@@ -1,33 +1,23 @@
 import { Hono } from 'hono';
-import { createMcpHandler, LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/server';
-import { authenticate, authResponse, AuthError } from './lib/auth';
-import { audit, createConnection, ensureUser, listConnections, removeConnection, updateConnection } from './lib/db';
-import { createMcpServer } from './lib/mcp';
+import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
+import { audit, createConnection, ensureUser, listConnections, removeConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
+export const MCP_PROTOCOL_VERSION = '2026-07-28' as const;
 
-app.get('/healthz', (c) => c.json({ ok: true, service: 'mcp-evolution-cloudflare', protocol: LATEST_PROTOCOL_VERSION }));
-
-function metadata(c: any) {
-  const base = c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin;
-  return c.json({ resource: `${base}/mcp`, authorization_servers: [c.env.ACCESS_ISSUER ?? `${base}/oauth`], scopes_supported: ['mcp'] }, 200, { 'Cache-Control': 'public, max-age=300' });
-}
-app.get('/.well-known/oauth-protected-resource', metadata);
-app.get('/.well-known/oauth-authorization-server', (c) => c.json({ issuer: c.env.ACCESS_ISSUER ?? `${new URL(c.req.url).origin}/oauth`, authorization_endpoint: `${c.env.ACCESS_ISSUER ?? `${new URL(c.req.url).origin}/oauth`}/authorize`, token_endpoint: `${c.env.ACCESS_ISSUER ?? `${new URL(c.req.url).origin}/oauth`}/token`, response_types_supported: ['code'], code_challenge_methods_supported: ['S256'], scopes_supported: ['mcp'] }, 200, { 'Cache-Control': 'public, max-age=300' }));
+app.get('/healthz', (c) => c.json({ ok: true, service: 'mcp-evolution-cloudflare', protocol: MCP_PROTOCOL_VERSION }));
 
 async function requireAuth(c: any): Promise<{ info: import('@modelcontextprotocol/server').AuthInfo; user: import('./types').AuthenticatedUser } | Response> {
   try { return await authenticate(c.req.raw, c.env); } catch (error) { return authResponse(error instanceof AuthError ? error : new AuthError(500, 'Authentication failed')); }
 }
 
-app.all('/mcp', async (c) => {
-  const auth = await requireAuth(c);
-  if (auth instanceof Response) return auth;
-  const handler = createMcpHandler(() => createMcpServer(c.env, auth.user), { legacy: 'reject', responseMode: 'json', maxRequestBodySize: Number(c.env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024), onerror: () => undefined });
-  return handler.fetch(c.req.raw, { authInfo: auth.info });
-});
-
 app.get('/', (c) => c.html(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Evolution Go · MCP</title><body><main><h1>Evolution Go · MCP</h1><p>Interface protegida para cadastro local de conexões WhatsApp.</p><p>Use <code>/mcp</code> com OAuth 2.1/PKCE. A configuração completa exige autenticação Cloudflare Access.</p></main></body></html>`));
+
+// The OAuth wrapper handles this route in production. Keeping a fail-closed
+// fallback avoids accidentally exposing an unauthenticated Hono route in tests
+// or if the wrapper is misconfigured.
+app.all('/mcp', (c) => c.json({ error: 'OAuth 2.1 bearer token required' }, 401));
 
 app.get('/connections', async (c) => {
   const auth = await requireAuth(c); if (auth instanceof Response) return auth;
@@ -48,7 +38,8 @@ app.post('/api/connections', async (c) => {
   const user = await ensureUser(c.env.DB, auth.user);
   const connection = await createConnection(c.env.DB, c.env.TOKEN_ENCRYPTION_KEY, { userId: user.id, friendlyName: body.friendlyName, instanceId: body.instanceId, phoneNumber: body.phoneNumber, token: body.instanceToken });
   await audit(c.env.DB, { userId: user.id, connectionId: connection.id, operation: 'connection_create', outcome: 'success' });
-  return c.json({ connection }, 201);
+  const base = c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin;
+  return c.json({ connection, webhookUrl: `${base}/webhooks/evolution/${connection.webhookSecret}` }, 201);
 });
 
 app.patch('/api/connections/:id', async (c) => {
@@ -68,10 +59,20 @@ app.delete('/api/connections/:id', async (c) => {
   return removed ? c.body(null, 204) : c.json({ error: 'Connection not found' }, 404);
 });
 
+/** Evolution Go webhook ingress. The URL must contain the per-connection secret
+ * configured by the connection UI; the payload's instance token is discarded. */
+app.post('/webhooks/evolution/:secret', async (c) => {
+  const result = await ingestWebhookEvent(c.env.DB, c.req.param('secret'), await c.req.json().catch(() => ({})));
+  return result.accepted ? c.json({ ok: true }, 202) : c.json({ error: result.error }, result.status as 400 | 404 | 409);
+});
+
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char)); }
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 app.onError((error, c) => { console.error('request failed', { path: c.req.path, message: error.message }); return c.json({ error: 'Internal server error' }, 500); });
 
-export default app;
 export { app };
+
+// The production OAuth wrapper lives in src/worker.ts so unit tests can import
+// this Hono app without evaluating Cloudflare's `cloudflare:` runtime imports.
+export default app;

@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { AuthenticatedUser, Env, Message } from '../types';
 import { EvolutionGoClient, EvolutionApiError } from './evolution';
-import { audit, ensureUser, getConnection, listConnections, revealConnectionToken } from './db';
+import { audit, ensureUser, getConnection, listConnections, revealConnectionToken, listCapturedConversations, listCapturedMessages } from './db';
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
 const connectionInput = { connectionId: z.string().uuid() };
@@ -38,13 +38,27 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     }
   };
 
+  const captured = async <T>(operation: string, connectionId: string, fn: () => Promise<T>) => {
+    try {
+      const connection = await getConnection(env.DB, ensured.id, connectionId);
+      if (!connection) throw new Error('Connection not found');
+      if (connection.status !== 'active') throw new Error('Connection is disabled or unavailable');
+      const data = await fn();
+      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'success' });
+      return ok(data);
+    } catch (error) {
+      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure' });
+      return fail(error);
+    }
+  };
+
   server.registerTool('list_connections', { title: 'List WhatsApp connections', description: 'List only the authenticated user\'s locally registered connections.', outputSchema: dataOutput }, async () => ok(await listConnections(env.DB, ensured.id)));
   server.registerTool('connection_status', { title: 'Connection status', inputSchema: z.object(connectionInput), outputSchema: dataOutput }, async ({ connectionId }) => read('connection_status', connectionId, (c) => c.status()));
   server.registerTool('search_contacts', { title: 'Search contacts', inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200), ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));
-  server.registerTool('list_conversations', { title: 'List conversations', inputSchema: z.object({ ...connectionInput, ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('list_conversations', connectionId, (c) => c.listConversations(cursor, limit)));
+  server.registerTool('list_conversations', { title: 'List captured conversations', description: 'Lists conversations observed after this connection webhook was configured. Evolution Go has no retroactive find-chats endpoint.', inputSchema: z.object({ ...connectionInput, ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => captured('list_conversations', connectionId, async () => ({ source: 'webhook_capture', ...(await listCapturedConversations(env.DB, ensured.id, connectionId, cursor, limit)) })));
   server.registerTool('list_groups', { title: 'List groups', inputSchema: z.object({ ...connectionInput, ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('list_groups', connectionId, (c) => c.listGroups(cursor, limit)));
-  server.registerTool('list_messages', { title: 'Query message history', inputSchema: z.object({ ...connectionInput, conversationId: z.string().optional(), after: z.string().datetime().optional(), before: z.string().datetime().optional(), text: z.string().max(200).optional(), ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, conversationId, after, before, text, cursor, limit }) => read('list_messages', connectionId, (c) => c.listMessages({ conversationId, after, before, text, cursor, limit })));
-  server.registerTool('recent_messages', { title: 'Recent incoming messages', inputSchema: z.object({ ...connectionInput, ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('recent_messages', connectionId, (c) => c.listMessages({ cursor, limit })));
+  server.registerTool('list_messages', { title: 'Query captured message history', description: 'Searches messages captured by the webhook after integration. It cannot retrieve message bodies that predate webhook capture.', inputSchema: z.object({ ...connectionInput, conversationId: z.string().optional(), after: z.string().datetime().optional(), before: z.string().datetime().optional(), text: z.string().max(200).optional(), ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, conversationId, after, before, text, cursor, limit }) => captured('list_messages', connectionId, async () => ({ source: 'webhook_capture', ...(await listCapturedMessages(env.DB, ensured.id, connectionId, { conversationId, after, before, text, cursor, limit })) })));
+  server.registerTool('recent_messages', { title: 'Recent captured incoming messages', description: 'Returns recent events received from the Evolution Go webhook.', inputSchema: z.object({ ...connectionInput, ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => captured('recent_messages', connectionId, async () => ({ source: 'webhook_capture', ...(await listCapturedMessages(env.DB, ensured.id, connectionId, { cursor, limit })) })));
 
   const send = async (operation: string, connectionId: string, fn: (client: EvolutionGoClient) => Promise<unknown>) => {
     try {
@@ -69,7 +83,8 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption, ptt }, replyTo));
   });
 
-  server.registerTool('download_media', { title: 'Download received media', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: z.unknown().optional() }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
+  server.registerTool('download_media', { title: 'Download received media', description: 'Evolution Go requires the full waE2E.Message envelope. Pass the message envelope returned in a captured message raw field; an ID alone is insufficient.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: z.unknown().optional() }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
+    if (!message || typeof message !== 'object') throw new Error('message envelope is required by Evolution Go for media download');
     const media = await c.downloadMedia(messageId, message);
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
     const reader = media.body.getReader();

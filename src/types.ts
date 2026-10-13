@@ -7,6 +7,7 @@ export interface Env {
   ACCESS_JWKS_URL?: string;
   ACCESS_ISSUER?: string;
   ACCESS_AUDIENCE?: string;
+  CONSENT_SECRET?: string;
   ALLOWED_EMAILS?: string;
   ENVIRONMENT?: string;
   MAX_MEDIA_BYTES?: string;
@@ -38,6 +39,8 @@ export interface ConnectionSummary {
   instanceId: string;
   phoneNumber?: string;
   status: ConnectionRecord['status'];
+  /** Returned only once by the local connection registration API. */
+  webhookSecret?: string;
 }
 
 export interface Page<T> {

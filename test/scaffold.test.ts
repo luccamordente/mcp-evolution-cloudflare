@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/server';
-import app from '../src/index';
+import { app, MCP_PROTOCOL_VERSION } from '../src/index';
 import { encryptToken, decryptToken } from '../src/lib/crypto';
 import { EvolutionGoClient } from '../src/lib/evolution';
 
@@ -18,7 +17,7 @@ describe('worker scaffold', () => {
   it('serves health with the current SDK protocol revision', async () => {
     const response = await app.request('/healthz', {}, env);
     expect(response.status).toBe(200);
-    expect((await response.json() as { protocol: string }).protocol).toBe(LATEST_PROTOCOL_VERSION);
+    expect((await response.json() as { protocol: string }).protocol).toBe(MCP_PROTOCOL_VERSION);
   });
 
   it('protects MCP and does not expose legacy /sse', async () => {

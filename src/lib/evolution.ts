@@ -123,8 +123,8 @@ export class EvolutionGoClient {
     });
   }
 
-  async downloadMedia(messageId: string, message?: unknown): Promise<MediaDownload> {
-    const payload = await this.request<{ data?: { base64?: string; mimetype?: string; fileName?: string }; base64?: string; mimetype?: string; fileName?: string }>('/message/downloadmedia', { method: 'POST', body: JSON.stringify({ message: message ?? { key: { id: messageId } } }) });
+  async downloadMedia(messageId: string, message: unknown): Promise<MediaDownload> {
+    const payload = await this.request<{ data?: { base64?: string; mimetype?: string; fileName?: string }; base64?: string; mimetype?: string; fileName?: string }>('/message/downloadmedia', { method: 'POST', body: JSON.stringify({ message }) });
     const raw = payload.data ?? payload;
     const dataUrl = raw.base64 ?? '';
     const match = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);

@@ -22,8 +22,33 @@ function emailFromClaims(payload: JWTPayload): string | undefined {
 export async function authenticate(request: Request, env: Env): Promise<{ info: AuthInfo; user: AuthenticatedUser }> {
   const token = bearer(request);
   if (!token) throw new AuthError(401, 'Missing bearer token');
-  if (!env.ACCESS_JWKS_URL) throw new AuthError(503, 'OAuth verifier is not configured');
-  let payload: JWTPayload;
+  const payload = await verifyAccessJwt(token, env);
+  const email = emailFromClaims(payload);
+  if (!email || !allowedEmails(env).has(email)) throw new AuthError(403, 'User is not authorized');
+  const id = typeof payload.sub === 'string' && payload.sub ? payload.sub : email;
+  const expiresAt = typeof payload.exp === 'number' ? payload.exp : undefined;
+  const info: AuthInfo = { token, clientId: typeof payload.azp === 'string' ? payload.azp : 'cloudflare-access', scopes: typeof payload.scope === 'string' ? payload.scope.split(' ').filter(Boolean) : [], expiresAt, extra: { email, claims: payload } };
+  return { info, user: { id, email, name: typeof payload.name === 'string' ? payload.name : undefined, claims: payload as Record<string, unknown> } };
+}
+
+/**
+ * Verify the JWT Cloudflare Access adds to requests that pass an Access policy.
+ * This is deliberately separate from MCP bearer-token verification: an Access
+ * assertion authenticates the browser at /authorize and the connection UI; it
+ * is never accepted as an MCP OAuth access token.
+ */
+export async function authenticateAccessRequest(request: Request, env: Env): Promise<AuthenticatedUser> {
+  const token = request.headers.get('cf-access-jwt-assertion');
+  if (!token) throw new AuthError(401, 'Cloudflare Access authentication required');
+  const payload = await verifyAccessJwt(token, env);
+  const email = emailFromClaims(payload);
+  if (!email || !allowedEmails(env).has(email)) throw new AuthError(403, 'User is not authorized');
+  const id = typeof payload.sub === 'string' && payload.sub ? payload.sub : email;
+  return { id, email, name: typeof payload.name === 'string' ? payload.name : undefined, claims: payload as Record<string, unknown> };
+}
+
+async function verifyAccessJwt(token: string, env: Env): Promise<JWTPayload> {
+  if (!env.ACCESS_JWKS_URL || !env.ACCESS_ISSUER || !env.ACCESS_AUDIENCE) throw new AuthError(503, 'Cloudflare Access verifier is not configured');
   try {
     const jwks = createRemoteJWKSet(new URL(env.ACCESS_JWKS_URL));
     const verified = await jwtVerify(token, jwks, {
@@ -31,16 +56,10 @@ export async function authenticate(request: Request, env: Env): Promise<{ info: 
       audience: env.ACCESS_AUDIENCE,
       algorithms: ['RS256', 'ES256'],
     });
-    payload = verified.payload;
+    return verified.payload;
   } catch (error) {
-    throw new AuthError(401, 'Invalid access token', error instanceof Error ? error.message : undefined);
+    throw new AuthError(401, 'Invalid Cloudflare Access token', error instanceof Error ? error.message : undefined);
   }
-  const email = emailFromClaims(payload);
-  if (!email || !allowedEmails(env).has(email)) throw new AuthError(403, 'User is not authorized');
-  const id = typeof payload.sub === 'string' && payload.sub ? payload.sub : email;
-  const expiresAt = typeof payload.exp === 'number' ? payload.exp : undefined;
-  const info: AuthInfo = { token, clientId: typeof payload.azp === 'string' ? payload.azp : 'cloudflare-access', scopes: typeof payload.scope === 'string' ? payload.scope.split(' ').filter(Boolean) : [], expiresAt, extra: { email, claims: payload } };
-  return { info, user: { id, email, name: typeof payload.name === 'string' ? payload.name : undefined, claims: payload as Record<string, unknown> } };
 }
 
 export class AuthError extends Error {

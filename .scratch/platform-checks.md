@@ -1,6 +1,6 @@
 # Platform checks (2026-10-13, America/Sao_Paulo)
 
-Read-only preflight for the Evolution Go MCP Worker. No GitHub, Cloudflare, WhatsApp, D1, KV, Worker, secret, or invitation resource was created or changed by this check.
+Read-only preflight for the Evolution Go MCP Worker. The statements below are the snapshot captured before implementation; subsequent execution created the project resources described at the end of this file.
 
 ## Local checkout
 
@@ -30,7 +30,7 @@ gh api -X PUT repos/luccamordente/mcp-evolution-cloudflare/collaborators/<github
   -f permission=push
 ```
 
-A read-only lookup of `heitorsalazar`, `HeitorSalazar`, `heitor-salazar`, and `heitorsalazar1` returned 404. A public user search for `heitorsalazar` returned an unrelated `Pickachu` result. The e-mail `heitorsalazar@gmail.com` cannot be safely mapped to a GitHub login from the authenticated API (private e-mail addresses are not searchable). **Blocking input:** the owner's GitHub username is required before sending an invitation. Do not guess a login. After invitation, verify with:
+A read-only lookup of `heitorsalazar`, `HeitorSalazar`, `heitor-salazar`, and `heitorsalazar1` returned 404. A public user search for `heitorsalazar` returned an unrelated `Pickachu` result. The e-mail `heitorsalazar@gmail.com` cannot be safely mapped to a GitHub login from the authenticated API (private e-mail addresses are not searchable). At preflight time the owner's GitHub username was required before sending an invitation. The owner later supplied `Pickachu`; the invitation was sent and verified with:
 
 ```sh
 gh api repos/luccamordente/mcp-evolution-cloudflare/invitations \
@@ -105,9 +105,11 @@ Official references:
 
 `npm view` timestamps were queried on 2026-10-13; lockfile versions must be intentionally pinned after compatibility validation.
 
-## Blocks and next actions
+## Final state and remaining blocks
 
-1. The project has no remote GitHub repository, Worker, public URL, D1 database, KV namespace, or configured secrets yet. These are pending implementation and explicit deployment execution by the owning agent.
-2. GitHub invitation is blocked only by the missing GitHub login for `heitorsalazar@gmail.com`; the public e-mail cannot be resolved safely to a username.
-3. The package manifest currently targets MCP SDK v1.32.1; update to and validate the v2 package/API for MCP `2026-07-28` before declaring protocol compliance.
-4. No Evolution Go endpoint, instance ID, API key, or instance token was available in this platform check; no backend call was attempted.
+1. GitHub, Worker, D1, KV, Access applications and Worker secrets were created after this preflight; see `docs/DEPLOY.md` for the observed IDs and version.
+2. The GitHub invitation is sent to `Pickachu`; acceptance remains external and was not assumed.
+3. The package manifest now pins `@modelcontextprotocol/server` 2.3.1 and the published Worker reports MCP `2026-07-28`.
+4. No Evolution Go endpoint, instance ID, API key, or instance token was available; no backend call or WhatsApp send/receive test was attempted.
+
+Final GitHub state: repository `https://github.com/luccamordente/mcp-evolution-cloudflare` exists and invitation `337601643` for `Pickachu` has `expired=false` and `permissions=write`.

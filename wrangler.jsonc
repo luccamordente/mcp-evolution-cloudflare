@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mcp-evolution-cloudflare",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "mcp-evolution",
+    "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+    "migrations_dir": "migrations"
+  }],
+  "kv_namespaces": [{
+    "binding": "OAUTH_KV",
+    "id": "REPLACE_WITH_KV_NAMESPACE_ID",
+    "preview_id": "REPLACE_WITH_KV_PREVIEW_ID"
+  }],
+  "vars": {
+    "EVOLUTION_BASE_URL": "https://replace-with-evolution-go.example",
+    "ALLOWED_EMAILS": "luccamordente@gmail.com,heitorsalazar@gmail.com",
+    "MAX_MEDIA_BYTES": "8388608",
+    "ENVIRONMENT": "production"
+  }
+}

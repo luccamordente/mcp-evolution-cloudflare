@@ -8,6 +8,18 @@ export interface EvolutionClientOptions {
   fetcher?: typeof fetch;
 }
 
+export interface EvolutionInstanceCreateInput {
+  name: string;
+  instanceId: string;
+  token: string;
+}
+
+export interface EvolutionConnectInput {
+  webhookUrl?: string;
+  subscribe?: string[];
+  immediate?: boolean;
+}
+
 export class EvolutionApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly details?: unknown) {
     super(message);
@@ -15,33 +27,24 @@ export class EvolutionApiError extends Error {
   }
 }
 
-/**
- * Narrow HTTP client for Evolution Go. Paths are kept in one place because the
- * backend's contract is versioned independently from Evolution API v2.
- * No credential is ever placed in a URL or returned to callers.
- */
-export class EvolutionGoClient {
+/** Administrative client used only by the owner-protected provisioning route.
+ * It keeps the global key separate from per-instance credentials. */
+export class EvolutionGoAdminClient {
   private readonly fetcher: typeof fetch;
   private readonly baseUrl: string;
-  private readonly instanceToken: string;
-  private readonly instanceId: string;
-  private readonly globalApiKey?: string;
+  private readonly globalApiKey: string;
 
-  constructor(options: EvolutionClientOptions) {
-    this.fetcher = options.fetcher ?? fetch;
+  constructor(options: { baseUrl: string; globalApiKey: string; fetcher?: typeof fetch }) {
+    this.fetcher = options.fetcher ?? fetch.bind(globalThis);
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
-    this.instanceToken = options.instanceToken;
-    this.instanceId = options.instanceId;
     this.globalApiKey = options.globalApiKey;
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private async request<T>(path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set('Accept', 'application/json');
     if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    // Evolution Go authenticates instance routes with the instance token in `apikey`.
-    // The global key is retained for administrative routes only and is never sent to user tools.
-    headers.set('apikey', this.instanceToken);
+    headers.set('apikey', apiKey);
     let response: Response;
     try {
       response = await this.fetcher(`${this.baseUrl}${path}`, { ...init, headers });
@@ -58,6 +61,84 @@ export class EvolutionGoClient {
       throw new EvolutionApiError(response.status, message, payload);
     }
     return payload as T;
+  }
+
+  async createInstance(input: EvolutionInstanceCreateInput): Promise<unknown> {
+    return this.request('/instance/create', this.globalApiKey, { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  async connectInstance(token: string, input: EvolutionConnectInput): Promise<unknown> {
+    return this.request('/instance/connect', token, { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  async qr(token: string): Promise<unknown> {
+    return this.request('/instance/qr', token);
+  }
+
+  async reconnectInstance(token: string): Promise<unknown> {
+    return this.request('/instance/reconnect', token, { method: 'POST', body: JSON.stringify({}) });
+  }
+
+  async status(token: string): Promise<unknown> {
+    return this.request('/instance/status', token);
+  }
+}
+
+/**
+ * Narrow HTTP client for Evolution Go. Paths are kept in one place because the
+ * backend's contract is versioned independently from Evolution API v2.
+ * No credential is ever placed in a URL or returned to callers.
+ */
+export class EvolutionGoClient {
+  private readonly fetcher: typeof fetch;
+  private readonly baseUrl: string;
+  private readonly instanceToken: string;
+  private readonly instanceId: string;
+  private readonly globalApiKey?: string;
+
+  constructor(options: EvolutionClientOptions) {
+    this.fetcher = options.fetcher ?? fetch.bind(globalThis);
+    this.baseUrl = options.baseUrl.replace(/\/$/, '');
+    this.instanceToken = options.instanceToken;
+    this.instanceId = options.instanceId;
+    this.globalApiKey = options.globalApiKey;
+  }
+
+  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const headers = new Headers(init.headers);
+    headers.set('Accept', 'application/json');
+    if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    // Evolution Go authenticates instance routes with the instance token in `apikey`.
+    // The global key is retained for administrative routes only and is never sent to user tools.
+    headers.set('apikey', this.instanceToken);
+    const method = (init.method ?? 'GET').toUpperCase();
+    const attempts = method === 'GET' ? 3 : 1;
+    let lastStatus: number | undefined;
+    let lastPayload: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      let response: Response;
+      try {
+        response = await this.fetcher(`${this.baseUrl}${path}`, { ...init, headers });
+      } catch (error) {
+        if (attempt + 1 < attempts) {
+          await retryDelay(attempt);
+          continue;
+        }
+        throw new EvolutionApiError(503, 'Evolution Go is unreachable', { cause: error instanceof Error ? error.message : String(error) });
+      }
+      const text = await response.text();
+      let payload: unknown = undefined;
+      if (text) {
+        try { payload = JSON.parse(text); } catch { payload = text; }
+      }
+      if (response.ok) return payload as T;
+      lastStatus = response.status;
+      lastPayload = payload;
+      if (response.status < 500 || response.status > 599 || attempt + 1 >= attempts) break;
+      await retryDelay(attempt);
+    }
+    const message = typeof lastPayload === 'object' && lastPayload && 'message' in lastPayload ? String((lastPayload as { message: unknown }).message) : `Evolution Go request failed (${lastStatus ?? 502})`;
+    throw new EvolutionApiError(lastStatus ?? 502, message, lastPayload);
   }
 
   private page<T>(payload: unknown, mapper: (value: unknown) => T): Page<T> {
@@ -133,4 +214,8 @@ export class EvolutionGoClient {
     const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
     return { body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }), mimeType: raw.mimetype ?? match[1] ?? 'application/octet-stream', fileName: raw.fileName, size: bytes.byteLength };
   }
+}
+
+async function retryDelay(attempt: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
 }

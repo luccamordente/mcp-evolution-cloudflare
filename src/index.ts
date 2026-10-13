@@ -40,7 +40,16 @@ app.all('/mcp', (c) => c.json({ error: 'OAuth 2.1 bearer token required' }, 401)
 app.get('/connections', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
   const user = await ensureUser(c.env.DB, auth);
-  return c.html(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conexões</title><body><main><h1>Minhas conexões</h1><p>Usuário: ${escapeHtml(user.email)}</p><p>Use a API autenticada <code>/api/connections</code> para cadastrar, validar e remover conexões. Remover só apaga o cadastro local.</p><pre id="connections">Carregando…</pre><script>fetch('/api/connections').then(r=>r.json()).then(x=>document.getElementById('connections').textContent=JSON.stringify(x,null,2)).catch(e=>document.getElementById('connections').textContent=e)</script></main></body></html>`);
+  return c.html(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conexões</title><body><main><h1>Minhas conexões</h1><p>Usuário: ${escapeHtml(user.email)}</p><p>Use a API autenticada <code>/api/connections</code> para cadastrar, validar e remover conexões. Remover só apaga o cadastro local.</p><pre id="connections">Carregando…</pre><script>fetch('/connections/data').then(r=>r.json()).then(x=>document.getElementById('connections').textContent=JSON.stringify(x,null,2)).catch(e=>document.getElementById('connections').textContent=e)</script></main></body></html>`);
+});
+
+// Keep the browser UI under the same path-scoped Access application as the
+// page. Fetching /api from an Access-protected page can redirect to a second
+// Access audience and browsers correctly reject that HTML redirect as CORS.
+app.get('/connections/data', async (c) => {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  return c.json({ connections: await listConnections(c.env.DB, user.id) });
 });
 
 app.get('/api/connections', async (c) => {

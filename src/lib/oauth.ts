@@ -103,7 +103,6 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       return new Response(null, { status: 302, headers: { ...Object.fromEntries(denied.headers), Location: denied.redirectTo, 'Cache-Control': 'no-store' } });
     }
     const approved = await oauth.approveConsent(request, handle, {
-      scope: scopesSupported.filter((scope) => scope !== 'offline_access'),
       remember: { secret: env.CONSENT_SECRET ?? env.TOKEN_ENCRYPTION_KEY, subject: encodeURIComponent(user.email) },
     });
     const completed = await oauth.completeAuthorization({

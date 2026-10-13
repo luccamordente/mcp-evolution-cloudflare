@@ -20,7 +20,7 @@ O protocolo publicado é **MCP 2026-07-28**, com transporte Streamable HTTP stat
 
 O contrato efetivamente analisado no commit `9337afc`/versão upstream `0.7.2` usa o header `apikey` e as rotas `/instance/status`, `/user/contacts`, `/group/list`, `/send/text`, `/send/media` e `/message/downloadmedia`. Não há consulta retroativa de chats/mensagens equivalente à API v2. Por isso `list_conversations`, `list_messages` e `recent_messages` consultam eventos recebidos pelo webhook depois da integração e identificam essa origem na resposta. `download_media` exige o envelope completo da mensagem porque o endpoint Go não aceita somente um ID.
 
-A versão implantada do Evolution Go, a URL e os tokens não estavam disponíveis durante esta entrega. O Worker permanece publicado, mas não declara conexão Evolution, histórico real ou envio concluído.
+A URL do Evolution Go e a API key global já estão configuradas no Worker. Ainda falta cadastrar um token específico de instância em `/connections`; por isso nenhuma conexão, histórico real ou envio WhatsApp foi declarado como concluído.
 
 ## Desenvolvimento
 

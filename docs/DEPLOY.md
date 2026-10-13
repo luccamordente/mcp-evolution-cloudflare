@@ -12,7 +12,7 @@ O `/healthz` publicado respondeu `protocol: 2026-07-28`, e `/mcp` respondeu `401
 
 ## Segredos
 
-Foram configurados `TOKEN_ENCRYPTION_KEY`, `CONSENT_SECRET`, `ACCESS_JWKS_URL`, `ACCESS_ISSUER` e `ACCESS_AUDIENCE` como Workers Secrets. O endpoint do Evolution Go e seus tokens não estavam disponíveis; `EVOLUTION_BASE_URL` permanece um placeholder e nenhuma chamada ao backend foi declarada como sucesso.
+Foram configurados `TOKEN_ENCRYPTION_KEY`, `CONSENT_SECRET`, `ACCESS_JWKS_URL`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE` e `EVOLUTION_GLOBAL_API_KEY` como Workers Secrets. `EVOLUTION_BASE_URL` está configurado como `https://zipt-zopt.neurau.com.br`. Uma chamada controlada sem token de instância respondeu `401 not authorized`, confirmando que o endpoint está acessível sem declarar uma conexão autenticada como sucesso.
 
 Para concluir a integração, configure:
 

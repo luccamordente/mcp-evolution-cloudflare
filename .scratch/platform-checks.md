@@ -110,6 +110,6 @@ Official references:
 1. GitHub, Worker, D1, KV, Access applications and Worker secrets were created after this preflight; see `docs/DEPLOY.md` for the observed IDs and version.
 2. The GitHub invitation is sent to `Pickachu`; acceptance remains external and was not assumed.
 3. The package manifest now pins `@modelcontextprotocol/server` 2.3.1 and the published Worker reports MCP `2026-07-28`.
-4. No Evolution Go endpoint, instance ID, API key, or instance token was available; no backend call or WhatsApp send/receive test was attempted.
+4. The Evolution Go endpoint and global API key are now configured; the endpoint returned `401 not authorized` without an instance token. No instance token or WhatsApp send/receive test is confirmed.
 
 Final GitHub state: repository `https://github.com/luccamordente/mcp-evolution-cloudflare` exists and invitation `337601643` for `Pickachu` has `expired=false` and `permissions=write`.

@@ -14,6 +14,11 @@ function fail(error: unknown) {
   return { isError: true, content: [{ type: 'text' as const, text: message }] };
 }
 
+function auditFailure(error: unknown): { error: string; status?: number } {
+  if (error instanceof EvolutionApiError) return { error: error.message, status: error.status };
+  return { error: error instanceof Error ? error.message : 'Unexpected error' };
+}
+
 export async function createMcpServer(env: Env, user: AuthenticatedUser): Promise<McpServer> {
   const ensured = await ensureUser(env.DB, user);
   const server = new McpServer({ name: 'mcp-evolution-cloudflare', version: '0.1.0' });
@@ -33,7 +38,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'success' });
       return ok(data);
     } catch (error) {
-      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure' });
+      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
       return fail(error);
     }
   };
@@ -47,7 +52,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'success' });
       return ok(data);
     } catch (error) {
-      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure' });
+      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
       return fail(error);
     }
   };
@@ -67,7 +72,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'success' });
       return ok(result);
     } catch (error) {
-      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure' });
+      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
       return fail(error);
     }
   };

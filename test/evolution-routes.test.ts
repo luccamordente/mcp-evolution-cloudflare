@@ -30,4 +30,16 @@ describe('Evolution Go route contracts', () => {
     expect(JSON.parse(calls[1].body ?? '{}')).toEqual({ message: { imageMessage: { url: 'https://media.invalid/file' } } });
     expect(media.mimeType).toBe('image/png');
   });
+
+  it('retries transient GET failures before returning an Evolution error', async () => {
+    let attempts = 0;
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored', instanceToken: 'secret', fetcher: async () => {
+      attempts += 1;
+      if (attempts < 3) return Response.json({ message: 'temporary upstream failure' }, { status: 503 });
+      return Response.json({ data: [{ jid: '5511999999999@s.whatsapp.net' }] });
+    } });
+
+    await expect(client.searchContacts('5511')).resolves.toMatchObject({ items: [{ jid: '5511999999999@s.whatsapp.net' }] });
+    expect(attempts).toBe(3);
+  });
 });

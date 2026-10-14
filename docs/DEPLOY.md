@@ -5,7 +5,7 @@
 - Worker: `mcp-evolution-cloudflare`
 - URL canônica: `https://app.wapilot.com.br`
 - URL provisória do Worker: `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
-- Revisão publicada durante esta entrega: `870dcb49-8b1f-43c8-a5c4-df907dd98cc2`
+- Revisão publicada durante esta entrega: `96713a04-c100-447f-84ba-fb66e704605e`
 - D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`), migrations `0001_init` e `0002_webhook_events` aplicadas remotamente.
 - KV OAuth: `3a5b420e14594ee4ae821b720a9bf74a`; preview `29bb2b67785b46bfa7c31d84bbbe9344`.
 
@@ -16,6 +16,8 @@ O Worker está conectado ao repositório GitHub `luccamordente/mcp-evolution-clo
 O push do commit `371901d` gerou o build `1b2e77e1-8469-498d-826e-da7655778a88`, encerrado com sucesso. O endpoint `/healthz` publicado respondeu `200` depois do build.
 
 O `/healthz` publicado respondeu `protocol: 2026-07-28`, e `/mcp` respondeu `401` com `resource_metadata` RFC 9728. A configuração de Access existente protege `/authorize`, `/connections` e `/api` por One-time PIN para os dois e-mails autorizados.
+
+Para entrar na interface, abra `https://app.wapilot.com.br/connections`, escolha a autenticação Cloudflare Access, informe `luccamordente@gmail.com` ou `heitorsalazar@gmail.com` e digite o One-time PIN enviado por e-mail. A sessão do navegador é independente do OAuth usado por clientes MCP; não use o token MCP no navegador.
 
 ## Segredos
 

@@ -14,6 +14,11 @@ function allowedEmails(env: Env): Set<string> {
   return new Set(configured);
 }
 
+/** Access apps may protect different browser paths, each with its own aud. */
+export function accessAudiences(env: Pick<Env, 'ACCESS_AUDIENCE'>): string[] {
+  return (env.ACCESS_AUDIENCE ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+}
+
 function emailFromClaims(payload: JWTPayload): string | undefined {
   const candidates = [payload.email, payload.preferred_username, payload.upn, payload['https://claims.access.email']];
   return candidates.find((x): x is string => typeof x === 'string' && x.includes('@'))?.toLowerCase();
@@ -48,12 +53,13 @@ export async function authenticateAccessRequest(request: Request, env: Env): Pro
 }
 
 async function verifyAccessJwt(token: string, env: Env): Promise<JWTPayload> {
-  if (!env.ACCESS_JWKS_URL || !env.ACCESS_ISSUER || !env.ACCESS_AUDIENCE) throw new AuthError(503, 'Cloudflare Access verifier is not configured');
+  const audiences = accessAudiences(env);
+  if (!env.ACCESS_JWKS_URL || !env.ACCESS_ISSUER || audiences.length === 0) throw new AuthError(503, 'Cloudflare Access verifier is not configured');
   try {
     const jwks = createRemoteJWKSet(new URL(env.ACCESS_JWKS_URL));
     const verified = await jwtVerify(token, jwks, {
       issuer: env.ACCESS_ISSUER,
-      audience: env.ACCESS_AUDIENCE,
+      audience: audiences.length === 1 ? audiences[0] : audiences,
       algorithms: ['RS256', 'ES256'],
     });
     return verified.payload;

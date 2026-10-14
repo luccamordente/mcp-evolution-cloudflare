@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conexões WhatsApp · Protótipo</title>
+  <style>
+    :root {
+      --ink: #17231f;
+      --muted: #64716d;
+      --line: #dce5e0;
+      --paper: #f6f8f5;
+      --white: #fff;
+      --green: #087443;
+      --green-soft: #e0f4e9;
+      --amber: #9a6200;
+      --amber-soft: #fff2d5;
+      --red: #aa3a36;
+      --red-soft: #fce5e3;
+      --blue: #2e5c9a;
+      --blue-soft: #e7effc;
+      --shadow: 0 24px 60px rgba(21, 43, 33, .10);
+      --radius: 18px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--paper); }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible { outline: 3px solid rgba(8, 116, 67, .28); outline-offset: 2px; }
+    .prototype-ribbon {
+      position: sticky; z-index: 20; top: 0; display: flex; justify-content: center; gap: 10px;
+      padding: 8px 16px; background: #18342a; color: #dff7e9; font-size: 11px; letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .prototype-ribbon strong { color: #fff; }
+    .shell { min-height: 100vh; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 76px; padding: 0 clamp(20px, 5vw, 72px); background: rgba(255,255,255,.86); border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; font-weight: 800; letter-spacing: -.03em; }
+    .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: #fff; background: var(--green); font-size: 18px; }
+    .topnav { display: flex; align-items: center; gap: 22px; color: var(--muted); font-size: 13px; }
+    .topnav .active { color: var(--ink); font-weight: 700; }
+    .account { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; }
+    .avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: #fff; background: #d16c4d; font-size: 12px; }
+    .page { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 52px 0 150px; }
+    .page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 28px; margin-bottom: 34px; }
+    .eyebrow { margin: 0 0 9px; color: var(--green); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 10px; font-size: clamp(31px, 4vw, 48px); line-height: 1.03; letter-spacing: -.055em; }
+    h2 { margin-bottom: 8px; font-size: 24px; line-height: 1.1; letter-spacing: -.035em; }
+    h3 { margin-bottom: 5px; font-size: 15px; }
+    .lede { max-width: 570px; margin-bottom: 0; color: var(--muted); font-size: 16px; line-height: 1.55; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; padding: 0 17px; border: 1px solid transparent; border-radius: 11px; color: #fff; background: var(--green); font-weight: 750; font-size: 13px; transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+    .button:hover { transform: translateY(-1px); box-shadow: 0 10px 20px rgba(8,116,67,.18); }
+    .button.secondary { color: var(--ink); border-color: var(--line); background: #fff; box-shadow: none; }
+    .button.ghost { color: var(--green); border-color: transparent; background: transparent; box-shadow: none; }
+    .button.small { min-height: 34px; padding: 0 12px; border-radius: 9px; font-size: 12px; }
+    .button.danger { color: var(--red); border-color: #f1c9c5; background: var(--red-soft); box-shadow: none; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 9px; border-radius: 99px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+    .chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .chip.connected { color: var(--green); background: var(--green-soft); }
+    .chip.qr, .chip.connecting { color: var(--amber); background: var(--amber-soft); }
+    .chip.expired, .chip.error { color: var(--red); background: var(--red-soft); }
+    .chip.offline { color: var(--blue); background: var(--blue-soft); }
+    .chip.default { color: #76552a; background: #fff4d9; }
+    .chip.default::before { content: '★'; width: auto; height: auto; background: none; font-size: 10px; }
+    .muted { color: var(--muted); }
+    .tiny { color: var(--muted); font-size: 12px; }
+    .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); box-shadow: var(--shadow); }
+    .empty-illustration { position: relative; display: grid; place-items: center; width: 126px; height: 126px; margin: 0 auto 24px; border-radius: 34px; background: #edf6ef; color: var(--green); }
+    .empty-illustration::before, .empty-illustration::after { content: ''; position: absolute; border: 1px solid #b9dfc6; border-radius: 50%; }
+    .empty-illustration::before { inset: 16px; }
+    .empty-illustration::after { inset: 31px; }
+    .empty-illustration span { position: relative; z-index: 1; font-size: 42px; }
+    .stepper { display: flex; align-items: center; margin: 26px 0 30px; }
+    .step { display: flex; align-items: center; gap: 10px; color: #a0aba5; font-size: 12px; font-weight: 750; white-space: nowrap; }
+    .step .number { display: grid; place-items: center; width: 27px; height: 27px; border: 1px solid #cbd8d0; border-radius: 50%; background: #fff; font-size: 11px; }
+    .step.active { color: var(--green); }
+    .step.active .number { border-color: var(--green); color: #fff; background: var(--green); }
+    .step.done { color: var(--ink); }
+    .step.done .number { border-color: var(--green-soft); color: var(--green); background: var(--green-soft); }
+    .step-line { flex: 1; height: 1px; margin: 0 12px; background: #d6e0da; }
+    .step-label { display: none; }
+    .onboarding-card { display: grid; grid-template-columns: 1.04fr .96fr; min-height: 460px; overflow: hidden; }
+    .onboarding-copy { display: flex; flex-direction: column; justify-content: center; padding: clamp(28px, 5vw, 62px); }
+    .onboarding-copy h2 { max-width: 430px; font-size: clamp(27px, 3vw, 37px); }
+    .onboarding-copy p { max-width: 460px; color: var(--muted); line-height: 1.6; }
+    .benefits { display: grid; gap: 12px; margin: 26px 0 30px; }
+    .benefit { display: flex; align-items: flex-start; gap: 11px; font-size: 13px; line-height: 1.4; }
+    .benefit-icon { display: grid; place-items: center; flex: 0 0 auto; width: 25px; height: 25px; border-radius: 8px; color: var(--green); background: var(--green-soft); font-size: 12px; font-weight: 800; }
+    .onboarding-art { display: grid; place-items: center; padding: 32px; background: #ecf6ee; }
+    .qr-placeholder { display: grid; place-items: center; width: min(300px, 80%); aspect-ratio: 1; padding: 22px; border-radius: 26px; background: #fff; box-shadow: 0 22px 45px rgba(22, 79, 47, .12); }
+    .qr-placeholder .qr-grid { width: 100%; max-width: 236px; }
+    .qr-grid { display: grid; grid-template-columns: repeat(21, 1fr); gap: 2px; aspect-ratio: 1; padding: 9px; border-radius: 6px; background: #fff; }
+    .qr-grid span { display: block; border-radius: 1px; background: #fff; }
+    .qr-grid span.on { background: #13231d; }
+    .qr-note { margin: 15px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
+    .connection-list { display: grid; gap: 12px; margin-top: 20px; }
+    .connection-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 19px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+    .connection-meta { display: flex; align-items: center; gap: 13px; min-width: 0; }
+    .connection-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 39px; height: 39px; border-radius: 12px; color: var(--green); background: #edf6ef; font-weight: 800; }
+    .connection-copy { min-width: 0; }
+    .connection-copy h3 { overflow: hidden; margin-bottom: 3px; text-overflow: ellipsis; white-space: nowrap; }
+    .connection-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .composer { display: grid; gap: 15px; padding: 22px; border: 1px dashed #9ac8aa; border-radius: 15px; background: #f5fbf6; }
+    .field { display: grid; gap: 7px; }
+    .field label { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+    .field input { width: 100%; height: 43px; padding: 0 12px; border: 1px solid #cbd9d0; border-radius: 10px; color: var(--ink); background: #fff; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .toast { position: fixed; z-index: 30; right: 20px; bottom: 82px; max-width: 330px; padding: 12px 15px; border: 1px solid #a8d7b8; border-radius: 12px; color: #164a2f; background: #eefaf2; box-shadow: 0 16px 30px rgba(20, 55, 35, .16); font-size: 12px; font-weight: 700; }
+    .hidden { display: none !important; }
+
+    /* Variant B: dark operations workspace. */
+    .variant-b { min-height: 650px; margin: -52px calc((100vw - min(1240px, calc(100% - 40px))) / -2) 0; padding: 28px clamp(20px, 5vw, 72px) 110px; color: #eef6f1; background: #13241f; }
+    .variant-b .page-heading { align-items: center; margin-bottom: 26px; }
+    .variant-b .eyebrow { color: #86d8a4; }
+    .variant-b h1 { color: #f7fbf8; font-size: clamp(29px, 4vw, 42px); }
+    .variant-b .lede { color: #a1b5ab; }
+    .workspace { display: grid; grid-template-columns: 286px minmax(0, 1fr); min-height: 560px; overflow: hidden; border: 1px solid #2a4539; border-radius: 20px; background: #1a3028; box-shadow: 0 26px 70px rgba(0,0,0,.21); }
+    .workspace-sidebar { padding: 20px; border-right: 1px solid #2a4539; background: #172a23; }
+    .workspace-sidebar h2 { margin: 0 0 4px; color: #f2f9f4; font-size: 18px; }
+    .workspace-sidebar .tiny { color: #91a99e; }
+    .workspace-sidebar .button { width: 100%; margin: 18px 0; }
+    .search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid #2f4c3f; border-radius: 9px; color: #819c90; background: #12231e; font-size: 12px; }
+    .search input { width: 100%; border: 0; outline: 0; color: #eaf5ee; background: transparent; font-size: 12px; }
+    .workspace-list { display: grid; gap: 6px; margin-top: 18px; }
+    .workspace-item { display: grid; grid-template-columns: 33px 1fr; gap: 10px; width: 100%; padding: 11px 10px; border: 1px solid transparent; border-radius: 12px; color: #c8d8cf; background: transparent; text-align: left; }
+    .workspace-item:hover, .workspace-item.selected { border-color: #37614e; background: #204234; }
+    .workspace-item .connection-avatar { width: 33px; height: 33px; border-radius: 9px; color: #a9e7ba; background: #2e624a; font-size: 11px; }
+    .workspace-item strong { display: block; overflow: hidden; color: #f2f9f4; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-item small { display: block; margin-top: 3px; color: #8fa79a; font-size: 10px; }
+    .workspace-main { padding: 26px clamp(20px, 4vw, 48px); background: #f8faf8; color: var(--ink); }
+    .workspace-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+    .detail-title { display: flex; gap: 13px; align-items: center; }
+    .detail-title .connection-avatar { width: 49px; height: 49px; border-radius: 14px; }
+    .detail-title h2 { margin-bottom: 4px; font-size: 23px; }
+    .detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .detail-body { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(210px, .8fr); gap: 26px; padding-top: 28px; }
+    .qr-panel { display: grid; justify-items: center; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+    .qr-panel .qr-grid { width: min(260px, 100%); }
+    .instructions { padding: 3px 0; }
+    .instructions h3 { margin-bottom: 16px; }
+    .instruction { display: grid; grid-template-columns: 28px 1fr; gap: 10px; margin-bottom: 15px; color: var(--muted); font-size: 12px; line-height: 1.48; }
+    .instruction b { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: var(--green); background: var(--green-soft); font-size: 11px; }
+    .health-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
+    .health-cell { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .health-cell .tiny { display: block; margin-bottom: 7px; font-size: 10px; }
+    .health-cell strong { font-size: 13px; }
+    .workspace-empty { display: grid; place-items: center; min-height: 480px; padding: 30px; text-align: center; }
+
+    /* Variant C: dense operations board. */
+    .variant-c { margin: -52px calc((100vw - min(1240px, calc(100% - 40px))) / -2) 0; padding: 34px clamp(20px, 5vw, 72px) 110px; background: #f1f2ef; }
+    .variant-c .page-heading { align-items: center; margin-bottom: 25px; }
+    .board-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 20px; }
+    .board-filters { display: flex; gap: 7px; }
+    .filter { min-height: 31px; padding: 0 11px; border: 1px solid #d2d8d1; border-radius: 99px; color: var(--muted); background: #fff; font-size: 11px; font-weight: 750; }
+    .filter.active { border-color: #9db9a5; color: var(--green); background: #e7f2e9; }
+    .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+    .board-column { min-height: 420px; padding: 13px; border: 1px solid #d9dfd8; border-radius: 15px; background: #e8ebe7; }
+    .board-column-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 3px 13px; }
+    .board-column-head h2 { margin: 0; color: #36453e; font-size: 13px; letter-spacing: -.01em; }
+    .count { display: grid; place-items: center; min-width: 23px; height: 23px; padding: 0 5px; border-radius: 8px; color: #617269; background: #d7ded8; font-size: 10px; font-weight: 800; }
+    .board-cards { display: grid; gap: 9px; }
+    .board-card { padding: 14px; border: 1px solid #dbe1db; border-radius: 12px; background: #fff; box-shadow: 0 5px 12px rgba(40,58,46,.04); }
+    .board-card.highlight { border-color: #98c5a4; box-shadow: 0 0 0 2px #d8f0de; }
+    .board-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .board-card h3 { margin: 0 0 4px; font-size: 13px; }
+    .board-card p { margin-bottom: 13px; color: var(--muted); font-size: 11px; }
+    .board-card .button { width: 100%; }
+    .board-card .button.secondary { color: #596a60; background: #f8faf8; }
+    .board-card .chip { transform: scale(.9); transform-origin: right top; }
+    .board-empty { display: grid; place-items: center; min-height: 155px; padding: 15px; border: 1px dashed #c8d1c9; border-radius: 11px; color: #75847a; font-size: 11px; line-height: 1.45; text-align: center; }
+    .board-summary { display: flex; align-items: center; gap: 11px; margin-top: 20px; padding: 15px 17px; border: 1px solid #d5ddd5; border-radius: 13px; color: var(--muted); background: #fff; font-size: 12px; }
+    .board-summary strong { color: var(--ink); }
+
+    .drawer-backdrop { position: fixed; z-index: 40; inset: 0; display: flex; justify-content: flex-end; background: rgba(14, 31, 23, .35); }
+    .drawer { width: min(450px, 100%); height: 100%; overflow: auto; padding: 26px; background: #fbfdfb; box-shadow: -20px 0 50px rgba(9, 33, 21, .18); }
+    .drawer-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 23px; }
+    .drawer-head h2 { font-size: 21px; }
+    .close { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 9px; color: var(--muted); background: #edf1ed; font-size: 18px; }
+    .drawer .qr-panel { margin-bottom: 20px; }
+    .drawer .button { width: 100%; margin-bottom: 8px; }
+    .drawer-note { padding: 12px 13px; border-radius: 10px; color: #5e6c63; background: #eef3ee; font-size: 11px; line-height: 1.5; }
+    .modal { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(14, 31, 23, .35); }
+    .modal-card { width: min(480px, 100%); padding: 26px; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 25px 70px rgba(9, 33, 21, .22); }
+    .modal-head { display: flex; justify-content: space-between; gap: 15px; margin-bottom: 20px; }
+    .modal-head h2 { margin-bottom: 5px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 21px; }
+    .switcher { position: fixed; z-index: 80; bottom: 18px; left: 50%; display: flex; align-items: center; gap: 12px; transform: translateX(-50%); padding: 8px 10px; border: 1px solid #385549; border-radius: 99px; color: #e8f4ec; background: #173128; box-shadow: 0 16px 30px rgba(15, 35, 25, .24); }
+    .switcher button { display: grid; place-items: center; width: 29px; height: 29px; border: 0; border-radius: 50%; color: #d7f4df; background: #2a5541; font-size: 16px; }
+    .switcher button:hover { background: #3a7456; }
+    .switcher-label { min-width: 152px; color: #f3fbf5; font-size: 11px; font-weight: 750; text-align: center; }
+    .switcher-label span { display: block; margin-top: 2px; color: #9dbbad; font-size: 9px; font-weight: 500; }
+
+    @media (min-width: 720px) { .step-label { display: inline; } }
+    @media (max-width: 880px) {
+      .topnav { display: none; }
+      .onboarding-card, .detail-body { grid-template-columns: 1fr; }
+      .onboarding-art { min-height: 350px; }
+      .workspace { grid-template-columns: 235px minmax(0, 1fr); }
+      .board { grid-template-columns: 1fr; }
+      .board-column { min-height: 0; }
+    }
+    @media (max-width: 620px) {
+      .topbar { height: 64px; padding: 0 18px; }
+      .account span { display: none; }
+      .page { width: min(100% - 28px, 1240px); padding-top: 33px; }
+      .page-heading { display: block; }
+      .page-heading .button { margin-top: 20px; }
+      .stepper { align-items: flex-start; }
+      .step { flex-direction: column; gap: 6px; text-align: center; }
+      .step-line { margin-top: 13px; }
+      .step-label { display: block; font-size: 10px; white-space: normal; }
+      .onboarding-copy { padding: 30px 23px; }
+      .onboarding-art { min-height: 280px; padding: 25px; }
+      .connection-row { align-items: flex-start; flex-direction: column; }
+      .connection-actions { justify-content: flex-start; }
+      .field-row { grid-template-columns: 1fr; }
+      .variant-b, .variant-c { margin-right: -14px; margin-left: -14px; padding-right: 14px; padding-left: 14px; }
+      .variant-b .page-heading, .variant-c .page-heading { display: block; }
+      .workspace { display: block; }
+      .workspace-sidebar { border-right: 0; border-bottom: 1px solid #2a4539; }
+      .workspace-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .workspace-main { padding: 23px 17px; }
+      .workspace-detail-head { display: block; }
+      .detail-actions { justify-content: flex-start; margin-top: 16px; }
+      .health-grid { grid-template-columns: 1fr; }
+      .board-toolbar { align-items: flex-start; flex-direction: column; }
+      .switcher { bottom: 12px; }
+      .switcher-label { min-width: 125px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-ribbon"><strong>Protótipo descartável</strong><span>dados locais · nenhuma alteração real é enviada</span></div>
+  <div id="app"></div>
+  <div id="overlay"></div>
+  <div class="switcher" id="switcher" aria-label="Alternar variação visual">
+    <button type="button" data-switch="prev" aria-label="Variação anterior">←</button>
+    <div class="switcher-label" id="switcher-label"></div>
+    <button type="button" data-switch="next" aria-label="Próxima variação">→</button>
+  </div>
+  <script>
+    /*
+     * Pergunta desta exploração: qual estrutura deixa o primeiro acesso,
+     * a leitura/renovação do QR e a escolha da conexão padrão mais claros?
+     * Três variações nesta mesma página: ?variant=a|b|c.
+     */
+    const variants = {
+      a: { label: 'A', name: 'Onboarding guiado' },
+      b: { label: 'B', name: 'Workspace operacional' },
+      c: { label: 'C', name: 'Fila de conexões' },
+    };
+    const state = {
+      connections: [], selectedId: null, composerOpen: false, drawerOpen: false,
+      toast: '', search: '', demo: false,
+    };
+    let toastTimer;
+    const params = new URLSearchParams(location.search);
+    let variant = (params.get('variant') || 'a').toLowerCase();
+    if (!variants[variant]) variant = 'a';
+
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    const initials = (name) => String(name || 'WA').split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+    const selected = () => state.connections.find((connection) => connection.id === state.selectedId) || state.connections[0];
+    const statusInfo = (status) => ({
+      connected: { label: 'Conectada', className: 'connected', note: 'Pronta para uso' },
+      qr: { label: 'Aguardando leitura', className: 'qr', note: 'Leia o QR pelo WhatsApp' },
+      expired: { label: 'QR expirado', className: 'expired', note: 'Gere um novo QR para continuar' },
+      offline: { label: 'Desconectada', className: 'offline', note: 'Conecte novamente pelo QR' },
+      error: { label: 'Não foi possível verificar', className: 'error', note: 'Tente atualizar o estado' },
+    }[status] || { label: 'Aguardando ação', className: 'qr', note: 'Continue a configuração' });
+
+    function fakeQr(seed) {
+      const cells = [];
+      const size = 21;
+      const finder = (x, y) => {
+        const inBox = (cx, cy) => cx >= x && cx < x + 7 && cy >= y && cy < y + 7;
+        if (!inBox(x, y)) return false;
+        return (x === 0 || x === 6 || y === 0 || y === 6 || (x >= 2 && x <= 4 && y >= 2 && y <= 4));
+      };
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        let on = false;
+        if (x < 7 && y < 7) on = finder(x, y);
+        else if (x > 13 && y < 7) on = finder(x - 14, y);
+        else if (x < 7 && y > 13) on = finder(x, y - 14);
+        else on = ((x * 17 + y * 31 + seed * 13 + x * y) % 7) < 3;
+        cells.push('<span class="' + (on ? 'on' : '') + '"></span>');
+      }
+      return '<div class="qr-grid" aria-label="QR code de demonstração">' + cells.join('') + '</div>';
+    }
+
+    function connectionCard(connection, compact = false) {
+      const info = statusInfo(connection.status);
+      return '<article class="connection-row">' +
+        '<div class="connection-meta"><div class="connection-avatar">' + esc(initials(connection.name)) + '</div><div class="connection-copy"><h3>' + esc(connection.name) + '</h3><div class="tiny">' + esc(connection.phone || 'Número ainda não identificado') + ' · ' + esc(info.note) + '</div></div></div>' +
+        '<div class="connection-actions"><span class="chip ' + info.className + '">' + info.label + '</span>' + (connection.isDefault ? '<span class="chip default">Padrão</span>' : '') + (compact ? '' : '<button class="button small secondary" data-action="open" data-id="' + esc(connection.id) + '">Ver detalhes</button>') +
+        '</div></article>';
+    }
+
+    function topbar(variantClass = '') {
+      return '<div class="shell ' + variantClass + '"><header class="topbar"><a class="brand" href="?variant=' + variant + '"><span class="brand-mark">⌁</span><span>Pulse workspace</span></a><nav class="topnav"><span>Visão geral</span><span class="active">Conexões</span><span>Atividade</span></nav><div class="account"><span>Lucca M.</span><span class="avatar">LM</span></div></header>';
+    }
+
+    function heading(kicker, title, description, button = true) {
+      return '<div class="page-heading"><div><p class="eyebrow">' + kicker + '</p><h1>' + title + '</h1><p class="lede">' + description + '</p></div>' + (button ? '<button class="button" data-action="new">＋ Nova conexão</button>' : '') + '</div>';
+    }
+
+    function stepper(step) {
+      const items = [['1', 'Criar instância'], ['2', 'Ler QR code'], ['3', 'Conectado']];
+      return '<div class="stepper" aria-label="Progresso da conexão">' + items.map((item, index) => '<div class="step ' + (index + 1 < step ? 'done' : index + 1 === step ? 'active' : '') + '"><span class="number">' + (index + 1 < step ? '✓' : item[0]) + '</span><span class="step-label">' + item[1] + '</span></div>' + (index < 2 ? '<span class="step-line"></span>' : '')).join('') + '</div>';
+    }
+
+    function emptyA() {
+      return '<section class="card onboarding-card"><div class="onboarding-copy"><p class="eyebrow">Primeiro passo</p><h2>Conecte seu primeiro WhatsApp</h2><p>Crie uma instância, leia um QR code pelo aplicativo e acompanhe tudo por aqui. A primeira conexão será marcada como padrão automaticamente.</p><div class="benefits"><div class="benefit"><span class="benefit-icon">1</span><span><strong>Você controla o acesso</strong><br><span class="muted">Cada número fica isolado em sua própria conexão.</span></span></div><div class="benefit"><span class="benefit-icon">✓</span><span><strong>Estado sempre visível</strong><br><span class="muted">Saiba quando é preciso ler ou renovar o QR code.</span></span></div></div><button class="button" data-action="new">＋ Criar primeira conexão</button></div><div class="onboarding-art"><div class="qr-placeholder"><div><div class="empty-illustration"><span>⌁</span></div><p class="qr-note">Seu QR code aparecerá aqui<br>depois de criar a instância.</p></div></div></div></section>';
+    }
+
+    function drawer() {
+      const connection = selected(); if (!connection) return '';
+      const info = statusInfo(connection.status);
+      return '<div class="drawer-backdrop" data-action="close-drawer"><aside class="drawer" role="dialog" aria-modal="true" aria-label="Detalhes da conexão" data-stop-propagation="true"><div class="drawer-head"><div><p class="eyebrow">Detalhes da conexão</p><h2>' + esc(connection.name) + '</h2><span class="chip ' + info.className + '">' + info.label + '</span></div><button class="close" data-action="close-drawer" aria-label="Fechar">×</button></div>' + (connection.status === 'connected' ? connectedPanel(connection) : qrPanel(connection)) + '</aside></div>';
+    }
+
+    function qrPanel(connection) {
+      const expired = connection.status === 'expired';
+      return '<div class="qr-panel">' + fakeQr(connection.qrVersion || 1) + '<p class="qr-note">QR de demonstração · versão ' + connection.qrVersion + '</p></div><div class="instructions"><h3>' + (expired ? 'Este QR code expirou' : 'Abra o WhatsApp no seu celular') + '</h3><div class="instruction"><b>1</b><span>Abra <strong>Configurações → Aparelhos conectados</strong> no WhatsApp.</span></div><div class="instruction"><b>2</b><span>Toque em <strong>Conectar aparelho</strong> e aponte a câmera para este QR.</span></div><div class="instruction"><b>3</b><span>Deixe esta tela aberta até o estado mudar para <strong>Conectada</strong>.</span></div><button class="button" data-action="renew" data-id="' + esc(connection.id) + '">' + (expired ? '↻ Gerar novo QR code' : '↻ Pedir novo QR code') + '</button><button class="button secondary" data-action="simulate-connected" data-id="' + esc(connection.id) + '">Simular conexão concluída</button><p class="drawer-note">A primeira conexão criada recebe o padrão automaticamente. Você pode trocar essa escolha a qualquer momento.</p></div>';
+    }
+
+    function connectedPanel(connection) {
+      return '<div class="card" style="padding:22px;box-shadow:none;margin-bottom:20px"><div class="detail-title"><div class="connection-avatar">' + esc(initials(connection.name)) + '</div><div><h3 style="font-size:18px">Tudo pronto</h3><p class="tiny">Última verificação há poucos segundos</p></div></div><div class="health-grid"><div class="health-cell"><span class="tiny">Estado</span><strong style="color:var(--green)">Conectada</strong></div><div class="health-cell"><span class="tiny">Número</span><strong>' + esc(connection.phone || '—') + '</strong></div><div class="health-cell"><span class="tiny">Padrão</span><strong>' + (connection.isDefault ? 'Sim' : 'Não') + '</strong></div></div></div><button class="button secondary" data-action="open" data-id="' + esc(connection.id) + '">Abrir detalhes novamente</button>';
+    }
+
+    function composer() {
+      return '<div class="modal"><form class="modal-card" id="connection-form"><div class="modal-head"><div><p class="eyebrow">Nova conexão</p><h2>Como você quer chamar este número?</h2><p class="tiny">O nome é só para você reconhecer a conexão no painel.</p></div><button type="button" class="close" data-action="close-composer" aria-label="Fechar">×</button></div><div class="field"><label for="connection-name">Nome da conexão</label><input id="connection-name" name="name" required value="' + (state.connections.length ? '' : 'WhatsApp pessoal') + '" placeholder="Ex.: WhatsApp pessoal"></div><div class="field"><label for="connection-phone">Número (opcional)</label><input id="connection-phone" name="phone" inputmode="tel" placeholder="Ex.: +55 31 99999-0000"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-composer">Cancelar</button><button type="submit" class="button">Criar e mostrar QR</button></div></form></div>';
+    }
+
+    function variantA() {
+      const hasConnections = state.connections.length > 0;
+      const active = selected();
+      const step = !hasConnections ? 1 : active && active.status === 'connected' ? 3 : 2;
+      return topbar('') + '<main class="page">' + heading('Conexões WhatsApp', hasConnections ? 'Seus números, sob controle' : 'Conecte o WhatsApp ao seu espaço', hasConnections ? 'Acompanhe cada número e escolha qual será usado como padrão.' : 'Uma configuração simples para começar: crie a instância, leia o QR code e pronto.') + stepper(step) + (hasConnections ? '<section><div style="display:flex;justify-content:space-between;align-items:center;gap:15px"><div><h2 style="font-size:20px">Suas conexões</h2><p class="tiny">' + state.connections.length + (state.connections.length === 1 ? ' número cadastrado' : ' números cadastrados') + '</p></div><button class="button small secondary" data-action="demo">' + (state.demo ? 'Limpar exemplo' : 'Ver cenário preenchido') + '</button></div>' + (state.composerOpen ? composerInline() : '') + '<div class="connection-list">' + state.connections.map((connection) => connectionCard(connection)).join('') + '</div></section>' : emptyA() + '<div style="margin-top:19px;text-align:center"><button class="button ghost" data-action="demo">Ver um cenário preenchido →</button></div>') + '</main></div>';
+    }
+
+    function composerInline() {
+      return '<form class="composer" id="connection-form"><div><strong>Nova conexão</strong><div class="tiny" style="margin-top:4px">Depois de criar, um QR code será gerado para este número.</div></div><div class="field-row"><div class="field"><label for="connection-name">Nome</label><input id="connection-name" name="name" required placeholder="Ex.: WhatsApp atendimento"></div><div class="field"><label for="connection-phone">Número (opcional)</label><input id="connection-phone" name="phone" inputmode="tel" placeholder="+55 31..."></div></div><div style="display:flex;gap:8px"><button type="submit" class="button small">Criar e mostrar QR</button><button type="button" class="button small secondary" data-action="close-composer">Cancelar</button></div></form>';
+    }
+
+    function variantB() {
+      const active = selected();
+      return topbar('variant-b') + '<main class="page">' + heading('Workspace de operação', 'Conexões', 'Um lugar para alternar entre números, ver o estado atual e agir quando um QR precisar ser renovado.') + '<section class="workspace"><aside class="workspace-sidebar"><h2>Conexões</h2><p class="tiny">' + state.connections.length + ' cadastrada' + (state.connections.length === 1 ? '' : 's') + '</p><button class="button small" data-action="new">＋ Nova conexão</button><label class="search">⌕<input id="workspace-search" value="' + esc(state.search) + '" placeholder="Buscar conexão" aria-label="Buscar conexão"></label><div class="workspace-list">' + (state.connections.length ? state.connections.filter((c) => c.name.toLowerCase().includes(state.search.toLowerCase())).map((c) => '<button class="workspace-item ' + (c.id === (active && active.id) ? 'selected' : '') + '" data-action="open" data-id="' + esc(c.id) + '"><span class="connection-avatar">' + esc(initials(c.name)) + '</span><span><strong>' + esc(c.name) + '</strong><small>' + esc(statusInfo(c.status).label) + (c.isDefault ? ' · padrão' : '') + '</small></span></button>').join('') : '<div class="tiny" style="line-height:1.5;margin-top:12px">Nenhuma conexão ainda.<br>Comece pelo botão acima.</div>') + '</div></aside><div class="workspace-main">' + (active ? detailB(active) : '<div class="workspace-empty"><div><div class="empty-illustration"><span>⌁</span></div><h2>Escolha uma conexão</h2><p class="tiny">Crie seu primeiro número ou carregue o cenário preenchido para explorar este painel.</p><button class="button" data-action="new">＋ Criar primeira conexão</button><button class="button ghost" data-action="demo">Ver cenário preenchido</button></div></div>') + '</div></section></main></div>';
+    }
+
+    function detailB(connection) {
+      const info = statusInfo(connection.status);
+      return '<div class="workspace-detail-head"><div class="detail-title"><div class="connection-avatar">' + esc(initials(connection.name)) + '</div><div><h2>' + esc(connection.name) + '</h2><p class="tiny">' + esc(connection.phone || 'Número ainda não identificado') + ' · atualizado agora</p><span class="chip ' + info.className + '">' + info.label + '</span>' + (connection.isDefault ? ' <span class="chip default">Padrão</span>' : '') + '</div></div><div class="detail-actions">' + (!connection.isDefault ? '<button class="button small secondary" data-action="default" data-id="' + esc(connection.id) + '">☆ Definir padrão</button>' : '<button class="button small secondary" disabled>★ Conexão padrão</button>') + (connection.status === 'connected' ? '' : '<button class="button small" data-action="renew" data-id="' + esc(connection.id) + '">↻ Novo QR</button>') + '</div></div>' + (connection.status === 'connected' ? '<div style="padding-top:27px">' + connectedPanel(connection) + '</div>' : '<div class="detail-body"><div class="qr-panel">' + fakeQr(connection.qrVersion || 1) + '<p class="qr-note">QR de demonstração · versão ' + connection.qrVersion + '</p></div><div class="instructions"><h3>Próximo passo</h3><p class="tiny" style="line-height:1.5;margin-bottom:18px">Abra o WhatsApp no celular, vá a <strong>Aparelhos conectados</strong> e leia o QR code.</p><div class="instruction"><b>1</b><span>Configurações</span></div><div class="instruction"><b>2</b><span>Aparelhos conectados</span></div><div class="instruction"><b>3</b><span>Conectar aparelho</span></div><button class="button" data-action="simulate-connected" data-id="' + esc(connection.id) + '">Simular conexão concluída</button><button class="button secondary" data-action="expire" data-id="' + esc(connection.id) + '" style="margin-top:8px">Simular QR expirado</button></div></div>');
+    }
+
+    function boardCard(connection) {
+      const info = statusInfo(connection.status);
+      let action = connection.status === 'connected' ? 'Ver detalhes' : connection.status === 'expired' ? 'Gerar novo QR' : 'Ler QR code';
+      let actionType = connection.status === 'connected' ? 'open' : connection.status === 'expired' ? 'renew' : 'open';
+      return '<article class="board-card ' + (connection.id === state.selectedId ? 'highlight' : '') + '"><div class="board-card-top"><div><h3>' + esc(connection.name) + '</h3><p>' + esc(connection.phone || 'Número ainda não identificado') + '</p></div><span class="chip ' + info.className + '">' + info.label + '</span></div>' + (connection.isDefault ? '<span class="chip default" style="margin-bottom:12px">Padrão</span>' : '') + '<button class="button small ' + (connection.status === 'connected' ? 'secondary' : '') + '" data-action="' + actionType + '" data-id="' + esc(connection.id) + '">' + action + '</button>' + (!connection.isDefault ? '<button class="button ghost small" data-action="default" data-id="' + esc(connection.id) + '" style="width:100%;margin-top:5px">☆ Tornar padrão</button>' : '') + '</article>';
+    }
+
+    function variantC() {
+      const needs = state.connections.filter((c) => ['qr', 'expired', 'error', 'offline'].includes(c.status));
+      const connecting = state.connections.filter((c) => c.status === 'connecting');
+      const connected = state.connections.filter((c) => c.status === 'connected');
+      return topbar('variant-c') + '<main class="page">' + heading('Fila operacional', 'Resolva o que precisa de atenção', 'Uma visão rápida para quem cuida de vários números e quer encontrar pendências sem abrir cada tela.') + '<div class="board-toolbar"><div class="board-filters"><button class="filter active">Todos · ' + state.connections.length + '</button><button class="filter">Precisa de ação · ' + needs.length + '</button><button class="filter">Conectadas · ' + connected.length + '</button></div><button class="button small" data-action="new">＋ Nova conexão</button></div><section class="board"><div class="board-column"><div class="board-column-head"><h2>Precisa de ação</h2><span class="count">' + needs.length + '</span></div><div class="board-cards">' + (needs.length ? needs.map(boardCard).join('') : '<div class="board-empty">Tudo em dia.<br>Novas conexões aparecerão aqui para leitura do QR.</div>') + '</div></div><div class="board-column"><div class="board-column-head"><h2>Conectando</h2><span class="count">' + connecting.length + '</span></div><div class="board-cards">' + (connecting.length ? connecting.map(boardCard).join('') : '<div class="board-empty">Nenhum número no meio da configuração.</div>') + '</div></div><div class="board-column"><div class="board-column-head"><h2>Conectadas</h2><span class="count">' + connected.length + '</span></div><div class="board-cards">' + (connected.length ? connected.map(boardCard).join('') : '<div class="board-empty">Depois de ler um QR, sua conexão aparecerá aqui.</div>') + '</div></div></section><div class="board-summary"><span class="chip default">Regra</span><span><strong>A primeira conexão vira padrão automaticamente.</strong> Troque pelo cartão do número que deve ser usado como principal.</span><button class="button ghost small" data-action="demo" style="margin-left:auto">' + (state.demo ? 'Limpar' : 'Ver exemplo') + '</button></div></main></div>';
+    }
+
+    function render() {
+      document.getElementById('app').innerHTML = variant === 'a' ? variantA() : variant === 'b' ? variantB() : variantC();
+      document.getElementById('overlay').innerHTML = state.composerOpen ? composer() : state.drawerOpen ? drawer() : '';
+      document.getElementById('switcher-label').innerHTML = variants[variant].label + ' · ' + variants[variant].name + '<span>← → para alternar</span>';
+      if (state.toast) { const toast = document.createElement('div'); toast.className = 'toast'; toast.textContent = state.toast; document.body.appendChild(toast); setTimeout(() => toast.remove(), 2800); state.toast = ''; }
+    }
+
+    function notify(message) { state.toast = message; clearTimeout(toastTimer); toastTimer = setTimeout(() => { state.toast = ''; render(); }, 2800); render(); }
+    function updateUrl() { const next = new URL(location.href); next.searchParams.set('variant', variant); history.replaceState({}, '', next); }
+    function createConnection(name, phone) { const id = 'connection-' + Date.now(); state.connections.push({ id, name: name || 'Nova conexão', phone: phone || '', status: 'qr', qrVersion: 1, isDefault: state.connections.length === 0 }); state.selectedId = id; state.composerOpen = false; state.drawerOpen = true; state.demo = false; notify(state.connections.length === 1 ? 'Conexão criada e marcada como padrão.' : 'Conexão criada. Leia o QR code para continuar.'); }
+    function loadDemo() { state.connections = [{ id: 'demo-primary', name: 'WhatsApp pessoal', phone: '+55 31 98888-1200', status: 'connected', qrVersion: 2, isDefault: true }, { id: 'demo-team', name: 'Atendimento', phone: '+55 31 97777-4100', status: 'qr', qrVersion: 4, isDefault: false }, { id: 'demo-old', name: 'Número antigo', phone: '+55 31 96666-8833', status: 'expired', qrVersion: 1, isDefault: false }]; state.selectedId = 'demo-team'; state.demo = true; state.drawerOpen = false; notify('Cenário preenchido carregado. Explore os estados e ações.'); }
+    function reset() { state.connections = []; state.selectedId = null; state.demo = false; state.drawerOpen = false; notify('Cenário limpo. Você voltou ao primeiro acesso.'); }
+    function setDefault(id) { state.connections.forEach((connection) => { connection.isDefault = connection.id === id; }); state.selectedId = id; notify('Conexão padrão atualizada.'); }
+    function handleAction(action, id) {
+      const connection = state.connections.find((item) => item.id === id);
+      if (action === 'new') { state.composerOpen = true; state.drawerOpen = false; render(); setTimeout(() => document.querySelector('#connection-name')?.focus(), 0); }
+      else if (action === 'close-composer') { state.composerOpen = false; render(); }
+      else if (action === 'open' && connection) { state.selectedId = id; state.drawerOpen = true; render(); }
+      else if (action === 'close-drawer') { state.drawerOpen = false; render(); }
+      else if (action === 'renew' && connection) { connection.status = 'qr'; connection.qrVersion = (connection.qrVersion || 1) + 1; state.selectedId = id; state.drawerOpen = true; notify('Novo QR code gerado para a mesma conexão.'); }
+      else if (action === 'simulate-connected' && connection) { connection.status = 'connected'; state.drawerOpen = false; notify('Conexão simulada como concluída.'); }
+      else if (action === 'expire' && connection) { connection.status = 'expired'; state.drawerOpen = true; notify('Estado simulado: QR expirado.'); }
+      else if (action === 'default' && connection) setDefault(id);
+      else if (action === 'demo') state.demo ? reset() : loadDemo();
+    }
+
+    document.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-action], [data-switch]'); if (!target) return;
+      if (target.dataset.switch) { const keys = Object.keys(variants); const index = keys.indexOf(variant); variant = keys[(index + (target.dataset.switch === 'next' ? 1 : keys.length - 1)) % keys.length]; updateUrl(); render(); return; }
+      if (target.dataset.stopPropagation) return;
+      handleAction(target.dataset.action, target.dataset.id);
+    });
+    document.addEventListener('submit', (event) => { if (event.target.id !== 'connection-form') return; event.preventDefault(); const data = new FormData(event.target); createConnection(data.get('name'), data.get('phone')); });
+    document.addEventListener('input', (event) => { if (event.target.id === 'workspace-search') { state.search = event.target.value; const caret = event.target.selectionStart; render(); const input = document.getElementById('workspace-search'); input?.focus(); input?.setSelectionRange(caret, caret); } });
+    document.addEventListener('keydown', (event) => { if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return; if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return; const keys = Object.keys(variants); const index = keys.indexOf(variant); variant = keys[(index + (event.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length]; updateUrl(); render(); });
+
+    // In production this floating prototype chrome must be removed with the page.
+    // The standalone file is intentionally always in exploration mode.
+    render();
+  </script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 Instale Node 20+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
 
-A revisão MCP publicada é `2026-07-28`. O `createMcpHandler` é criado por request com `legacy: 'reject'`, `responseMode: 'json'` e limite de corpo configurável. Não adicione `sessionIdGenerator`, `StreamableHTTPServerTransport` stateful, SSE, WebSocket, stdio ou `createLegacyMcpHandler`.
+A revisão MCP publicada é `2026-07-28`. O `createMcpHandler` é criado por request com `legacy: 'stateless'`, `responseMode: 'json'` e limite de corpo configurável. Clientes sem os headers `Mcp-Method` / `_meta` da revisão 2026 são atendidos no modo stateless. Não adicione `sessionIdGenerator`, `StreamableHTTPServerTransport` stateful, SSE, WebSocket, stdio ou `createLegacyMcpHandler`.
 
 O OAuth Provider exige o binding `OAUTH_KV`, um recurso canônico HTTPS em `MCP_PUBLIC_URL` e um `CONSENT_SECRET`. A tela `/authorize` só conclui o fluxo quando recebe a assertion JWT do Cloudflare Access; Access protege essa rota por One-time PIN e a allowlist dos dois e-mails. O token emitido pelo OAuth Provider é o único bearer aceito em `/mcp`.
 

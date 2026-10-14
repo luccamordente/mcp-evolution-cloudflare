@@ -29,7 +29,7 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
         const auth = (ctx as ExecutionContext & { auth?: { token: string; clientId?: string; scope: string[]; expiresAt?: number } }).auth;
         const server = await createMcpServer(env, user);
         const handler = createMcpHandler(() => server, {
-          legacy: 'reject',
+          legacy: 'stateless',
           responseMode: 'json',
           maxRequestBodySize: Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024),
         });

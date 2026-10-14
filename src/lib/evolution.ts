@@ -84,6 +84,34 @@ export class EvolutionGoAdminClient {
   }
 }
 
+function field(record: Record<string, unknown>, ...names: string[]): string {
+  for (const name of names) {
+    const value = record[name];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  const lowered = new Map(Object.entries(record).map(([key, value]) => [key.toLowerCase(), value]));
+  for (const name of names) {
+    const value = lowered.get(name.toLowerCase());
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
+}
+
+/** Evolution Go returns PascalCase contact fields (`FullName`, `Jid`). */
+function normalizeContact(value: unknown): Contact {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const fullName = field(record, 'FullName', 'fullName', 'name');
+  const firstName = field(record, 'FirstName', 'firstName');
+  const pushName = field(record, 'PushName', 'pushName');
+  const businessName = field(record, 'BusinessName', 'businessName');
+  return {
+    jid: field(record, 'Jid', 'jid'),
+    name: fullName || firstName || pushName || businessName || undefined,
+    pushName: pushName || undefined,
+    phoneNumber: field(record, 'phoneNumber', 'phone') || undefined,
+  };
+}
+
 /**
  * Narrow HTTP client for Evolution Go. Paths are kept in one place because the
  * backend's contract is versioned independently from Evolution API v2.
@@ -159,10 +187,13 @@ export class EvolutionGoClient {
     const payload = await this.request<unknown>('/user/contacts');
     const object = payload && typeof payload === 'object' ? payload as Record<string, unknown> : undefined;
     const values = Array.isArray(payload) ? payload : (Array.isArray(object?.data) ? object.data : Array.isArray(object?.items) ? object.items : payload);
-    const needle = query.trim().toLocaleLowerCase();
-    const contacts = (Array.isArray(values) ? values : []).map((value) => value as Contact).filter((contact) => {
-      const haystack = [contact.name, contact.pushName, contact.phoneNumber, contact.jid].filter(Boolean).join(' ').toLocaleLowerCase();
-      return !needle || haystack.includes(needle);
+    const needle = query.trim().toLowerCase();
+    const digits = needle.replace(/\D/g, '');
+    const contacts = (Array.isArray(values) ? values : []).map(normalizeContact).filter((contact) => {
+      if (!needle) return true;
+      const haystack = [contact.name, contact.pushName, contact.phoneNumber, contact.jid].filter(Boolean).join(' ').toLowerCase();
+      if (haystack.includes(needle)) return true;
+      return Boolean(digits) && (contact.jid ?? '').replace(/\D/g, '').includes(digits);
     });
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
     const items = contacts.slice(offset, offset + limit);

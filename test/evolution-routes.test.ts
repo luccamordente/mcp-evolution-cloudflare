@@ -42,4 +42,19 @@ describe('Evolution Go route contracts', () => {
     await expect(client.searchContacts('5511')).resolves.toMatchObject({ items: [{ jid: '5511999999999@s.whatsapp.net' }] });
     expect(attempts).toBe(3);
   });
+
+  it('matches Evolution Go FullName and Jid, and treats whitespace as the whole book', async () => {
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored', instanceToken: 'secret', fetcher: async () => Response.json({
+      data: [
+        { Jid: '555491977284@s.whatsapp.net', Found: true, FirstName: '', FullName: 'Lucas Lermen', PushName: '', BusinessName: '' },
+        { Jid: '5511999999999@s.whatsapp.net', FullName: '', PushName: 'Ana' },
+      ],
+    }) });
+
+    await expect(client.searchContacts('Lucas')).resolves.toMatchObject({ items: [{ jid: '555491977284@s.whatsapp.net', name: 'Lucas Lermen' }] });
+    await expect(client.searchContacts('lermen')).resolves.toMatchObject({ items: [{ name: 'Lucas Lermen' }] });
+    await expect(client.searchContacts('ana')).resolves.toMatchObject({ items: [{ pushName: 'Ana' }] });
+    await expect(client.searchContacts(' ')).resolves.toMatchObject({ items: [{ name: 'Lucas Lermen' }, { pushName: 'Ana' }] });
+    await expect(client.searchContacts('nobody')).resolves.toMatchObject({ items: [] });
+  });
 });

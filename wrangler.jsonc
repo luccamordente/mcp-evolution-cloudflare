@@ -19,7 +19,7 @@
   }],
   "vars": {
     "EVOLUTION_BASE_URL": "https://zipt-zopt.neurau.com.br",
-    "MCP_PUBLIC_URL": "https://mcp-evolution-cloudflare.luccamordente.workers.dev",
+    "MCP_PUBLIC_URL": "https://app.wapilot.com.br",
     "ALLOWED_EMAILS": "luccamordente@gmail.com,heitorsalazar@gmail.com",
     "MAX_MEDIA_BYTES": "8388608",
     "ENVIRONMENT": "production"

@@ -3,8 +3,9 @@
 ## Estado publicado
 
 - Worker: `mcp-evolution-cloudflare`
-- URL: `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
-- Revisão publicada durante esta entrega: `37af8e4a-b506-4b8c-9d74-6e36ba276418`
+- URL canônica: `https://app.wapilot.com.br`
+- URL provisória do Worker: `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
+- Revisão publicada durante esta entrega: `870dcb49-8b1f-43c8-a5c4-df907dd98cc2`
 - D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`), migrations `0001_init` e `0002_webhook_events` aplicadas remotamente.
 - KV OAuth: `3a5b420e14594ee4ae821b720a9bf74a`; preview `29bb2b67785b46bfa7c31d84bbbe9344`.
 
@@ -33,9 +34,9 @@ Cadastre cada instância em `/connections` ou `POST /api/connections` com nome a
 ## Verificação
 
 ```sh
-curl -i https://mcp-evolution-cloudflare.luccamordente.workers.dev/healthz
-curl -i https://mcp-evolution-cloudflare.luccamordente.workers.dev/mcp
-curl -i https://mcp-evolution-cloudflare.luccamordente.workers.dev/.well-known/oauth-protected-resource/mcp
+curl -i https://app.wapilot.com.br/healthz
+curl -i https://app.wapilot.com.br/mcp
+curl -i https://app.wapilot.com.br/.well-known/oauth-protected-resource/mcp
 ```
 
 O teste com um cliente real MCP e qualquer envio WhatsApp dependem da autenticação do cliente e de uma conexão Evolution Go real. Não execute envio real sem destinatário e conteúdo definidos.

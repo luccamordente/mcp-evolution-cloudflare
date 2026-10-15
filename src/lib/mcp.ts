@@ -2,10 +2,10 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { AuthenticatedUser, Env } from '../types';
 import { EvolutionGoAdminClient, EvolutionGoClient, EvolutionApiError } from './evolution';
-import { audit, ensureUser, getConnection, revealConnectionToken } from './db';
+import { audit, ensureUser, getConnection, resolveConnection, revealConnectionToken } from './db';
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
-const connectionInput = { connectionId: z.string().uuid() };
+export const connectionInput = { connectionId: z.string().uuid().optional().describe('Optional. Uses the default connection when omitted.') };
 // Tool results are JSON payloads from Evolution Go. `z.unknown()` emits an
 // empty JSON Schema (`{}`), which declares no validation at all and causes
 // MCP clients to report a malformed output schema. `z.json()` keeps the
@@ -49,21 +49,22 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   const ensured = await ensureUser(env.DB, user);
   const server = new McpServer({ name: 'mcp-evolution-cloudflare', version: '0.1.0' });
 
-  async function clientFor(connectionId: string): Promise<{ client: EvolutionGoClient; connection: NonNullable<Awaited<ReturnType<typeof getConnection>>> }> {
-    const connection = await getConnection(env.DB, ensured.id, connectionId);
-    if (!connection) throw new Error('Connection not found');
+  async function clientFor(connectionId?: string): Promise<{ client: EvolutionGoClient; connection: NonNullable<Awaited<ReturnType<typeof getConnection>>> }> {
+    const connection = await resolveConnection(env.DB, ensured.id, connectionId);
     const token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
     return { client: new EvolutionGoClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY, instanceId: connection.instanceId, instanceToken: token }), connection };
   }
 
-  const read = async <T>(operation: string, connectionId: string, fn: (client: EvolutionGoClient) => Promise<T>) => {
+  const read = async <T>(operation: string, connectionId: string | undefined, fn: (client: EvolutionGoClient) => Promise<T>) => {
+    let resolvedConnectionId = connectionId;
     try {
-      const { client } = await clientFor(connectionId);
+      const { client, connection } = await clientFor(connectionId);
+      resolvedConnectionId = connection.id;
       const data = await fn(client);
-      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'success' });
+      await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
       return ok(data);
     } catch (error) {
-      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
+      await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
       return fail(error);
     }
   };
@@ -77,14 +78,16 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   server.registerTool('list_groups', { title: 'List groups', inputSchema: z.object({ ...connectionInput, ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('list_groups', connectionId, (c) => c.listGroups(cursor, limit)));
   server.registerTool('list_messages', { title: 'Search messages', description: 'Searches messages stored by Evolution Go through its message search endpoint. Requires DATABASE_SAVE_MESSAGES to be enabled upstream.', inputSchema: z.object({ ...connectionInput, text: z.string().max(200).optional(), limit: z.number().int().min(1).max(50).default(25) }), outputSchema: dataOutput }, async ({ connectionId, text, limit }) => read('list_messages', connectionId, (c) => c.listMessages(text, limit)));
 
-  const send = async (operation: string, connectionId: string, fn: (client: EvolutionGoClient) => Promise<unknown>) => {
+  const send = async (operation: string, connectionId: string | undefined, fn: (client: EvolutionGoClient) => Promise<unknown>) => {
+    let resolvedConnectionId = connectionId;
     try {
-      const { client } = await clientFor(connectionId);
+      const { client, connection } = await clientFor(connectionId);
+      resolvedConnectionId = connection.id;
       const result = await fn(client);
-      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'success' });
+      await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
       return ok(result);
     } catch (error) {
-      await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
+      await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
       return fail(error);
     }
   };
@@ -99,7 +102,6 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     if (data.byteLength > max) return fail(new Error(`Media exceeds configured limit of ${max} bytes`));
     return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption }, replyTo));
   });
-
 
   return server;
 }

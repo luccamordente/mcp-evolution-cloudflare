@@ -1,6 +1,6 @@
 # Ferramentas MCP
 
-Todas as ferramentas exigem `connectionId`, o UUID interno cadastrado pelo usuário. Nenhuma aceita token Evolution ou nome de instância.
+As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID interno cadastrado pelo usuário. Quando omitido, o Worker usa a única conexão padrão do usuário; se não houver exatamente uma, retorna erro explícito. Um `connectionId` informado sempre tem prioridade. `null` não é aceito. Nenhuma ferramenta aceita token Evolution ou nome de instância.
 
 | Ferramenta | Fonte | Observação |
 | --- | --- | --- |

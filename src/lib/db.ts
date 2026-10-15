@@ -18,6 +18,26 @@ export async function getConnection(db: D1Database, userId: string, connectionId
   return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId).first<ConnectionRecord>();
 }
 
+export async function getDefaultConnections(db: D1Database, userId: string): Promise<ConnectionRecord[]> {
+  const result = await db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE user_id = ?1 AND is_default = 1 ORDER BY id').bind(userId).all<ConnectionRecord>();
+  return result.results ?? [];
+}
+
+export const NO_DEFAULT_CONNECTION_ERROR = 'No default connection configured. Configure a default connection or pass a connection identifier';
+export const MULTIPLE_DEFAULT_CONNECTIONS_ERROR = 'Multiple default connections configured';
+
+export async function resolveConnection(db: D1Database, userId: string, connectionId?: string): Promise<ConnectionRecord> {
+  if (connectionId) {
+    const connection = await getConnection(db, userId, connectionId);
+    if (!connection) throw new Error('Connection not found');
+    return connection;
+  }
+  const defaults = await getDefaultConnections(db, userId);
+  if (defaults.length === 0) throw new Error(NO_DEFAULT_CONNECTION_ERROR);
+  if (defaults.length > 1) throw new Error(MULTIPLE_DEFAULT_CONNECTIONS_ERROR);
+  return defaults[0];
+}
+
 export async function findConnectionByInstanceId(db: D1Database, userId: string, instanceId: string): Promise<ConnectionRecord | null> {
   return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE instance_id = ?1 AND user_id = ?2').bind(instanceId, userId).first<ConnectionRecord>();
 }

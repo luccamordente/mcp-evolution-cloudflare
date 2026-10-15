@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { removeConnection } from '../src/lib/db';
+import { removeConnection, resolveConnection } from '../src/lib/db';
 
 type ConnectionRow = { id: string; userId: string; isDefault: number; createdAt: string };
 
@@ -62,4 +62,45 @@ describe('connection defaults', () => {
       { id: 'remaining', userId: 'user-1', isDefault: 1, createdAt: '2026-10-15 11:00:00' },
     ]);
   });
+
+  function resolverDb(defaults: Array<{ id: string }>, explicit?: { id: string }) {
+    return {
+      prepare(sql: string) {
+        return {
+          bind(...values: unknown[]) {
+            return {
+              async all<T>() {
+                return { results: defaults.map((row) => ({ id: row.id, userId: values[0], friendlyName: row.id, instanceId: row.id, encryptedToken: 'encrypted', status: 'active', connectionState: 'connected' })) as T[] };
+              },
+              async first<T>() {
+                if (sql.includes('WHERE id = ?1')) return explicit as T | undefined;
+                return undefined;
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  it('resolves the explicit connection before the default', async () => {
+    const db = resolverDb([{ id: 'default' }], { id: 'explicit' });
+    await expect(resolveConnection(db as unknown as D1Database, 'user-1', 'explicit')).resolves.toMatchObject({ id: 'explicit' });
+  });
+
+  it('resolves the only default when connectionId is omitted', async () => {
+    const db = resolverDb([{ id: 'default' }]);
+    await expect(resolveConnection(db as unknown as D1Database, 'user-1')).resolves.toMatchObject({ id: 'default' });
+  });
+
+  it('rejects omitted connectionId when there is no default', async () => {
+    const db = resolverDb([]);
+    await expect(resolveConnection(db as unknown as D1Database, 'user-1')).rejects.toThrow('No default connection configured. Configure a default connection or pass a connection identifier');
+  });
+
+  it('rejects ambiguous defaults', async () => {
+    const db = resolverDb([{ id: 'one' }, { id: 'two' }]);
+    await expect(resolveConnection(db as unknown as D1Database, 'user-1')).rejects.toThrow('Multiple default connections configured');
+  });
+
 });

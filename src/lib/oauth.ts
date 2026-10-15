@@ -9,6 +9,7 @@ import type { Env, AuthenticatedUser } from '../types';
 import { authenticateAccessRequest, AuthError } from './auth';
 import { createMcpServer } from './mcp';
 import { createMcpHandler } from '@modelcontextprotocol/server';
+import { logOAuthError } from './oauth-diagnostics';
 
 const scopesSupported = ['mcp:read', 'mcp:write', 'offline_access'];
 
@@ -52,6 +53,7 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
     authorizeEndpoint: '/authorize',
     tokenEndpoint: '/oauth/token',
     clientRegistrationEndpoint: '/oauth/register',
+    onError: logOAuthError,
     scopesSupported,
     requiredScopes: ['mcp:read'],
     resourceMetadata: {

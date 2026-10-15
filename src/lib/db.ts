@@ -10,33 +10,58 @@ export async function ensureUser(db: D1Database, user: AuthenticatedUser): Promi
 }
 
 export async function listConnections(db: D1Database, userId: string): Promise<ConnectionSummary[]> {
-  const result = await db.prepare('SELECT id, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, status FROM whatsapp_connections WHERE user_id = ?1 ORDER BY friendly_name').bind(userId).all<ConnectionSummary>();
+  const result = await db.prepare('SELECT id, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, status, connection_state as connectionState, is_default as isDefault, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE user_id = ?1 ORDER BY is_default DESC, friendly_name').bind(userId).all<ConnectionSummary>();
   return result.results ?? [];
 }
 
 export async function getConnection(db: D1Database, userId: string, connectionId: string): Promise<ConnectionRecord | null> {
-  return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId).first<ConnectionRecord>();
+  return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId).first<ConnectionRecord>();
 }
 
 export async function findConnectionByInstanceId(db: D1Database, userId: string, instanceId: string): Promise<ConnectionRecord | null> {
-  return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE instance_id = ?1 AND user_id = ?2').bind(instanceId, userId).first<ConnectionRecord>();
+  return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE instance_id = ?1 AND user_id = ?2').bind(instanceId, userId).first<ConnectionRecord>();
 }
 
-export async function createConnection(db: D1Database, encryptionKey: string, input: { userId: string; friendlyName: string; instanceId: string; phoneNumber?: string; token: string }): Promise<ConnectionSummary> {
+export async function createConnection(db: D1Database, encryptionKey: string, input: { userId: string; friendlyName: string; instanceId: string; phoneNumber?: string; token: string; connectionState?: ConnectionRecord['connectionState'] }): Promise<ConnectionSummary> {
   const id = crypto.randomUUID();
   const encryptedToken = await encryptToken(input.token, encryptionKey);
   const webhookSecret = randomSecret();
   const webhookSecretHash = await sha256(webhookSecret);
-  await db.prepare('INSERT INTO whatsapp_connections (id, user_id, friendly_name, instance_id, phone_number, encrypted_token, webhook_secret_hash, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \'active\')').bind(id, input.userId, input.friendlyName, input.instanceId, input.phoneNumber ?? null, encryptedToken, webhookSecretHash).run();
-  return { id, friendlyName: input.friendlyName, instanceId: input.instanceId, phoneNumber: input.phoneNumber, status: 'active', webhookSecret };
+  const existing = await db.prepare('SELECT 1 as present FROM whatsapp_connections WHERE user_id = ?1 LIMIT 1').bind(input.userId).first<{ present: number }>();
+  const isDefault = existing ? 0 : 1;
+  const connectionState = input.connectionState ?? 'connected';
+  await db.prepare('INSERT INTO whatsapp_connections (id, user_id, friendly_name, instance_id, phone_number, encrypted_token, webhook_secret_hash, status, connection_state, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \'active\', ?8, ?9)').bind(id, input.userId, input.friendlyName, input.instanceId, input.phoneNumber ?? null, encryptedToken, webhookSecretHash, connectionState, isDefault).run();
+  return { id, friendlyName: input.friendlyName, instanceId: input.instanceId, phoneNumber: input.phoneNumber, status: 'active', connectionState, isDefault: isDefault === 1, webhookSecret };
 }
 
-export async function updateConnection(db: D1Database, userId: string, connectionId: string, patch: { friendlyName?: string; phoneNumber?: string; status?: ConnectionRecord['status'] }): Promise<void> {
+export async function setDefaultConnection(db: D1Database, userId: string, connectionId: string): Promise<boolean> {
+  const target = await db.prepare('SELECT id FROM whatsapp_connections WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId).first<{ id: string }>();
+  if (!target) return false;
+  await db.batch([
+    db.prepare('UPDATE whatsapp_connections SET is_default = 0, updated_at = datetime(\'now\') WHERE user_id = ?1').bind(userId),
+    db.prepare('UPDATE whatsapp_connections SET is_default = 1, updated_at = datetime(\'now\') WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId),
+  ]);
+  return true;
+}
+
+export interface AuditSummary {
+  operation: string;
+  outcome: 'success' | 'failure';
+  createdAt: string;
+}
+
+export async function listRecentAudit(db: D1Database, userId: string, connectionId: string, limit = 3): Promise<AuditSummary[]> {
+  const rows = await db.prepare('SELECT operation, outcome, created_at as createdAt FROM audit_log WHERE user_id = ?1 AND connection_id = ?2 ORDER BY created_at DESC LIMIT ?3').bind(userId, connectionId, Math.min(Math.max(limit, 1), 10)).all<AuditSummary>();
+  return rows.results ?? [];
+}
+
+export async function updateConnection(db: D1Database, userId: string, connectionId: string, patch: { friendlyName?: string; phoneNumber?: string; status?: ConnectionRecord['status']; connectionState?: ConnectionRecord['connectionState'] }): Promise<void> {
   const fields: string[] = [];
   const values: unknown[] = [];
   if (patch.friendlyName !== undefined) { fields.push('friendly_name = ?'); values.push(patch.friendlyName); }
   if (patch.phoneNumber !== undefined) { fields.push('phone_number = ?'); values.push(patch.phoneNumber); }
   if (patch.status !== undefined) { fields.push('status = ?'); values.push(patch.status); }
+  if (patch.connectionState !== undefined) { fields.push('connection_state = ?'); values.push(patch.connectionState); }
   if (!fields.length) return;
   fields.push("updated_at = datetime('now')");
   values.push(connectionId, userId);

@@ -29,6 +29,7 @@ export interface ConnectionRecord {
   phoneNumber?: string;
   encryptedToken: string;
   status: 'active' | 'disabled' | 'error';
+  connectionState?: 'provisioning' | 'qr' | 'connected' | 'expired' | 'offline' | 'error';
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +40,10 @@ export interface ConnectionSummary {
   instanceId: string;
   phoneNumber?: string;
   status: ConnectionRecord['status'];
+  connectionState?: ConnectionRecord['connectionState'];
+  isDefault?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
   /** Returned only once by the local connection registration API. */
   webhookSecret?: string;
 }

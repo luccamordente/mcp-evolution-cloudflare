@@ -69,8 +69,21 @@ export async function updateConnection(db: D1Database, userId: string, connectio
 }
 
 export async function removeConnection(db: D1Database, userId: string, connectionId: string): Promise<boolean> {
-  const result = await db.prepare('DELETE FROM whatsapp_connections WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId).run();
-  return (result.meta?.changes ?? 0) > 0;
+  const target = await db.prepare('SELECT id, is_default as isDefault FROM whatsapp_connections WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId).first<{ id: string; isDefault: number }>();
+  if (!target) return false;
+
+  const statements = [
+    db.prepare('DELETE FROM whatsapp_connections WHERE id = ?1 AND user_id = ?2').bind(connectionId, userId),
+  ];
+  if (target.isDefault === 1) {
+    const replacement = await db.prepare("SELECT id FROM whatsapp_connections WHERE user_id = ?1 AND id != ?2 ORDER BY created_at ASC, id ASC LIMIT 1").bind(userId, connectionId).first<{ id: string }>();
+    if (replacement) {
+      statements.push(db.prepare("UPDATE whatsapp_connections SET is_default = 1, updated_at = datetime('now') WHERE id = ?1 AND user_id = ?2").bind(replacement.id, userId));
+    }
+  }
+
+  await db.batch(statements);
+  return true;
 }
 
 export async function revealConnectionToken(db: D1Database, encryptionKey: string, connection: ConnectionRecord): Promise<string> {

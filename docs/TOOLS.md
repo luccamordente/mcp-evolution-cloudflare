@@ -14,4 +14,4 @@ Todas as ferramentas exigem `connectionId`, o UUID interno cadastrado pelo usuá
 | `send_media` | `POST /send/media` | Imagem, documento, áudio ou vídeo; limite configurável. |
 | `download_media` | `POST /message/downloadmedia` | Requer o envelope completo `waE2E.Message` capturado no webhook; ID isolado não basta no Evolution Go. |
 
-As respostas incluem `structuredContent.data` e preservam os campos que o backend fornecer: IDs, JID, conversa, remetente, direção, timestamp, tipo e metadados de mídia. Administração de instâncias, logout, exclusão de mensagens/grupos e gestão ampla de participantes não fazem parte da superfície padrão.
+As respostas incluem `structuredContent.data`, sempre como um valor JSON (objeto, lista, string, número, booleano ou `null`), e preservam os campos que o backend fornecer: IDs, JID, conversa, remetente, direção, timestamp, tipo e metadados de mídia. Administração de instâncias, logout, exclusão de mensagens/grupos e gestão ampla de participantes não fazem parte da superfície padrão.

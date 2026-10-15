@@ -7,7 +7,11 @@ import { audit, ensureUser, getConnection, listConnections, revealConnectionToke
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
 const connectionInput = { connectionId: z.string().uuid() };
-const dataOutput = z.object({ data: z.unknown() });
+// Tool results are JSON payloads from Evolution Go. `z.unknown()` emits an
+// empty JSON Schema (`{}`), which declares no validation at all and causes
+// MCP clients to report a malformed output schema. `z.json()` keeps the
+// payload intentionally free-form while declaring every valid JSON value.
+export const dataOutput = z.object({ data: z.json() });
 
 function ok(data: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], structuredContent: { data } }; }
 function fail(error: unknown) {

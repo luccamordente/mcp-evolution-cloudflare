@@ -1,6 +1,29 @@
+# Dependências e artefatos de build
 node_modules/
-.wrangler/
 dist/
+.wrangler/
+coverage/
+.nyc_output/
+.cache/
+
+# Segredos e configurações locais
 .env
+.env.*
+!.env.example
 .dev.vars
+.dev.vars.*
+
+# Logs e artefatos gerados por ferramentas locais
 *.log
+.playwright-cli/
+output/
+tmp/
+temp/
+
+# Sistema e editores
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

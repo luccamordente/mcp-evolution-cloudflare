@@ -103,10 +103,3 @@ export interface SendMessageResult {
   accepted: boolean;
   raw?: unknown;
 }
-
-export interface MediaDownload {
-  mimeType: string;
-  fileName?: string;
-  size?: number;
-  body: ReadableStream<Uint8Array>;
-}

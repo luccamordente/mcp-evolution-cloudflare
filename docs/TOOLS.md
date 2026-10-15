@@ -12,6 +12,5 @@ Todas as ferramentas exigem `connectionId`, o UUID interno cadastrado pelo usuá
 | `send_text` | `POST /send/text` | Destino individual ou grupo; resposta estruturada. |
 | `reply_to_message` | `POST /send/text` com `quoted` | Usa `messageId` e participante opcional. |
 | `send_media` | `POST /send/media` | Imagem, documento, áudio ou vídeo; o adaptador converte o MIME para os tipos aceitos pelo Evolution Go (`image`, `video`, `audio`, `document`); limite configurável. |
-| `download_media` | `POST /message/downloadmedia` | Chama diretamente o Evolution Go com o envelope completo `waE2E.Message`, que deve ser fornecido pelo chamador. |
 
 As respostas incluem `structuredContent.data`, sempre como um valor JSON (objeto, lista, string, número, booleano ou `null`), e preservam os campos que o backend fornecer: IDs, JID, conversa, remetente, direção, timestamp, tipo e metadados de mídia. Administração de instâncias, logout, exclusão de mensagens/grupos e gestão ampla de participantes não fazem parte da superfície padrão.

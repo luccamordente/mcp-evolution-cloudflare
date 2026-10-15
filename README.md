@@ -18,7 +18,7 @@ O protocolo publicado é **MCP 2026-07-28**, com transporte Streamable HTTP stat
 
 ## Limite do Evolution Go
 
-O contrato usa o header `apikey` e as rotas `/instance/status`, `/user/contacts`, `/group/list`, `/message/search`, `/send/text`, `/send/media` e `/message/downloadmedia`. `list_messages` consulta mensagens persistidas diretamente na API e depende de `DATABASE_SAVE_MESSAGES=true`; o fork não possui endpoint de listagem de chats. O webhook continua disponível para receber eventos e `download_media` exige o envelope completo da mensagem.
+O contrato usa o header `apikey` e as rotas `/instance/status`, `/user/contacts`, `/group/list`, `/message/search`, `/send/text` e `/send/media`. `list_messages` consulta mensagens persistidas diretamente na API e depende de `DATABASE_SAVE_MESSAGES=true`; o fork não possui endpoint de listagem de chats. O webhook continua disponível para receber eventos.
 
 A URL do Evolution Go e a API key global já estão configuradas no Worker. Ainda falta cadastrar um token específico de instância em `/connections`; por isso nenhuma conexão, histórico real ou envio WhatsApp foi declarado como concluído.
 

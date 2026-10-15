@@ -6,7 +6,6 @@ import { audit, ensureUser, getConnection, revealConnectionToken } from './db';
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
 const connectionInput = { connectionId: z.string().uuid() };
-export const messageInput = z.record(z.string(), z.json());
 // Tool results are JSON payloads from Evolution Go. `z.unknown()` emits an
 // empty JSON Schema (`{}`), which declares no validation at all and causes
 // MCP clients to report a malformed output schema. `z.json()` keeps the
@@ -101,24 +100,6 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption }, replyTo));
   });
 
-  server.registerTool('download_media', { title: 'Download received media', description: 'Downloads media directly from Evolution Go using the full waE2E.Message envelope captured by the caller.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: messageInput }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
-    const media = await c.downloadMedia(messageId, message);
-    const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
-    const reader = media.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > max) { await reader.cancel(); throw new Error(`Media exceeds configured limit of ${max} bytes`); }
-      chunks.push(next.value);
-    }
-    const bytes = new Uint8Array(total); let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
-    return { mimeType: media.mimeType, fileName: media.fileName, size: total, dataBase64: btoa(binary) };
-  }));
 
   return server;
 }

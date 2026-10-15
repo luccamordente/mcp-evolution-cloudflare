@@ -1,4 +1,4 @@
-import type { Contact, Group, MediaDownload, Message, Page, SendMessageResult } from '../types';
+import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 
 export interface EvolutionClientOptions {
   baseUrl: string;
@@ -246,16 +246,6 @@ export class EvolutionGoClient {
     });
   }
 
-  async downloadMedia(messageId: string, message: unknown): Promise<MediaDownload> {
-    const payload = await this.request<{ data?: { base64?: string; mimetype?: string; fileName?: string }; base64?: string; mimetype?: string; fileName?: string }>('/message/downloadmedia', { method: 'POST', body: JSON.stringify({ message }) });
-    const raw = payload.data ?? payload;
-    const dataUrl = raw.base64 ?? '';
-    const match = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
-    if (!match) throw new EvolutionApiError(502, 'Evolution Go returned media without a data URL');
-    const binary = atob(match[2]);
-    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-    return { body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }), mimeType: raw.mimetype ?? match[1] ?? 'application/octet-stream', fileName: raw.fileName, size: bytes.byteLength };
-  }
 }
 
 function normalizeStoredMessage(value: unknown): Message {

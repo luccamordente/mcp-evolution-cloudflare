@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { dataOutput, messageInput, toJsonValue } from '../src/lib/mcp';
+import { dataOutput, toJsonValue } from '../src/lib/mcp';
 
 describe('MCP tool output schema', () => {
   it('declares data as a JSON value instead of an unconstrained schema', () => {
@@ -13,17 +13,6 @@ describe('MCP tool output schema', () => {
     expect(dataSchema?.$ref).toBeDefined();
     expect(schema.$defs?.[dataSchema?.$ref?.split('/').pop() ?? '']?.anyOf).toBeDefined();
     expect(dataSchema).not.toEqual({});
-  });
-
-  it('declares the media message envelope as a free-form JSON object', () => {
-    const schema = z.toJSONSchema(messageInput) as { type?: string; additionalProperties?: unknown };
-
-    expect(schema.type).toBe('object');
-    expect(schema.additionalProperties).toBeDefined();
-  });
-
-  it('requires the media message envelope', () => {
-    expect(messageInput.safeParse(undefined).success).toBe(false);
   });
 
   it('removes undefined fields before structured content validation', () => {

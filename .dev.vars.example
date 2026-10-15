@@ -1,0 +1,5 @@
+# Local-only secrets. `npm run dev:local` creates .dev.vars from this file when
+# it does not exist. Keep real credentials out of this file and out of Git.
+TOKEN_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+CONSENT_SECRET=local-consent-secret
+EVOLUTION_GLOBAL_API_KEY=local-evolution-global-key

@@ -23,5 +23,18 @@
     "ALLOWED_EMAILS": "luccamordente@gmail.com,heitorsalazar@gmail.com",
     "MAX_MEDIA_BYTES": "8388608",
     "ENVIRONMENT": "production"
+  },
+  "env": {
+    "local": {
+      "name": "mcp-evolution-cloudflare-local",
+      "vars": {
+        "EVOLUTION_BASE_URL": "http://127.0.0.1:8789",
+        "MCP_PUBLIC_URL": "http://localhost:8787",
+        "ALLOWED_EMAILS": "dev@example.test",
+        "MAX_MEDIA_BYTES": "8388608",
+        "ENVIRONMENT": "local",
+        "LOCAL_DEV_USER_EMAIL": "dev@example.test"
+      }
+    }
   }
 }

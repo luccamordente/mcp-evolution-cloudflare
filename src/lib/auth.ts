@@ -38,6 +38,11 @@ export async function authenticate(request: Request, env: Env): Promise<{ info: 
  * is never accepted as an MCP OAuth access token.
  */
 export async function authenticateAccessRequest(request: Request, env: Env): Promise<AuthenticatedUser> {
+  if (env.ENVIRONMENT === 'local') {
+    const email = (env.LOCAL_DEV_USER_EMAIL ?? 'dev@example.test').trim().toLowerCase();
+    if (!email || !email.includes('@')) throw new AuthError(500, 'Local development user is not configured');
+    return { id: `local:${email}`, email, name: 'Local development', claims: { local: true } };
+  }
   const token = request.headers.get('cf-access-jwt-assertion');
   if (!token) throw new AuthError(401, 'Cloudflare Access authentication required');
   const payload = await verifyAccessJwt(token, env);

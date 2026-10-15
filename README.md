@@ -30,6 +30,14 @@ npm run check
 npx wrangler deploy --dry-run
 ```
 
+Para abrir a aplicação localmente com D1/KV persistentes e uma identidade de desenvolvimento isolada:
+
+```sh
+npm run dev:local
+```
+
+Depois abra `http://localhost:8787/connections`. O comando aplica as migrations locais e cria `.dev.vars` somente com segredos de exemplo. O backend Evolution Go local é opcional; sem um mock ou uma instância de desenvolvimento em `127.0.0.1:8789`, a tela abre, mas o provisionamento de uma conexão não pode ser concluído.
+
 Configure IDs de bindings em `wrangler.jsonc` e segredos com `wrangler secret put`. Nunca armazene tokens em `.env`, URLs ou respostas MCP. Veja [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/TOOLS.md](docs/TOOLS.md) e [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Referências e atribuições

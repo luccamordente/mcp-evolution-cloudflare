@@ -7,6 +7,7 @@ export interface Env {
   ACCESS_JWKS_URL?: string;
   ACCESS_ISSUER?: string;
   ACCESS_AUDIENCE?: string;
+  LOCAL_DEV_USER_EMAIL?: string;
   CONSENT_SECRET?: string;
   ALLOWED_EMAILS?: string;
   ENVIRONMENT?: string;

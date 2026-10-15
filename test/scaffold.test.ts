@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { app, MCP_PROTOCOL_VERSION } from '../src/index';
 import { encryptToken, decryptToken } from '../src/lib/crypto';
 import { EvolutionGoClient } from '../src/lib/evolution';
+import { authenticateAccessRequest } from '../src/lib/auth';
 
 const env = {
   DB: {} as D1Database,
@@ -24,6 +25,15 @@ describe('worker scaffold', () => {
     const response = await app.request('/mcp', {}, env);
     expect(response.status).toBe(401);
     expect((await app.request('/sse', {}, env)).status).toBe(404);
+  });
+
+  it('allows the synthetic UI identity only in the local environment', async () => {
+    await expect(authenticateAccessRequest(new Request('http://localhost/connections'), {
+      ...env,
+      ENVIRONMENT: 'local',
+      LOCAL_DEV_USER_EMAIL: 'dev@example.test',
+    } as any)).resolves.toMatchObject({ id: 'local:dev@example.test', email: 'dev@example.test' });
+    await expect(authenticateAccessRequest(new Request('http://localhost/connections'), env)).rejects.toMatchObject({ status: 401 });
   });
 
   it('encrypts and decrypts instance tokens with authenticated encryption', async () => {

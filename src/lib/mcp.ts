@@ -7,6 +7,7 @@ import { audit, ensureUser, getConnection, listConnections, revealConnectionToke
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
 const connectionInput = { connectionId: z.string().uuid() };
+export const messageInput = z.record(z.string(), z.json()).optional();
 // Tool results are JSON payloads from Evolution Go. `z.unknown()` emits an
 // empty JSON Schema (`{}`), which declares no validation at all and causes
 // MCP clients to report a malformed output schema. `z.json()` keeps the
@@ -91,7 +92,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption, ptt }, replyTo));
   });
 
-  server.registerTool('download_media', { title: 'Download received media', description: 'Evolution Go requires the full waE2E.Message envelope. Pass the message envelope returned in a captured message raw field; an ID alone is insufficient.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: z.unknown().optional() }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
+  server.registerTool('download_media', { title: 'Download received media', description: 'Evolution Go requires the full waE2E.Message envelope. Pass the message envelope returned in a captured message raw field; an ID alone is insufficient.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: messageInput }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
     if (!message || typeof message !== 'object') throw new Error('message envelope is required by Evolution Go for media download');
     const media = await c.downloadMedia(messageId, message);
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);

@@ -26,9 +26,22 @@ describe('Evolution Go route contracts', () => {
     const media = await client.downloadMedia('msg-1', { imageMessage: { url: 'https://media.invalid/file' } });
     expect(calls[0].url).toBe('https://evolution.invalid/send/media');
     expect(JSON.parse(calls[0].body ?? '{}').url).toBe('AQ==');
+    expect(JSON.parse(calls[0].body ?? '{}').type).toBe('image');
     expect(calls[1].url).toBe('https://evolution.invalid/message/downloadmedia');
     expect(JSON.parse(calls[1].body ?? '{}')).toEqual({ message: { imageMessage: { url: 'https://media.invalid/file' } } });
     expect(media.mimeType).toBe('image/png');
+  });
+
+  it('maps application MIME types to Evolution Go documents', async () => {
+    let body = '';
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored', instanceToken: 'secret', fetcher: async (_request, init) => {
+      body = String(init?.body ?? '');
+      return Response.json({ accepted: true });
+    } });
+
+    await client.sendMedia('5511999999999', { mimeType: 'application/pdf', fileName: 'arquivo.pdf', data: Uint8Array.from([1]).buffer });
+    expect(JSON.parse(body)).toMatchObject({ type: 'document', filename: 'arquivo.pdf', url: 'AQ==' });
+    expect(JSON.parse(body)).not.toHaveProperty('ptt');
   });
 
   it('retries transient GET failures before returning an Evolution error', async () => {

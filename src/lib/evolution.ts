@@ -227,13 +227,18 @@ export class EvolutionGoClient {
     });
   }
 
-  async sendMedia(to: string, media: { mimeType: string; fileName?: string; data: ArrayBuffer; caption?: string; ptt?: boolean }, replyTo?: string): Promise<SendMessageResult> {
+  async sendMedia(to: string, media: { mimeType: string; fileName?: string; data: ArrayBuffer; caption?: string }, replyTo?: string): Promise<SendMessageResult> {
     const bytes = new Uint8Array(media.data);
     let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
-    const type = media.mimeType.split('/')[0] || 'document';
+    // Evolution Go accepts only image, video, audio, or document here. MIME
+    // types such as application/pdf must be sent as `document`, not `application`.
+    const mimeType = media.mimeType.toLowerCase();
+    const type = mimeType.startsWith('image/') ? 'image'
+      : mimeType.startsWith('video/') ? 'video'
+        : mimeType.startsWith('audio/') ? 'audio' : 'document';
     return this.request('/send/media', {
       method: 'POST',
-      body: JSON.stringify({ number: to, url: btoa(binary), type, caption: media.caption, filename: media.fileName, ptt: media.ptt, ...(replyTo ? { quoted: { messageId: replyTo } } : {}) }),
+      body: JSON.stringify({ number: to, url: btoa(binary), type, caption: media.caption, filename: media.fileName, ...(replyTo ? { quoted: { messageId: replyTo } } : {}) }),
     });
   }
 

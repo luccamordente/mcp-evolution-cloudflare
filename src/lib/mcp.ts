@@ -14,7 +14,19 @@ export const messageInput = z.record(z.string(), z.json()).optional();
 // payload intentionally free-form while declaring every valid JSON value.
 export const dataOutput = z.object({ data: z.json() });
 
-function ok(data: unknown) { return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], structuredContent: { data } }; }
+/** Remove undefined values before MCP validates structuredContent as JSON. */
+export function toJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => item === undefined ? null : toJsonValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, toJsonValue(item)]));
+  }
+  return value;
+}
+
+function ok(data: unknown) {
+  const safeData = toJsonValue(data);
+  return { content: [{ type: 'text' as const, text: JSON.stringify(safeData) }], structuredContent: { data: safeData } };
+}
 function fail(error: unknown) {
   const message = error instanceof EvolutionApiError ? error.message : error instanceof Error ? error.message : 'Unexpected error';
   return { isError: true, content: [{ type: 'text' as const, text: message }] };
@@ -83,13 +95,13 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
 
   server.registerTool('send_text', { title: 'Send text message', inputSchema: z.object({ ...connectionInput, to: z.string().min(3).max(200), text: z.string().min(1).max(10000) }), outputSchema: dataOutput }, async ({ connectionId, to, text }) => send('send_text', connectionId, (c) => c.sendText(to, text)));
   server.registerTool('reply_to_message', { title: 'Reply to a message', inputSchema: z.object({ ...connectionInput, to: z.string().min(3).max(200), text: z.string().min(1).max(10000), messageId: z.string().min(1).max(200), participant: z.string().max(200).optional() }), outputSchema: dataOutput }, async ({ connectionId, to, text, messageId, participant }) => send('reply_to_message', connectionId, (c) => c.sendText(to, text, messageId, participant)));
-  server.registerTool('send_media', { title: 'Send media', inputSchema: z.object({ ...connectionInput, to: z.string().min(3).max(200), mimeType: z.string().min(3).max(200), fileName: z.string().max(255).optional(), dataBase64: z.string().min(1), caption: z.string().max(2000).optional(), ptt: z.boolean().optional(), replyTo: z.string().max(200).optional() }), outputSchema: dataOutput }, async ({ connectionId, to, mimeType, fileName, dataBase64, caption, ptt, replyTo }) => {
+  server.registerTool('send_media', { title: 'Send media', inputSchema: z.object({ ...connectionInput, to: z.string().min(3).max(200), mimeType: z.string().min(3).max(200), fileName: z.string().max(255).optional(), dataBase64: z.string().min(1), caption: z.string().max(2000).optional(), replyTo: z.string().max(200).optional() }), outputSchema: dataOutput }, async ({ connectionId, to, mimeType, fileName, dataBase64, caption, replyTo }) => {
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
     if (dataBase64.length > max * 1.4) return fail(new Error(`Media exceeds configured limit of ${max} bytes`));
     let data: ArrayBuffer;
     try { const binary = atob(dataBase64.replace(/\s/g, '')); data = Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer; } catch { return fail(new Error('dataBase64 is invalid')); }
     if (data.byteLength > max) return fail(new Error(`Media exceeds configured limit of ${max} bytes`));
-    return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption, ptt }, replyTo));
+    return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption }, replyTo));
   });
 
   server.registerTool('download_media', { title: 'Download received media', description: 'Evolution Go requires the full waE2E.Message envelope. Pass the message envelope returned in a captured message raw field; an ID alone is insufficient.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: messageInput }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {

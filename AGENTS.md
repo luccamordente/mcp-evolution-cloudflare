@@ -23,6 +23,8 @@ Esses documentos são a referência técnica; o histórico das conversas registr
 
 Mantenha a diferença entre a chave administrativa global e o token de cada instância. A chave global é usada pelo cliente administrativo para criação; rotas de uma instância usam o token específico no header `apikey`. O contrato analisado usa `/instance/status`, `/user/contacts`, `/group/list`, `/send/text`, `/send/media` e `/message/downloadmedia`. O download exige o envelope completo da mensagem capturada, não apenas um ID.
 
+Quando precisar consultar a implementação da API Evolution Go, use o checkout local ignorado `.scratch/evolution-go/`, que é o clone canônico de `https://github.com/neurau/evolution-go.git`. Se o diretório ainda não existir, clone o repositório nesse caminho; se já existir, execute `git -C .scratch/evolution-go pull --ff-only` antes de ler qualquer arquivo, para garantir que a consulta usa a versão mais recente. Não crie clones alternativos em outros diretórios do projeto.
+
 Concentre mudanças de contrato em `src/lib/evolution.ts` e acrescente testes mockados das rotas reais. Leituras GET podem sofrer 5xx transitório: o cliente tenta até três vezes, enquanto operações de escrita não são repetidas para evitar duplicação. Erros e auditoria devem registrar somente status e mensagem sanitizados, nunca tokens, chaves, payloads sensíveis ou conteúdo desnecessário.
 
 ## UI, Access e provisionamento

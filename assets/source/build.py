@@ -1,4 +1,4 @@
-"""Generate standalone vector assets from the two approved raster references.
+"""Generate standalone vector assets from the approved icon and wordmark sources.
 
 Requires Pillow, potrace and rsvg-convert. No font dependency in logo assets.
 """
@@ -46,8 +46,21 @@ def trace(name, filename, region):
     return dict(body=body, width=width, height=height, overlap=overlap)
 
 
-# Icon from the explicitly approved single-logo image; lettering from camel-case 01.
-icon = trace('icon', 'wapilot-logo-final-01.png', (520, 175, 1010, 650))
+def load_icon_curves():
+    """Load the approved hand-drawn icon geometry at the traced asset size."""
+    source = ROOT / 'source' / 'icon-curves.svg'
+    root = ET.parse(source).getroot()
+    path = root.find(NS + 'path')
+    if path is None:
+        raise ValueError(f'{source} does not contain an icon path')
+    return dict(body=ET.tostring(path, encoding='unicode'),
+                width=float(root.attrib['width']),
+                height=float(root.attrib['height']),
+                overlap=1.0)
+
+
+# The icon is maintained as explicit Bézier geometry; lettering comes from camel-case 01.
+icon = load_icon_curves()
 word = trace('wordmark', 'wapilot-wordmarks-camelcase.png', (90, 340, 470, 435))
 
 
@@ -68,7 +81,9 @@ def layout(kind, ic, wc):
         width, height = pad * 2 + iw + gap + ww, ih + pad * 2
         body = shape(icon, pad, pad, ih, ic) + shape(word, pad+iw+gap, (height-wh)/2, wh, wc)
     else:
-        ih, pad = 240, 24
+        # Icon-only marks get a little more breathing room while keeping the
+        # artwork itself at the same size as the lockups.
+        ih, pad = 240, 32
         iw = icon['width'] * ih / icon['height']
         width = height = max(iw, ih) + pad * 2
         body = shape(icon, (width-iw)/2, (height-ih)/2, ih, ic)

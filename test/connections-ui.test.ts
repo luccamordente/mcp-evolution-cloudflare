@@ -12,6 +12,12 @@ describe('connections workspace page', () => {
     expect(html).toContain("'/api/connections/'");
     expect(html).toContain("'/qr'");
     expect(html).toContain('luccamordente@gmail.com');
+    expect(html).toContain('WaPilot — verde-carvao, inline');
+    expect(html).toContain("window.location.hash === '#onboarding'");
+    expect(html).not.toContain('id="dashboard-add"');
+    expect(html).not.toContain('id="activity-nav"');
+    expect(html).not.toContain('class="notice"');
+    expect(html).not.toContain('Atualizar estado');
     expect(html).not.toContain('__USER_EMAIL__');
   });
 });

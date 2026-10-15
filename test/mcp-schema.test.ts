@@ -22,6 +22,10 @@ describe('MCP tool output schema', () => {
     expect(schema.additionalProperties).toBeDefined();
   });
 
+  it('requires the media message envelope', () => {
+    expect(messageInput.safeParse(undefined).success).toBe(false);
+  });
+
   it('removes undefined fields before structured content validation', () => {
     const safe = toJsonValue({ items: [{ jid: '1@s.whatsapp.net', name: undefined }], next: undefined });
     expect(dataOutput.parse({ data: safe })).toEqual({ data: { items: [{ jid: '1@s.whatsapp.net' }] } });

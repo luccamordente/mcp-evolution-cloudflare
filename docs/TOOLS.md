@@ -4,7 +4,7 @@ Todas as ferramentas exigem `connectionId`, o UUID interno cadastrado pelo usuá
 
 | Ferramenta | Fonte | Observação |
 | --- | --- | --- |
-| `list_connections` | D1 + `GET /instance/status` | Lista as conexões do usuário e consulta o estado atual de cada instância diretamente no Evolution Go; o resultado não é gravado no D1. |
+| `list_connections` | `GET /instance/all` | Lista diretamente as instâncias do Evolution Go com a chave administrativa; tokens, webhooks e QR codes são redigidos. |
 | `connection_status` | `GET /instance/status` | Usa o token específico da conexão e nunca lê o estado operacional do D1. |
 | `search_contacts` | `GET /user/contacts` | Filtra localmente e pagina a lista devolvida pelo Go. |
 | `list_groups` | `GET /group/list` | Metadados e participantes básicos, com paginação local. |
@@ -12,6 +12,6 @@ Todas as ferramentas exigem `connectionId`, o UUID interno cadastrado pelo usuá
 | `send_text` | `POST /send/text` | Destino individual ou grupo; resposta estruturada. |
 | `reply_to_message` | `POST /send/text` com `quoted` | Usa `messageId` e participante opcional. |
 | `send_media` | `POST /send/media` | Imagem, documento, áudio ou vídeo; o adaptador converte o MIME para os tipos aceitos pelo Evolution Go (`image`, `video`, `audio`, `document`); limite configurável. |
-| `download_media` | `POST /message/downloadmedia` | Usa o envelope completo `waE2E.Message`; quando `message` é omitido, o Worker tenta recuperá-lo dos eventos de webhook capturados para a conexão. |
+| `download_media` | `POST /message/downloadmedia` | Chama diretamente o Evolution Go com o envelope completo `waE2E.Message`, que deve ser fornecido pelo chamador. |
 
 As respostas incluem `structuredContent.data`, sempre como um valor JSON (objeto, lista, string, número, booleano ou `null`), e preservam os campos que o backend fornecer: IDs, JID, conversa, remetente, direção, timestamp, tipo e metadados de mídia. Administração de instâncias, logout, exclusão de mensagens/grupos e gestão ampla de participantes não fazem parte da superfície padrão.

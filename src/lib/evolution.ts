@@ -82,6 +82,10 @@ export class EvolutionGoAdminClient {
   async status(token: string): Promise<unknown> {
     return this.request('/instance/status', token);
   }
+
+  async listInstances(): Promise<unknown> {
+    return this.request('/instance/all', this.globalApiKey);
+  }
 }
 
 function field(record: Record<string, unknown>, ...names: string[]): string {

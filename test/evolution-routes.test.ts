@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { EvolutionGoClient } from '../src/lib/evolution';
+import { EvolutionGoAdminClient, EvolutionGoClient } from '../src/lib/evolution';
 
 describe('Evolution Go route contracts', () => {
+  it('lists instances through the administrative route with the global key', async () => {
+    let seen: { url: string; headers: Headers } | undefined;
+    const client = new EvolutionGoAdminClient({ baseUrl: 'https://evolution.invalid/', globalApiKey: 'global-secret', fetcher: async (request, init) => {
+      seen = { url: String(request), headers: new Headers(init?.headers) };
+      return Response.json({ message: 'success', data: [{ id: 'instance-1' }] });
+    } });
+
+    await expect(client.listInstances()).resolves.toEqual({ message: 'success', data: [{ id: 'instance-1' }] });
+    expect(seen?.url).toBe('https://evolution.invalid/instance/all');
+    expect(seen?.headers.get('apikey')).toBe('global-secret');
+  });
+
   it('uses the Go text route and quoted message shape', async () => {
     let seen: { url: string; init: RequestInit } | undefined;
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored-by-go', instanceToken: 'instance-secret', fetcher: async (request, init) => {

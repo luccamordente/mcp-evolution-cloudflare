@@ -11,7 +11,7 @@ O protocolo publicado é **MCP 2026-07-28**, com transporte Streamable HTTP stat
 - Worker publicado com Hono, TypeScript, D1 e KV.
 - OAuth Provider oficial `@cloudflare/workers-oauth-provider` 1.2.3, discovery, CIMD/DCR compatível, Authorization Code, PKCE S256, refresh e revogação.
 - Cloudflare Access com One-time PIN e allowlist de `luccamordente@gmail.com` e `heitorsalazar@gmail.com` em `/authorize`, `/connections` e `/api`.
-- Tokens das instâncias protegidos por AES-GCM e resolvidos apenas por UUID interno do usuário.
+- Tokens das instâncias protegidos por AES-GCM e resolvidos apenas por UUID interno do usuário nas ferramentas de conexão; `list_connections` usa a chave administrativa do Evolution Go e redige credenciais.
 - Ferramentas de status, contatos, grupos, conversas/histórico capturados, texto, resposta e mídia.
 - Webhook por conexão com segredo opaco, verificação da instância e deduplicação em D1.
 - Testes unitários locais e dry-run do Wrangler.

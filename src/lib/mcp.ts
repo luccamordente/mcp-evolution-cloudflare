@@ -1,13 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { AuthenticatedUser, Env } from '../types';
-import { EvolutionGoClient, EvolutionApiError } from './evolution';
-import { evolutionState, extractPhone } from './connection-status';
-import { audit, ensureUser, findWebhookMessage, getConnection, listConnections, revealConnectionToken } from './db';
+import { EvolutionGoAdminClient, EvolutionGoClient, EvolutionApiError } from './evolution';
+import { audit, ensureUser, getConnection, revealConnectionToken } from './db';
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
 const connectionInput = { connectionId: z.string().uuid() };
-export const messageInput = z.record(z.string(), z.json()).optional();
+export const messageInput = z.record(z.string(), z.json());
 // Tool results are JSON payloads from Evolution Go. `z.unknown()` emits an
 // empty JSON Schema (`{}`), which declares no validation at all and causes
 // MCP clients to report a malformed output schema. `z.json()` keeps the
@@ -37,6 +36,16 @@ function auditFailure(error: unknown): { error: string; status?: number } {
   return { error: error instanceof Error ? error.message : 'Unexpected error' };
 }
 
+function redactInstances(payload: unknown): unknown[] {
+  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const values = Array.isArray(payload) ? payload : Array.isArray(root.data) ? root.data : [];
+  return values.map((value) => {
+    if (!value || typeof value !== 'object') return value;
+    const { token: _token, webhook: _webhook, qrcode: _qrcode, ...safe } = value as Record<string, unknown>;
+    return safe;
+  });
+}
+
 export async function createMcpServer(env: Env, user: AuthenticatedUser): Promise<McpServer> {
   const ensured = await ensureUser(env.DB, user);
   const server = new McpServer({ name: 'mcp-evolution-cloudflare', version: '0.1.0' });
@@ -60,21 +69,9 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     }
   };
 
-  server.registerTool('list_connections', { title: 'List WhatsApp connections', description: 'Lists the authenticated user\'s connections and reads each current status directly from Evolution Go. The live status result is never written to D1.', outputSchema: dataOutput }, async () => {
-    const connections = await listConnections(env.DB, ensured.id);
-    const live = await Promise.all(connections.map(async (summary) => {
-      const connection = await getConnection(env.DB, ensured.id, summary.id);
-      if (!connection) return { ...summary, status: 'error' as const, connectionState: 'error' as const, statusSource: 'evolution', statusError: 'Connection not found' };
-      try {
-        const token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
-        const payload = await new EvolutionGoClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY, instanceId: connection.instanceId, instanceToken: token }).status();
-        const state = evolutionState(payload);
-        return { ...summary, status: state === 'error' ? 'error' as const : 'active' as const, connectionState: state, phoneNumber: extractPhone(payload) ?? summary.phoneNumber, statusSource: 'evolution', statusCheckedAt: new Date().toISOString() };
-      } catch (_) {
-        return { ...summary, status: 'error' as const, connectionState: 'error' as const, statusSource: 'evolution', statusError: 'Evolution Go status unavailable', statusCheckedAt: new Date().toISOString() };
-      }
-    }));
-    return ok(live);
+  server.registerTool('list_connections', { title: 'List WhatsApp connections', description: 'Lists instances directly from Evolution Go using its administrative instance endpoint. Credentials and QR data are redacted.', outputSchema: dataOutput }, async () => {
+    const payload = await new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' }).listInstances();
+    return ok(redactInstances(payload));
   });
   server.registerTool('connection_status', { title: 'Connection status', inputSchema: z.object(connectionInput), outputSchema: dataOutput }, async ({ connectionId }) => read('connection_status', connectionId, (c) => c.status()));
   server.registerTool('search_contacts', { title: 'Search contacts', inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200), ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));
@@ -104,10 +101,8 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption }, replyTo));
   });
 
-  server.registerTool('download_media', { title: 'Download received media', description: 'Downloads media using the full waE2E.Message envelope. If message is omitted, the Worker looks it up in webhook events captured for this connection.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: messageInput }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
-    const envelope = message && typeof message === 'object' ? message : await findWebhookMessage(env.DB, ensured.id, connectionId, messageId);
-    if (!envelope || typeof envelope !== 'object') throw new Error('message envelope not found; include the captured message object in the message argument');
-    const media = await c.downloadMedia(messageId, envelope);
+  server.registerTool('download_media', { title: 'Download received media', description: 'Downloads media directly from Evolution Go using the full waE2E.Message envelope captured by the caller.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: messageInput }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
+    const media = await c.downloadMedia(messageId, message);
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
     const reader = media.body.getReader();
     const chunks: Uint8Array[] = [];

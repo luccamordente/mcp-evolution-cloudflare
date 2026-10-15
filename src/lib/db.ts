@@ -83,10 +83,17 @@ export async function audit(db: D1Database, input: { userId: string; connectionI
 
 /** Return the Evolution message envelope captured by this user's webhook. */
 export async function findWebhookMessage(db: D1Database, userId: string, connectionId: string, messageId: string): Promise<unknown | null> {
-  const row = await db.prepare('SELECT e.message_json as messageJson FROM webhook_events e JOIN whatsapp_connections c ON c.id = e.connection_id WHERE e.connection_id = ?1 AND e.message_id = ?2 AND c.user_id = ?3 ORDER BY e.received_at DESC LIMIT 1').bind(connectionId, messageId, userId).first<{ messageJson: string }>();
+  let row = await db.prepare('SELECT e.message_json as messageJson FROM webhook_events e JOIN whatsapp_connections c ON c.id = e.connection_id WHERE e.connection_id = ?1 AND e.message_id = ?2 AND c.user_id = ?3 ORDER BY e.received_at DESC LIMIT 1').bind(connectionId, messageId, userId).first<{ messageJson: string }>();
+  // Older events may have been stored before all Evolution key shapes were
+  // recognized, leaving message_id empty. Search only inside this user's
+  // connection and verify the parsed payload below before returning it.
+  if (!row) {
+    row = await db.prepare('SELECT e.message_json as messageJson FROM webhook_events e JOIN whatsapp_connections c ON c.id = e.connection_id WHERE e.connection_id = ?1 AND c.user_id = ?2 AND e.message_json LIKE ?3 ORDER BY e.received_at DESC LIMIT 1').bind(connectionId, userId, `%${messageId}%`).first<{ messageJson: string }>();
+  }
   if (!row?.messageJson) return null;
   try {
     const parsed = JSON.parse(row.messageJson) as Record<string, unknown>;
+    if (!JSON.stringify(parsed).includes(messageId)) return null;
     return parsed.message ?? parsed;
   } catch {
     return null;
@@ -101,11 +108,12 @@ export async function ingestWebhookEvent(db: D1Database, secret: string, payload
   const eventName = typeof body.event === 'string' ? body.event : 'Message';
   const data = (body.data && typeof body.data === 'object' ? body.data : {}) as Record<string, unknown>;
   const info = (data.Info && typeof data.Info === 'object' ? data.Info : data.info && typeof data.info === 'object' ? data.info : {}) as Record<string, unknown>;
+  const key = (data.key && typeof data.key === 'object' ? data.key : data.Key && typeof data.Key === 'object' ? data.Key : {}) as Record<string, unknown>;
   const instanceId = String(body.instanceId ?? body.instanceID ?? data.instanceId ?? '');
   if (instanceId && instanceId !== connection.instanceId) return { accepted: false, status: 400, error: 'Webhook instance mismatch' };
-  const message = (data.Message ?? data.message ?? data) as Record<string, unknown>;
-  const messageId = String(info.ID ?? info.id ?? message.id ?? '');
-  const conversationId = String(info.RemoteJID ?? info.remoteJid ?? info.Chat ?? info.chat ?? '');
+  const message = (data.Message && typeof data.Message === 'object' ? data.Message : data.message && typeof data.message === 'object' ? data.message : data) as Record<string, unknown>;
+  const messageId = String(info.ID ?? info.id ?? key.ID ?? key.id ?? message.id ?? '');
+  const conversationId = String(info.RemoteJID ?? info.remoteJid ?? info.Chat ?? info.chat ?? key.remoteJid ?? key.remoteJID ?? '');
   const safe = { info, message, groupData: data.groupData ?? data.group_data };
   const inserted = await db.prepare('INSERT OR IGNORE INTO webhook_events (id, connection_id, event_name, message_id, conversation_id, message_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(crypto.randomUUID(), connection.id, eventName, messageId || null, conversationId || null, JSON.stringify(safe)).run();
   return { accepted: (inserted.meta?.changes ?? 0) > 0, status: (inserted.meta?.changes ?? 0) > 0 ? 202 : 200 };

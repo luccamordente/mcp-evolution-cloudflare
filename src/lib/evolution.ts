@@ -1,4 +1,4 @@
-import type { Contact, Conversation, Group, MediaDownload, Message, Page, SendMessageResult } from '../types';
+import type { Contact, Group, MediaDownload, Message, Page, SendMessageResult } from '../types';
 
 export interface EvolutionClientOptions {
   baseUrl: string;
@@ -202,10 +202,6 @@ export class EvolutionGoClient {
     return { items, nextCursor, hasMore: Boolean(nextCursor) };
   }
 
-  async listConversations(_cursor?: string, _limit?: number): Promise<Page<Conversation>> {
-    throw new EvolutionApiError(501, 'Evolution Go does not expose a conversation list endpoint; use captured webhook events');
-  }
-
   async listGroups(cursor?: string, limit = 50): Promise<Page<Group>> {
     const payload = await this.request<unknown>('/group/list');
     const values = Array.isArray(payload) ? payload : ((payload as Record<string, unknown> | undefined)?.data ?? payload);
@@ -216,8 +212,13 @@ export class EvolutionGoClient {
     return { items, nextCursor, hasMore: Boolean(nextCursor) };
   }
 
-  async listMessages(_options?: { conversationId?: string; after?: string; before?: string; text?: string; cursor?: string; limit?: number }): Promise<Page<Message>> {
-    throw new EvolutionApiError(501, 'Evolution Go does not expose message history search; configure webhook capture for post-integration history');
+  async listMessages(text?: string, limit = 50): Promise<Page<Message>> {
+    const boundedLimit = Math.min(Math.max(limit, 1), 50);
+    const query = text?.trim() ?? '';
+    const params = new URLSearchParams({ limit: String(boundedLimit) });
+    if (query) params.set('q', query);
+    const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
+    return this.page(payload, normalizeStoredMessage);
   }
 
   async sendText(to: string, text: string, replyTo?: string, participant?: string): Promise<SendMessageResult> {
@@ -232,7 +233,7 @@ export class EvolutionGoClient {
     const type = media.mimeType.split('/')[0] || 'document';
     return this.request('/send/media', {
       method: 'POST',
-      body: JSON.stringify({ number: to, url: `data:${media.mimeType};base64,${btoa(binary)}`, type, caption: media.caption, filename: media.fileName, ptt: media.ptt, ...(replyTo ? { quoted: { messageId: replyTo } } : {}) }),
+      body: JSON.stringify({ number: to, url: btoa(binary), type, caption: media.caption, filename: media.fileName, ptt: media.ptt, ...(replyTo ? { quoted: { messageId: replyTo } } : {}) }),
     });
   }
 
@@ -246,6 +247,19 @@ export class EvolutionGoClient {
     const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
     return { body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }), mimeType: raw.mimetype ?? match[1] ?? 'application/octet-stream', fileName: raw.fileName, size: bytes.byteLength };
   }
+}
+
+function normalizeStoredMessage(value: unknown): Message {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const id = record.message_id ?? record.messageId ?? record.id;
+  const text = record.body ?? record.text;
+  return {
+    id: typeof id === 'string' ? id : undefined,
+    timestamp: typeof record.timestamp === 'string' ? record.timestamp : undefined,
+    text: typeof text === 'string' ? text : undefined,
+    type: typeof record.source === 'string' ? record.source : undefined,
+    raw: value,
+  };
 }
 
 async function retryDelay(attempt: number): Promise<void> {

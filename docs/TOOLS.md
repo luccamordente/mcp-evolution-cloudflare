@@ -8,9 +8,7 @@ Todas as ferramentas exigem `connectionId`, o UUID interno cadastrado pelo usuá
 | `connection_status` | `GET /instance/status` | Usa o token específico da conexão e nunca lê o estado operacional do D1. |
 | `search_contacts` | `GET /user/contacts` | Filtra localmente e pagina a lista devolvida pelo Go. |
 | `list_groups` | `GET /group/list` | Metadados e participantes básicos, com paginação local. |
-| `list_conversations` | D1/webhook | Somente conversas capturadas desde a integração. |
-| `list_messages` | D1/webhook | Filtra conversa, datas e texto sobre eventos capturados. |
-| `recent_messages` | D1/webhook | Eventos recentes recebidos. |
+| `list_messages` | `GET /message/search?q=&limit=` | Consulta mensagens persistidas pelo Evolution Go; depende de `DATABASE_SAVE_MESSAGES=true`. |
 | `send_text` | `POST /send/text` | Destino individual ou grupo; resposta estruturada. |
 | `reply_to_message` | `POST /send/text` com `quoted` | Usa `messageId` e participante opcional. |
 | `send_media` | `POST /send/media` | Imagem, documento, áudio ou vídeo; limite configurável. |

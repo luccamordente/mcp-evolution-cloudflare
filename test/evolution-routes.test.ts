@@ -25,7 +25,7 @@ describe('Evolution Go route contracts', () => {
     await client.sendMedia('group@g.us', { mimeType: 'image/png', fileName: 'a.png', data: Uint8Array.from([1]).buffer });
     const media = await client.downloadMedia('msg-1', { imageMessage: { url: 'https://media.invalid/file' } });
     expect(calls[0].url).toBe('https://evolution.invalid/send/media');
-    expect(JSON.parse(calls[0].body ?? '{}').url).toBe('data:image/png;base64,AQ==');
+    expect(JSON.parse(calls[0].body ?? '{}').url).toBe('AQ==');
     expect(calls[1].url).toBe('https://evolution.invalid/message/downloadmedia');
     expect(JSON.parse(calls[1].body ?? '{}')).toEqual({ message: { imageMessage: { url: 'https://media.invalid/file' } } });
     expect(media.mimeType).toBe('image/png');
@@ -56,5 +56,16 @@ describe('Evolution Go route contracts', () => {
     await expect(client.searchContacts('ana')).resolves.toMatchObject({ items: [{ pushName: 'Ana' }] });
     await expect(client.searchContacts(' ')).resolves.toMatchObject({ items: [{ name: 'Lucas Lermen' }, { pushName: 'Ana' }] });
     await expect(client.searchContacts('nobody')).resolves.toMatchObject({ items: [] });
+  });
+
+  it('searches persisted messages through the Evolution message route', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'secret', fetcher: async (request, init) => {
+      calls.push({ url: String(request), method: String(init?.method ?? 'GET') });
+      return Response.json({ message: 'success', data: [{ message_id: 'message-1', body: 'Olá', timestamp: '2026-10-15T10:00:00Z' }] });
+    } });
+
+    await expect(client.listMessages('Olá', 10)).resolves.toMatchObject({ items: [{ id: 'message-1', text: 'Olá' }] });
+    expect(calls[0]).toEqual({ url: 'https://evolution.invalid/message/search?limit=10&q=Ol%C3%A1', method: 'GET' });
   });
 });

@@ -184,10 +184,11 @@ export class EvolutionGoClient {
   }
 
   async searchContacts(query: string, cursor?: string, limit = 50): Promise<Page<Contact>> {
-    const payload = await this.request<unknown>('/user/contacts');
+    const needle = query.trim().toLowerCase();
+    const path = needle ? `/user/contacts?search=${encodeURIComponent(needle)}` : '/user/contacts';
+    const payload = await this.request<unknown>(path);
     const object = payload && typeof payload === 'object' ? payload as Record<string, unknown> : undefined;
     const values = Array.isArray(payload) ? payload : (Array.isArray(object?.data) ? object.data : Array.isArray(object?.items) ? object.items : payload);
-    const needle = query.trim().toLowerCase();
     const digits = needle.replace(/\D/g, '');
     const contacts = (Array.isArray(values) ? values : []).map(normalizeContact).filter((contact) => {
       if (!needle) return true;

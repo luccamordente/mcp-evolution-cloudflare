@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { app, MCP_PROTOCOL_VERSION } from '../src/index';
 import { encryptToken, decryptToken } from '../src/lib/crypto';
 import { EvolutionGoClient } from '../src/lib/evolution';
-import { authenticateAccessRequest } from '../src/lib/auth';
+import { accessAudiences, authenticateAccessRequest } from '../src/lib/auth';
 
 const env = {
   DB: {} as D1Database,
@@ -15,6 +15,22 @@ const env = {
 } as any;
 
 describe('worker scaffold', () => {
+  it('accepts comma-separated Cloudflare Access audiences', () => {
+    expect(accessAudiences({ ACCESS_AUDIENCE: 'authorize-aud, connections-aud, api-aud' })).toEqual([
+      'authorize-aud',
+      'connections-aud',
+      'api-aud',
+    ]);
+  });
+
+  it('accepts comma-separated Cloudflare Access audiences', () => {
+    expect(accessAudiences({ ACCESS_AUDIENCE: 'authorize-aud, connections-aud, api-aud' })).toEqual([
+      'authorize-aud',
+      'connections-aud',
+      'api-aud',
+    ]);
+  });
+
   it('serves health with the current SDK protocol revision', async () => {
     const response = await app.request('/healthz', {}, env);
     expect(response.status).toBe(200);

@@ -16,6 +16,8 @@ O push do commit `371901d` gerou o build `1b2e77e1-8469-498d-826e-da7655778a88`,
 
 O `/healthz` publicado respondeu `protocol: 2026-07-28`, e `/mcp` respondeu `401` com `resource_metadata` RFC 9728. A configuração de Access existente protege `/authorize`, `/connections` e `/api` por One-time PIN para os dois e-mails autorizados. O `/user/contacts` passa a repassar o parâmetro `search` diretamente ao Evolution Go além da normalização em memória.
 
+Para entrar na interface, abra `https://app.wapilot.com.br/connections`, escolha a autenticação Cloudflare Access, informe `luccamordente@gmail.com` ou `heitorsalazar@gmail.com` e digite o One-time PIN enviado por e-mail. A sessão do navegador é independente do OAuth usado por clientes MCP; não use o token MCP no navegador.
+
 ## Segredos
 
 Foram configurados `TOKEN_ENCRYPTION_KEY`, `CONSENT_SECRET`, `ACCESS_JWKS_URL`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE` e `EVOLUTION_GLOBAL_API_KEY` como Workers Secrets. `EVOLUTION_BASE_URL` está configurado como `https://zipt-zopt.neurau.com.br`. Uma chamada controlada sem token de instância respondeu `401 not authorized`, confirmando que o endpoint está acessível sem declarar uma conexão autenticada como sucesso.
@@ -33,9 +35,9 @@ Cadastre cada instância em `/connections` ou `POST /api/connections` com nome a
 ## Verificação
 
 ```sh
-curl -i https://mcp-evolution-cloudflare.luccamordente.workers.dev/healthz
-curl -i https://mcp-evolution-cloudflare.luccamordente.workers.dev/mcp
-curl -i https://mcp-evolution-cloudflare.luccamordente.workers.dev/.well-known/oauth-protected-resource/mcp
+curl -i https://app.wapilot.com.br/healthz
+curl -i https://app.wapilot.com.br/mcp
+curl -i https://app.wapilot.com.br/.well-known/oauth-protected-resource/mcp
 ```
 
 O teste com um cliente real MCP e qualquer envio WhatsApp dependem da autenticação do cliente e de uma conexão Evolution Go real. Não execute envio real sem destinatário e conteúdo definidos.

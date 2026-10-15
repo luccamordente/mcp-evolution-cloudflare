@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WaPilot · Conexões</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <style>
+    :root {
+      --ink: #0f1b25;
+      --muted: #667789;
+      --line: #dfe9e6;
+      --canvas: #f7faf9;
+      --surface: #ffffff;
+      --mint: #e9f8f0;
+      --mint-strong: #d3f3e0;
+      --wa: #25d366;
+      --wa-deep: #108b45;
+      --shadow: 0 18px 45px rgba(15, 27, 37, .07);
+      --radius-lg: 24px;
+      --radius-md: 14px;
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--canvas); }
+    body { margin: 0; color: var(--ink); font-family: "DM Sans", system-ui, sans-serif; background: var(--canvas); }
+    button, select { font: inherit; }
+    button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid rgba(37,211,102,.35); outline-offset: 3px; }
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .prototype-note { background: #092c20; color: #e4f7ec; font-size: 12px; line-height: 1.45; letter-spacing: .01em; padding: 9px 42px; text-align: center; }
+    .topbar { position: relative; height: 88px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 24px; padding: 0 52px; background: var(--surface); border-bottom: 1px solid var(--line); }
+    .brand { display: inline-flex; align-items: center; gap: 14px; color: var(--ink); text-decoration: none; }
+    .brand img { width: 138px; height: auto; display: block; }
+    .top-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
+    .user { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; }
+    .avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--mint-strong); color: var(--wa-deep); font-weight: 700; font-size: 12px; }
+    .context-control { position: relative; grid-column: 2; grid-row: 1; }
+    .context-trigger { display: inline-flex; align-items: center; gap: 12px; min-width: 278px; padding: 12px 15px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; cursor: pointer; font-weight: 700; box-shadow: 0 7px 18px rgba(15,27,37,.05); }
+    .context-trigger:hover, .context-trigger[aria-expanded="true"] { border-color: rgba(37,211,102,.7); box-shadow: 0 9px 22px rgba(37,211,102,.13); }
+    .context-trigger .context-avatar { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; color: var(--wa-deep); background: var(--mint-strong); border-radius: 50%; font-size: 11px; font-weight: 800; }
+    .context-trigger .context-copy { display: grid; gap: 2px; text-align: left; flex: 1; }
+    .context-trigger .context-label { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .context-trigger .context-number { font-size: 14px; }
+    .context-trigger .status-dot { width: 8px; height: 8px; box-shadow: none; }
+    .context-trigger > i { color: var(--muted); font-size: 18px; transition: transform .2s ease; }
+    .context-trigger[aria-expanded="true"] > i { transform: rotate(180deg); }
+    .context-menu { position: absolute; z-index: 10; top: calc(100% + 9px); left: 0; width: 100%; padding: 7px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: 0 18px 40px rgba(15,27,37,.14); }
+    .context-menu[hidden] { display: none; }
+    .context-option { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 10px; color: var(--ink); border: 0; border-radius: 10px; background: transparent; cursor: pointer; text-align: left; }
+    .context-option:hover, .context-option:focus-visible { background: var(--mint); outline: none; }
+    .context-option.is-active { background: #f0faf4; }
+    .context-option small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .context-option .check { margin-left: auto; color: var(--wa-deep); }
+    .context-option.action { color: var(--wa-deep); font-weight: 700; }
+    .context-option.action i { font-size: 18px; }
+    .context-divider { height: 1px; margin: 5px 8px; background: var(--line); }
+    .new-context { grid-column: 2; grid-row: 1; display: inline-flex; align-items: center; gap: 9px; padding: 10px 14px; color: var(--muted); border: 1px solid var(--line); border-radius: 14px; font-size: 13px; font-weight: 700; }
+    .new-context[hidden], .context-control[hidden] { display: none; }
+    .page { width: min(1180px, calc(100% - 64px)); margin: 0 auto; padding: 58px 0 72px; }
+    .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 34px; }
+    .eyebrow { margin: 0 0 12px; color: var(--wa-deep); text-transform: uppercase; letter-spacing: .16em; font-size: 11px; font-weight: 700; }
+    h1, h2, h3 { font-family: "Manrope", "DM Sans", sans-serif; letter-spacing: -.04em; }
+    h1 { margin: 0; max-width: 630px; font-size: clamp(38px, 5vw, 68px); line-height: .98; }
+    .lede { max-width: 520px; margin: 16px 0 0; color: var(--muted); font-size: 17px; line-height: 1.55; }
+    .primary-btn { display: inline-flex; align-items: center; gap: 9px; border: 0; border-radius: 999px; padding: 13px 18px; color: #052b1a; background: var(--wa); cursor: pointer; font-weight: 700; box-shadow: 0 8px 18px rgba(37,211,102,.18); }
+    .primary-btn:hover { background: #1fbd5b; }
+    .connection-hero { min-height: 262px; overflow: hidden; background: var(--mint); border-radius: var(--radius-lg); }
+    .connection-copy { min-height: 262px; padding: 38px 42px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 28px; }
+    .connection-avatar { width: 62px; height: 62px; display: grid; place-items: center; color: var(--wa-deep); background: var(--mint-strong); border: 1px solid rgba(16,139,69,.15); border-radius: 50%; font-size: 20px; font-weight: 800; letter-spacing: -.04em; }
+    .identity-row { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 20px; justify-self: start; align-self: center; }
+    .connection-details { display: grid; gap: 6px; justify-items: start; }
+    .connection-copy > .status-line { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; }
+    .status-line { display: inline-flex; align-items: center; gap: 8px; width: max-content; padding: 7px 11px; color: var(--wa-deep); border: 1px solid rgba(16,139,69,.16); background: rgba(255,255,255,.7); border-radius: 999px; font-size: 13px; font-weight: 700; }
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--wa); box-shadow: 0 0 0 4px rgba(37,211,102,.15); }
+    .connection-copy h2 { margin: 0; font-size: clamp(29px, 4vw, 44px); line-height: 1; }
+    .connection-meta { margin: 0; color: var(--muted); font-size: 15px; }
+    .connection-meta strong { color: var(--ink); font-weight: 700; }
+    .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
+    .stat { padding: 26px 24px 28px 0; display: flex; flex-direction: column; gap: 9px; }
+    .stat + .stat { padding-left: 24px; border-left: 1px solid var(--line); }
+    .stat-label { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; font-weight: 600; }
+    .stat-label i { color: var(--wa-deep); font-size: 19px; }
+    .stat strong { font-size: 22px; letter-spacing: -.02em; }
+    .stat small { color: var(--muted); font-size: 13px; }
+    .activity { padding-top: 34px; }
+    .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 15px; }
+    .section-heading h3 { margin: 0; font-size: 22px; }
+    .text-btn { display: inline-flex; align-items: center; gap: 7px; color: var(--wa-deep); border: 0; background: transparent; cursor: pointer; font-weight: 700; }
+    .activity-list { display: grid; gap: 10px; margin: 0; padding: 4px 0 0; list-style: none; }
+    .activity-item { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 14px; min-height: 72px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 5px 16px rgba(15,27,37,.035); }
+    .activity-icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; align-self: center; overflow: hidden; border-radius: 50%; color: var(--wa-deep); background: var(--mint-strong); }
+    .activity-icon i { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 17px; line-height: 1; }
+    .activity-item > div { display: grid; gap: 3px; }
+    .activity-item strong { display: block; font-size: 14px; }
+    .activity-item span { display: block; margin: 0; color: var(--muted); font-size: 13px; }
+    .activity-time { color: var(--muted); font-size: 12px; }
+    .state-warning .status-line { color: #9a6710; border-color: #f1d79b; background: #fff8e8; }
+    .state-warning .status-dot { background: #e9a51c; box-shadow: 0 0 0 4px rgba(233,165,28,.15); }
+    .state-danger .status-line { color: #b53b3b; border-color: #f2c4c4; background: #fff0f0; }
+    .state-danger .status-dot { background: #e25757; box-shadow: 0 0 0 4px rgba(226,87,87,.15); }
+    .state-neutral .status-line { color: var(--muted); border-color: #d7e0e5; background: #f1f5f7; }
+    .state-neutral .status-dot { background: #8a9aa5; box-shadow: 0 0 0 4px rgba(138,154,165,.15); }
+    .toast { position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; padding: 12px 16px; color: white; background: #092c20; border-radius: 999px; font-size: 13px; transition: opacity .2s ease, transform .2s ease; }
+    .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+    .dashboard-hidden { display: none; }
+    .onboarding { display: grid; grid-template-columns: .9fr 1.1fr; gap: 58px; align-items: center; }
+    .onboarding h1 { max-width: 560px; }
+    .step-list { margin: 38px 0 0; padding: 0; list-style: none; display: grid; gap: 26px; }
+    .qr-instructions[hidden] { display: none; }
+    .step { display: grid; grid-template-columns: 42px 1fr; gap: 16px; align-items: start; }
+    .step-number { width: 38px; height: 38px; display: grid; place-items: center; border: 2px solid var(--line); border-radius: 50%; color: var(--muted); font-weight: 700; }
+    .step.is-current .step-number { color: #052b1a; background: var(--wa); border-color: var(--wa); }
+    .step strong { font-size: 16px; }
+    .step p { margin: 4px 0 0; color: var(--muted); line-height: 1.45; }
+    .qr-panel { padding: 34px; background: var(--mint); border-radius: var(--radius-lg); text-align: center; }
+    .onboarding-state { min-height: 560px; display: grid; place-items: center; }
+    .onboarding-state[hidden] { display: none; }
+    .state-card { width: min(100%, 520px); padding: 42px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+    .state-icon { width: 58px; height: 58px; display: grid; place-items: center; margin-bottom: 22px; color: var(--wa-deep); background: var(--mint-strong); border-radius: 18px; font-size: 28px; }
+    .state-card h2 { margin: 0; font-size: 31px; line-height: 1.05; }
+    .state-card p { margin: 14px 0 26px; color: var(--muted); line-height: 1.55; }
+    .state-card .primary-btn { border-radius: 12px; }
+    .progress-note { display: flex; align-items: center; gap: 9px; margin-top: 18px; color: var(--muted); font-size: 13px; }
+    .spinner { width: 17px; height: 17px; border: 2px solid var(--mint-strong); border-top-color: var(--wa); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .step-summary { display: flex; gap: 8px; margin-bottom: 25px; }
+    .step-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .step-chip.is-active { color: var(--wa-deep); border-color: rgba(37,211,102,.45); background: var(--mint); }
+    .qr-panel h2 { margin: 0; font-size: 25px; }
+    .qr-panel p { margin: 7px auto 24px; max-width: 350px; color: var(--muted); }
+    .qr-frame { width: min(100%, 320px); aspect-ratio: 1; display: grid; place-items: center; margin: 0 auto 20px; background: white; border: 12px solid white; border-radius: 18px; box-shadow: var(--shadow); }
+    .qr-frame img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+    .countdown { display: inline-flex; align-items: center; gap: 8px; color: var(--wa-deep); font-size: 23px; font-weight: 700; }
+    .qr-help { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    .back-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 36px; color: var(--ink); text-decoration: none; font-weight: 700; }
+    .back-link:hover { color: var(--wa-deep); }
+    @media (max-width: 860px) {
+      .topbar { height: auto; display: flex; gap: 18px; align-items: stretch; flex-direction: column; padding: 22px 24px; }
+      .top-actions { width: 100%; justify-content: flex-end; }
+      .top-actions .user { margin-left: auto; }
+      .context-control, .new-context { order: 2; width: 100%; }
+      .context-trigger { width: 100%; }
+      .context-menu { width: 100%; }
+      .context-select { min-width: 0; width: min(280px, 100%); }
+      .page { width: min(100% - 36px, 660px); padding-top: 42px; }
+      .page-heading { align-items: flex-start; flex-direction: column; }
+      .connection-hero, .onboarding { grid-template-columns: 1fr; }
+      .connection-copy { grid-template-columns: 1fr; row-gap: 18px; }
+      .connection-copy > .status-line { grid-column: 1; grid-row: 1; justify-self: start; }
+      .identity-row { grid-column: 1; grid-row: 2; }
+      .stat-grid { grid-template-columns: 1fr; }
+      .stat, .stat + .stat { padding: 20px 0; border-left: 0; border-bottom: 1px solid var(--line); }
+      .stat:last-child { border-bottom: 0; }
+      .onboarding { gap: 36px; }
+    }
+    @media (max-width: 520px) {
+      .prototype-note { padding: 9px 18px; }
+      .top-actions { align-items: flex-start; flex-direction: column-reverse; }
+      .context-select { width: 100%; }
+      .new-context { width: 100%; }
+      .page { width: min(100% - 28px, 520px); }
+      h1 { font-size: 42px; }
+      .connection-copy { padding: 30px 26px; }
+      .symbol-ring { width: 138px; height: 138px; }
+      .symbol-ring i { font-size: 64px; }
+      .activity-item { grid-template-columns: 30px 1fr; padding: 14px 0; }
+      .activity-time { grid-column: 2; }
+      .qr-panel { padding: 22px 16px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="prototype-note">Protótipo exploratório · dados locais · nenhuma conexão real é alterada</div>
+    <header class="topbar">
+      <a class="brand" href="#dashboard" aria-label="WaPilot, ir para o dashboard"><img src="../output/brand/wapilot/png/wapilot-verde-carvao-inline.png" alt="WaPilot"></a>
+      <div class="context-control" id="context-control">
+        <button class="context-trigger" id="context-trigger" type="button" aria-expanded="false" aria-controls="context-menu">
+          <span class="context-avatar" aria-hidden="true">AT</span>
+          <span class="context-copy"><span class="context-label">Atendimento</span><span class="context-number">+55 11 98765-4321</span></span>
+          <i class="ph ph-caret-down" aria-hidden="true"></i>
+        </button>
+        <div class="context-menu" id="context-menu" hidden>
+          <button class="context-option is-active" type="button" data-context-action="select" data-name="Atendimento" data-number="+55 11 98765-4321" data-state="connected"><span class="context-avatar" aria-hidden="true">AT</span><span><strong>Atendimento</strong><small>+55 11 98765-4321 · conectado</small></span><i class="ph ph-check check" aria-hidden="true"></i></button>
+          <button class="context-option" type="button" data-context-action="select" data-name="Vendas" data-number="+55 21 99876-5432" data-state="connected"><span class="context-avatar" aria-hidden="true">V</span><span><strong>Vendas</strong><small>+55 21 99876-5432 · conectado</small></span></button>
+          <button class="context-option" type="button" data-context-action="select" data-name="Suporte" data-number="+55 31 91234-5678" data-state="offline"><span class="context-avatar" aria-hidden="true">S</span><span><strong>Suporte</strong><small>+55 31 91234-5678 · offline</small></span></button>
+          <div class="context-divider" role="separator"></div>
+          <button class="context-option action" type="button" data-context-action="add"><i class="ph ph-plus-circle" aria-hidden="true"></i><span>Adicionar novo número</span></button>
+        </div>
+      </div>
+      <div class="new-context" id="new-context" hidden><i class="ph ph-plus-circle" aria-hidden="true"></i> Nova instância · nenhum número selecionado</div>
+      <div class="top-actions"><div class="user"><span class="avatar">LM</span><span>Lucca Mordente</span></div></div>
+    </header>
+
+    <main class="page">
+      <section id="dashboard-view">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Dashboard da conexão</p>
+            <h1>Seu WhatsApp está pronto para trabalhar.</h1>
+          </div>
+        </div>
+
+        <section class="connection-hero" aria-labelledby="connection-title">
+          <div class="connection-copy">
+            <span class="status-line"><span class="status-dot" aria-hidden="true"></span><span id="connection-status">Conectado</span></span>
+            <div class="identity-row">
+              <div class="connection-avatar" aria-hidden="true">AT</div>
+            <div class="connection-details">
+              <h2 id="connection-title">Atendimento</h2>
+              <p class="connection-meta"><strong>+55 11 98765-4321</strong> · última verificação há 2 minutos</p>
+            </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="stat-grid" aria-label="Resumo da conexão">
+          <div class="stat"><span class="stat-label"><i class="ph ph-heartbeat"></i> Saúde da conexão</span><strong id="health-value">Saudável</strong><small id="health-detail">Recebendo e enviando normalmente</small></div>
+          <div class="stat"><span class="stat-label"><i class="ph ph-clock"></i> Tempo conectado</span><strong id="uptime-value">3h 24min</strong><small id="uptime-detail">Desde hoje às 08:12</small></div>
+          <div class="stat"><span class="stat-label"><i class="ph ph-broadcast"></i> Webhook</span><strong id="webhook-value">Ativo</strong><small id="webhook-detail">Pronto para capturar eventos</small></div>
+        </section>
+
+        <section class="activity" aria-labelledby="activity-title">
+          <div class="section-heading"><h3 id="activity-title">Atividade recente</h3><button class="text-btn" type="button" id="view-all">Ver tudo <i class="ph ph-arrow-right"></i></button></div>
+          <ul class="activity-list">
+            <li class="activity-item"><span class="activity-icon"><i class="ph ph-check-circle"></i></span><div><strong data-activity-title>Conexão verificada</strong><span data-activity-detail>WhatsApp está online e pronto para uso</span></div><time class="activity-time">10:18</time></li>
+            <li class="activity-item"><span class="activity-icon"><i class="ph ph-broadcast"></i></span><div><strong data-activity-title>Webhook ativo</strong><span data-activity-detail>Eventos serão capturados a partir de agora</span></div><time class="activity-time">10:17</time></li>
+            <li class="activity-item"><span class="activity-icon"><i class="ph ph-plus-circle"></i></span><div><strong data-activity-title>Instância criada</strong><span data-activity-detail>O ambiente foi preparado com sucesso</span></div><time class="activity-time">10:17</time></li>
+          </ul>
+        </section>
+      </section>
+
+      <section id="onboarding-view" class="dashboard-hidden" aria-labelledby="onboarding-title">
+        <div class="onboarding">
+          <div>
+            <p class="eyebrow">Nova conexão</p>
+            <h1 id="onboarding-title">Conecte um novo WhatsApp ao WaPilot</h1>
+            <p class="lede">Vamos preparar uma instância nova. Nenhum número fica selecionado enquanto essa conexão não for confirmada.</p>
+            <div class="step-summary" aria-label="Etapas da nova conexão"><span class="step-chip is-active" data-chip="confirm">1&nbsp; Confirmar</span><span class="step-chip" data-chip="provision">2&nbsp; Preparar</span><span class="step-chip" data-chip="qr">3&nbsp; Ler QR</span></div>
+            <ol class="step-list qr-instructions" id="qr-instructions" hidden>
+              <li class="step is-current"><span class="step-number">1</span><div><strong>Abra o WhatsApp</strong><p>No seu celular, toque em <strong>Configurações → Aparelhos conectados</strong>.</p></div></li>
+              <li class="step"><span class="step-number">2</span><div><strong>Toque em Conectar aparelho</strong><p>Escolha <strong>Conectar aparelho</strong> para abrir a câmera.</p></div></li>
+              <li class="step"><span class="step-number">3</span><div><strong>Escaneie o QR Code</strong><p>Aponte a câmera para o código ao lado e mantenha esta tela aberta.</p></div></li>
+            </ol>
+            <a class="back-link" href="#dashboard" id="back-dashboard"><i class="ph ph-arrow-left"></i> Voltar para o dashboard</a>
+          </div>
+          <div class="onboarding-state" id="confirm-state">
+            <div class="state-card"><div class="state-icon"><i class="ph ph-plugs-connected"></i></div><h2>Pronto para criar uma instância?</h2><p>O WaPilot vai preparar um ambiente novo para o WhatsApp que você escolher. Isso leva alguns segundos e ainda não conecta nenhum número.</p><button class="primary-btn" id="confirm-provision" type="button">Continuar <i class="ph ph-arrow-right"></i></button></div>
+          </div>
+          <div class="onboarding-state" id="provision-state" hidden>
+            <div class="state-card"><div class="state-icon"><i class="ph ph-cloud-arrow-up"></i></div><h2>Preparando sua instância</h2><p>A instância e o webhook estão sendo configurados. Você não precisa fazer nada agora.</p><div class="progress-note"><span class="spinner" aria-hidden="true"></span><span>Isso deve levar alguns segundos.</span></div></div>
+          </div>
+          <div class="onboarding-state" id="qr-state" hidden>
+            <div class="qr-panel"><h2>Leia este QR Code</h2><p>Abra o WhatsApp no celular e conecte um aparelho a esta nova instância.</p><div class="qr-frame"><img src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&amp;data=wapilot-prototype-demo" alt="QR Code demonstrativo"></div><div class="countdown"><i class="ph ph-timer"></i> <span id="countdown">00:30</span></div><p class="qr-help">Se expirar, um novo código será gerado automaticamente.</p></div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <div class="toast" role="status" aria-live="polite" id="toast"></div>
+  </div>
+  <script>
+    const dashboard = document.querySelector('#dashboard-view');
+    const onboarding = document.querySelector('#onboarding-view');
+    const contextControl = document.querySelector('#context-control');
+    const contextTrigger = document.querySelector('#context-trigger');
+    const contextMenu = document.querySelector('#context-menu');
+    const newContext = document.querySelector('#new-context');
+    const toast = document.querySelector('#toast');
+    let toastTimer;
+    let countdownTimer;
+    let renewalTimer;
+    let seconds = 30;
+    let activeName = 'Atendimento';
+    let activeNumber = '+55 11 98765-4321';
+    const showToast = (message) => { toast.textContent = message; toast.classList.add('is-visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2600); };
+    const stateCatalog = {
+      connected: { tone: '', status: 'Conectado', title: 'Atendimento', meta: 'última verificação há 2 minutos', health: 'Saudável', healthDetail: 'Recebendo e enviando normalmente', uptime: '3h 24min', uptimeDetail: 'Desde hoje às 08:12', webhook: 'Ativo', webhookDetail: 'Pronto para capturar eventos', activity: [['Conexão verificada', 'WhatsApp está online e pronto para uso'], ['Webhook ativo', 'Eventos serão capturados a partir de agora'], ['Instância criada', 'O ambiente foi preparado com sucesso']] },
+      provisioning: { tone: 'state-warning', status: 'Provisionando', title: 'Preparando Atendimento', meta: 'A instância está sendo criada agora', health: 'Em preparação', healthDetail: 'Nenhuma ação é necessária', uptime: '—', uptimeDetail: 'A conexão ainda não começou', webhook: 'Configurando', webhookDetail: 'O webhook será ativado em seguida', activity: [['Instância em criação', 'O ambiente está sendo preparado'], ['Webhook aguardando', 'Será configurado automaticamente'], ['Solicitação iniciada', 'Nova conexão solicitada há poucos segundos']] },
+      qr: { tone: 'state-warning', status: 'Aguardando QR', title: 'Atendimento', meta: 'Leia o QR Code para concluir a conexão', health: 'Aguardando ação', healthDetail: 'Abra Aparelhos conectados no WhatsApp', uptime: '—', uptimeDetail: 'Ainda não conectado', webhook: 'Pronto', webhookDetail: 'Aguardando a confirmação do aparelho', activity: [['QR Code disponível', 'Aguardando leitura pelo WhatsApp'], ['Webhook configurado', 'Pronto para capturar o evento'], ['Instância criada', 'O ambiente foi preparado com sucesso']] },
+      expired: { tone: 'state-warning', status: 'QR expirado', title: 'Atendimento', meta: 'Gere um novo QR Code para reconectar', health: 'Ação necessária', healthDetail: 'O código deixou de ser válido', uptime: '—', uptimeDetail: 'A conexão ainda não começou', webhook: 'Pronto', webhookDetail: 'Aguardando um novo aparelho', activity: [['QR Code expirado', 'Gere um novo código para continuar'], ['Webhook configurado', 'Pronto para capturar o evento'], ['Instância criada', 'O ambiente foi preparado com sucesso']] },
+      offline: { tone: 'state-neutral', status: 'Offline', title: 'Atendimento', meta: 'O número está desconectado no momento', health: 'Desconectada', healthDetail: 'Nenhuma mensagem será processada', uptime: '—', uptimeDetail: 'Última sessão encerrada há 18 min', webhook: 'Ativo', webhookDetail: 'Aguardando a reconexão', activity: [['Conexão encerrada', 'O aparelho ficou offline'], ['Webhook ativo', 'A captura será retomada ao reconectar'], ['Conexão verificada', 'Última verificação há 18 minutos']] },
+      error: { tone: 'state-danger', status: 'Erro de conexão', title: 'Atendimento', meta: 'Não foi possível verificar este número', health: 'Indisponível', healthDetail: 'Tente atualizar o estado da conexão', uptime: '—', uptimeDetail: 'Último estado conhecido há 4 min', webhook: 'Verificar', webhookDetail: 'A resposta do provedor falhou', activity: [['Falha na verificação', 'O provedor não respondeu a tempo'], ['Webhook preservado', 'Nenhuma configuração foi alterada'], ['Última conexão', 'O ambiente existia e estava configurado']] }
+    };
+    const applyDashboardState = (key) => { const state = stateCatalog[key] || stateCatalog.connected; document.body.classList.remove('state-warning', 'state-danger', 'state-neutral'); if (state.tone) document.body.classList.add(state.tone); document.querySelector('#connection-status').textContent = state.status; document.querySelector('#connection-title').textContent = activeName; document.querySelector('.connection-meta').innerHTML = `<strong>${activeNumber}</strong> · ${state.meta}`; document.querySelector('#health-value').textContent = state.health; document.querySelector('#health-detail').textContent = state.healthDetail; document.querySelector('#uptime-value').textContent = state.uptime; document.querySelector('#uptime-detail').textContent = state.uptimeDetail; document.querySelector('#webhook-value').textContent = state.webhook; document.querySelector('#webhook-detail').textContent = state.webhookDetail; document.querySelectorAll('[data-activity-title]').forEach((element, index) => { element.textContent = state.activity[index][0]; }); document.querySelectorAll('[data-activity-detail]').forEach((element, index) => { element.textContent = state.activity[index][1]; }); };
+    const setContext = (isNew) => { contextControl.hidden = isNew; newContext.hidden = !isNew; };
+    const setOnboardingState = (state) => { document.querySelectorAll('.onboarding-state').forEach((element) => { element.hidden = element.id !== `${state}-state`; }); document.querySelectorAll('.step-chip').forEach((chip) => chip.classList.toggle('is-active', chip.dataset.chip === state)); document.querySelector('#qr-instructions').hidden = state !== 'qr'; };
+    const showDashboard = () => { dashboard.classList.remove('dashboard-hidden'); onboarding.classList.add('dashboard-hidden'); setContext(false); setOnboardingState('confirm'); clearInterval(countdownTimer); clearTimeout(renewalTimer); window.location.hash = 'dashboard'; };
+    const showOnboarding = () => { dashboard.classList.add('dashboard-hidden'); onboarding.classList.remove('dashboard-hidden'); setContext(true); setOnboardingState('confirm'); window.location.hash = 'onboarding'; clearInterval(countdownTimer); clearTimeout(renewalTimer); };
+    const resetCountdown = () => { seconds = 30; document.querySelector('#countdown').textContent = '00:30'; clearInterval(countdownTimer); clearTimeout(renewalTimer); countdownTimer = setInterval(() => { seconds = Math.max(0, seconds - 1); document.querySelector('#countdown').textContent = `00:${String(seconds).padStart(2, '0')}`; if (!seconds) { clearInterval(countdownTimer); showToast('QR expirado. Um novo código será gerado.'); renewalTimer = setTimeout(resetCountdown, 1200); } }, 1000); };
+    const closeContextMenu = () => { contextMenu.hidden = true; contextTrigger.setAttribute('aria-expanded', 'false'); };
+    contextTrigger.addEventListener('click', () => { const isOpen = contextTrigger.getAttribute('aria-expanded') === 'true'; contextTrigger.setAttribute('aria-expanded', String(!isOpen)); contextMenu.hidden = isOpen; });
+    contextMenu.addEventListener('click', (event) => { const option = event.target.closest('[data-context-action]'); const action = option?.dataset.contextAction; if (!action) return; closeContextMenu(); if (action === 'select') { activeName = option.dataset.name; activeNumber = option.dataset.number; document.querySelector('.context-label').textContent = activeName; document.querySelector('.context-number').textContent = activeNumber; document.querySelector('.context-trigger .context-avatar').textContent = activeName.slice(0, 1); document.querySelector('.connection-avatar').textContent = activeName.slice(0, 1); contextMenu.querySelectorAll('[data-context-action="select"]').forEach((item) => item.classList.toggle('is-active', item === option)); applyDashboardState(option.dataset.state || 'connected'); showToast(`${activeName} agora está em foco.`); } if (action === 'add') { showOnboarding(); showToast('Iniciando uma nova instância.'); } });
+    document.addEventListener('click', (event) => { if (!contextControl.contains(event.target)) closeContextMenu(); });
+    document.querySelector('#back-dashboard').addEventListener('click', (event) => { event.preventDefault(); showDashboard(); });
+    document.querySelector('.brand').addEventListener('click', (event) => { event.preventDefault(); showDashboard(); });
+    document.querySelector('#view-all').addEventListener('click', () => showToast('A consulta completa de atividade ainda não faz parte deste protótipo.'));
+    document.querySelector('#confirm-provision').addEventListener('click', () => { setOnboardingState('provision'); setTimeout(() => { setOnboardingState('qr'); resetCountdown(); }, 1800); });
+    applyDashboardState(new URLSearchParams(window.location.search).get('state') || 'connected');
+    if (window.location.hash === '#onboarding') showOnboarding(); else showDashboard();
+  </script>
+</body>
+</html>

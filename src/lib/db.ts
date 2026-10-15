@@ -81,6 +81,18 @@ export async function audit(db: D1Database, input: { userId: string; connectionI
   await db.prepare('INSERT INTO audit_log (id, user_id, connection_id, operation, outcome, metadata_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(crypto.randomUUID(), input.userId, input.connectionId ?? null, input.operation, input.outcome, input.metadata ? JSON.stringify(input.metadata) : null).run();
 }
 
+/** Return the Evolution message envelope captured by this user's webhook. */
+export async function findWebhookMessage(db: D1Database, userId: string, connectionId: string, messageId: string): Promise<unknown | null> {
+  const row = await db.prepare('SELECT e.message_json as messageJson FROM webhook_events e JOIN whatsapp_connections c ON c.id = e.connection_id WHERE e.connection_id = ?1 AND e.message_id = ?2 AND c.user_id = ?3 ORDER BY e.received_at DESC LIMIT 1').bind(connectionId, messageId, userId).first<{ messageJson: string }>();
+  if (!row?.messageJson) return null;
+  try {
+    const parsed = JSON.parse(row.messageJson) as Record<string, unknown>;
+    return parsed.message ?? parsed;
+  } catch {
+    return null;
+  }
+}
+
 export async function ingestWebhookEvent(db: D1Database, secret: string, payload: unknown): Promise<{ accepted: boolean; status: number; error?: string }> {
   const hash = await sha256(secret);
   const connection = await db.prepare('SELECT id, instance_id as instanceId FROM whatsapp_connections WHERE webhook_secret_hash = ?1 AND status = \'active\'').bind(hash).first<{ id: string; instanceId: string }>();

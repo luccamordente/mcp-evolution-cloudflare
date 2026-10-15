@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AuthenticatedUser, Env } from '../types';
 import { EvolutionGoClient, EvolutionApiError } from './evolution';
 import { evolutionState, extractPhone } from './connection-status';
-import { audit, ensureUser, getConnection, listConnections, revealConnectionToken } from './db';
+import { audit, ensureUser, findWebhookMessage, getConnection, listConnections, revealConnectionToken } from './db';
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
 const connectionInput = { connectionId: z.string().uuid() };
@@ -104,9 +104,10 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption }, replyTo));
   });
 
-  server.registerTool('download_media', { title: 'Download received media', description: 'Evolution Go requires the full waE2E.Message envelope. Pass the message envelope returned in a captured message raw field; an ID alone is insufficient.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: messageInput }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
-    if (!message || typeof message !== 'object') throw new Error('message envelope is required by Evolution Go for media download');
-    const media = await c.downloadMedia(messageId, message);
+  server.registerTool('download_media', { title: 'Download received media', description: 'Downloads media using the full waE2E.Message envelope. If message is omitted, the Worker looks it up in webhook events captured for this connection.', inputSchema: z.object({ ...connectionInput, messageId: z.string().min(1).max(200), message: messageInput }), outputSchema: dataOutput }, async ({ connectionId, messageId, message }) => send('download_media', connectionId, async (c) => {
+    const envelope = message && typeof message === 'object' ? message : await findWebhookMessage(env.DB, ensured.id, connectionId, messageId);
+    if (!envelope || typeof envelope !== 'object') throw new Error('message envelope not found; include the captured message object in the message argument');
+    const media = await c.downloadMedia(messageId, envelope);
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
     const reader = media.body.getReader();
     const chunks: Uint8Array[] = [];

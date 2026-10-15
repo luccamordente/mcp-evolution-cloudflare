@@ -1,0 +1,26 @@
+{
+  "colors": {
+    "green": "#25D366",
+    "charcoal": "#111A20",
+    "black": "#000000",
+    "white": "#FFFFFF"
+  },
+  "source_overlap": {
+    "icon": 0.997939653151265,
+    "wordmark": 0.9884822860475287
+  },
+  "assets": [
+    "svg/wapilot-verde-vertical.svg",
+    "svg/wapilot-verde-inline.svg",
+    "svg/wapilot-verde-icone.svg",
+    "svg/wapilot-verde-carvao-vertical.svg",
+    "svg/wapilot-verde-carvao-inline.svg",
+    "svg/wapilot-verde-carvao-icone.svg",
+    "svg/wapilot-negativo-vertical.svg",
+    "svg/wapilot-negativo-inline.svg",
+    "svg/wapilot-negativo-icone.svg",
+    "svg/wapilot-preto-vertical.svg",
+    "svg/wapilot-preto-inline.svg",
+    "svg/wapilot-preto-icone.svg"
+  ]
+}

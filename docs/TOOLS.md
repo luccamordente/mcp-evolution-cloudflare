@@ -4,8 +4,8 @@ Todas as ferramentas exigem `connectionId`, o UUID interno cadastrado pelo usuá
 
 | Ferramenta | Fonte | Observação |
 | --- | --- | --- |
-| `list_connections` | D1 | Conexões do usuário autenticado. |
-| `connection_status` | `GET /instance/status` | Usa o token específico da conexão. |
+| `list_connections` | D1 + `GET /instance/status` | Lista as conexões do usuário e consulta o estado atual de cada instância diretamente no Evolution Go; o resultado não é gravado no D1. |
+| `connection_status` | `GET /instance/status` | Usa o token específico da conexão e nunca lê o estado operacional do D1. |
 | `search_contacts` | `GET /user/contacts` | Filtra localmente e pagina a lista devolvida pelo Go. |
 | `list_groups` | `GET /group/list` | Metadados e participantes básicos, com paginação local. |
 | `list_conversations` | D1/webhook | Somente conversas capturadas desde a integração. |

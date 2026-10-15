@@ -40,7 +40,7 @@ export interface ConnectionSummary {
   friendlyName: string;
   instanceId: string;
   phoneNumber?: string;
-  status: ConnectionRecord['status'];
+  status?: ConnectionRecord['status'];
   connectionState?: ConnectionRecord['connectionState'];
   isDefault?: boolean;
   createdAt?: string;

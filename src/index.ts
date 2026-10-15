@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
 import { audit, createConnection, ensureUser, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import { EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
+import { evolutionState, extractPhone } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
 
@@ -88,7 +89,7 @@ app.get('/connections/data', async (c) => {
 app.get('/api/connections', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
   const user = await ensureUser(c.env.DB, auth);
-  return c.json({ connections: await listConnections(c.env.DB, user.id) });
+  return c.json({ connections: await connectionViews(c.env, user.id, true) });
 });
 
 app.post('/api/connections/provision', async (c) => {
@@ -119,7 +120,6 @@ app.get('/api/connections/:id/status', async (c) => {
     const token = await revealConnectionToken(c.env.DB, c.env.TOKEN_ENCRYPTION_KEY, connection);
     const status = await new EvolutionGoAdminClient({ baseUrl: c.env.EVOLUTION_BASE_URL, globalApiKey: c.env.EVOLUTION_GLOBAL_API_KEY ?? '' }).status(token);
     const state = evolutionState(status);
-    await updateConnection(c.env.DB, user.id, connection.id, { status: state === 'error' ? 'error' : 'active', connectionState: state });
     await audit(c.env.DB, { userId: user.id, connectionId: connection.id, operation: 'connection_status', outcome: 'success' });
     return c.json({ state, phoneNumber: extractPhone(status) ?? connection.phoneNumber });
   } catch (error) {
@@ -203,46 +203,40 @@ app.get('/admin/evolution', async (c) => {
   return c.html(adminProvisionPage());
 });
 
-type ConnectionViewState = 'connected' | 'provisioning' | 'qr' | 'expired' | 'offline' | 'error';
-
-async function connectionViews(env: Env, userId: string, refresh: boolean): Promise<Array<ConnectionSummary & Record<string, unknown>>> {
+async function connectionViews(env: Env, userId: string, _refresh: boolean): Promise<Array<ConnectionSummary & Record<string, unknown>>> {
   const connections = await listConnections(env.DB, userId);
   return Promise.all(connections.map(async (connection) => {
-    const initialState = connection.connectionState ?? (connection.status === 'error' ? 'error' : connection.status === 'disabled' ? 'offline' : 'connected');
     const view: ConnectionSummary & Record<string, unknown> = {
       ...connection,
       isDefault: Boolean(connection.isDefault),
-      state: initialState,
+      state: 'provisioning',
       statusDetail: undefined,
-      lastVerified: connection.updatedAt ? formatRelativeTime(connection.updatedAt) : 'verificação pendente',
-      health: initialState === 'connected' ? 'Saudável' : initialState === 'offline' ? 'Desconectada' : initialState === 'error' ? 'Indisponível' : 'Aguardando ação',
-      healthDetail: initialState === 'connected' ? 'Recebendo e enviando normalmente' : 'A conexão precisa de atenção para continuar',
-      uptime: initialState === 'connected' ? 'Disponível' : '—',
+      lastVerified: 'verificando agora',
+      health: 'Aguardando ação',
+      healthDetail: 'Consultando o provedor',
+      uptime: '—',
       uptimeDetail: connection.createdAt ? `Desde ${connection.createdAt}` : 'Após a confirmação',
-      webhook: connection.status === 'error' ? 'Verificar' : 'Ativo',
-      webhookDetail: connection.status === 'error' ? 'A resposta do provedor falhou' : 'Pronto para capturar eventos',
+      webhook: 'Ativo',
+      webhookDetail: 'Pronto para capturar eventos',
       activity: await activityFor(env.DB, userId, connection.id),
     };
-    if (refresh && connection.status === 'active') {
-      try {
-        const record = await getConnection(env.DB, userId, connection.id);
-        if (record) {
-          const token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, record);
-          const result = await new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' }).status(token);
-          const state = evolutionState(result);
-          await updateConnection(env.DB, userId, connection.id, { status: state === 'error' ? 'error' : 'active', connectionState: state });
-          view.state = state;
-          view.phoneNumber = extractPhone(result) ?? connection.phoneNumber;
-          view.lastVerified = 'verificado agora';
-          view.health = state === 'connected' ? 'Saudável' : state === 'offline' ? 'Desconectada' : state === 'error' ? 'Indisponível' : 'Aguardando ação';
-          view.healthDetail = state === 'connected' ? 'Recebendo e enviando normalmente' : 'O provedor informou que esta conexão precisa de atenção';
-        }
-      } catch (error) {
-        view.state = 'error';
-        view.statusDetail = safeErrorMessage(error, 'Não foi possível verificar o provedor');
-        view.health = 'Indisponível';
-        view.healthDetail = 'Tente atualizar o estado da conexão';
-      }
+    try {
+      const record = await getConnection(env.DB, userId, connection.id);
+      if (!record) throw new Error('Connection not found');
+      const token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, record);
+      const result = await new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' }).status(token);
+      const state = evolutionState(result);
+      view.state = state;
+      view.phoneNumber = extractPhone(result) ?? connection.phoneNumber;
+      view.lastVerified = 'verificado agora';
+      view.health = state === 'connected' ? 'Saudável' : state === 'offline' ? 'Desconectada' : state === 'error' ? 'Indisponível' : 'Aguardando ação';
+      view.healthDetail = state === 'connected' ? 'Recebendo e enviando normalmente' : 'O provedor informou que esta conexão precisa de atenção';
+      view.uptime = state === 'connected' ? 'Disponível' : '—';
+    } catch (error) {
+      view.state = 'error';
+      view.statusDetail = safeErrorMessage(error, 'Não foi possível verificar o provedor');
+      view.health = 'Indisponível';
+      view.healthDetail = 'Tente atualizar o estado da conexão';
     }
     return view;
   }));
@@ -302,34 +296,6 @@ async function provisionUserConnection(env: Env, user: { id: string; email: stri
     if (connection) await updateConnection(env.DB, owner.id, connection.id, { status: 'error' });
     throw error;
   }
-}
-
-function evolutionState(payload: unknown): ConnectionViewState {
-  const values: string[] = [];
-  const visit = (value: unknown, key = '') => {
-    if (typeof value === 'string' && /(state|status|connection|instance|qr|pair)/i.test(key)) values.push(value.toLowerCase());
-    else if (Array.isArray(value)) value.forEach((item) => visit(item, key));
-    else if (value && typeof value === 'object') Object.entries(value as Record<string, unknown>).forEach(([childKey, child]) => visit(child, childKey));
-  };
-  visit(payload);
-  const joined = values.join(' ');
-  if (!joined) return 'error';
-  if (/(qr|qrcode|pairing|scan)/.test(joined)) return 'qr';
-  if (/(disconnect|offline|closed|logout|close)/.test(joined)) return 'offline';
-  if (/(error|fail|unavailable)/.test(joined)) return 'error';
-  if (/(creat|provision|pending|process)/.test(joined)) return 'provisioning';
-  return 'connected';
-}
-
-function extractPhone(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== 'object') return undefined;
-  const record = payload as Record<string, unknown>;
-  for (const key of ['phone', 'phoneNumber', 'number', 'ownerJid', 'jid']) {
-    const value = record[key];
-    if (typeof value === 'string' && value.replace(/\D/g, '').length >= 8) return value.replace(/@.*$/, '');
-  }
-  for (const value of Object.values(record)) { const found = extractPhone(value); if (found) return found; }
-  return undefined;
 }
 
 function extractQrExpiry(payload: unknown): number | undefined {

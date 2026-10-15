@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { app, MCP_PROTOCOL_VERSION } from '../src/index';
+import { evolutionState } from '../src/lib/connection-status';
 import { encryptToken, decryptToken } from '../src/lib/crypto';
 import { EvolutionGoClient } from '../src/lib/evolution';
 import { accessAudiences, authenticateAccessRequest } from '../src/lib/auth';
@@ -35,6 +36,13 @@ describe('worker scaffold', () => {
     const response = await app.request('/healthz', {}, env);
     expect(response.status).toBe(200);
     expect((await response.json() as { protocol: string }).protocol).toBe(MCP_PROTOCOL_VERSION);
+  });
+
+  it('maps Evolution Go connected/loggedIn status booleans', () => {
+    expect(evolutionState({ message: 'success', data: { connected: true, loggedIn: true, myJid: '5511999999999@s.whatsapp.net' } })).toBe('connected');
+    expect(evolutionState({ message: 'success', data: { Connected: true, LoggedIn: true, MyJid: '5511999999999@s.whatsapp.net' } })).toBe('connected');
+    expect(evolutionState({ message: 'success', data: { connected: false, loggedIn: false } })).toBe('qr');
+    expect(evolutionState({ message: 'success', data: { connected: false, loggedIn: true } })).toBe('offline');
   });
 
   it('protects MCP and does not expose legacy /sse', async () => {

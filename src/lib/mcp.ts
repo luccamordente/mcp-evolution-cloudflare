@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { AuthenticatedUser, Env, Message } from '../types';
 import { EvolutionGoClient, EvolutionApiError } from './evolution';
+import { evolutionState, extractPhone } from './connection-status';
 import { audit, ensureUser, getConnection, listConnections, revealConnectionToken, listCapturedConversations, listCapturedMessages } from './db';
 
 const pageInput = { cursor: z.string().optional(), limit: z.number().int().min(1).max(100).default(50) };
@@ -26,7 +27,6 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   async function clientFor(connectionId: string): Promise<{ client: EvolutionGoClient; connection: NonNullable<Awaited<ReturnType<typeof getConnection>>> }> {
     const connection = await getConnection(env.DB, ensured.id, connectionId);
     if (!connection) throw new Error('Connection not found');
-    if (connection.status !== 'active') throw new Error('Connection is disabled or unavailable');
     const token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
     return { client: new EvolutionGoClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY, instanceId: connection.instanceId, instanceToken: token }), connection };
   }
@@ -47,7 +47,6 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     try {
       const connection = await getConnection(env.DB, ensured.id, connectionId);
       if (!connection) throw new Error('Connection not found');
-      if (connection.status !== 'active') throw new Error('Connection is disabled or unavailable');
       const data = await fn();
       await audit(env.DB, { userId: ensured.id, connectionId, operation, outcome: 'success' });
       return ok(data);
@@ -57,7 +56,22 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     }
   };
 
-  server.registerTool('list_connections', { title: 'List WhatsApp connections', description: 'List only the authenticated user\'s locally registered connections.', outputSchema: dataOutput }, async () => ok(await listConnections(env.DB, ensured.id)));
+  server.registerTool('list_connections', { title: 'List WhatsApp connections', description: 'Lists the authenticated user\'s connections and reads each current status directly from Evolution Go. The live status result is never written to D1.', outputSchema: dataOutput }, async () => {
+    const connections = await listConnections(env.DB, ensured.id);
+    const live = await Promise.all(connections.map(async (summary) => {
+      const connection = await getConnection(env.DB, ensured.id, summary.id);
+      if (!connection) return { ...summary, status: 'error' as const, connectionState: 'error' as const, statusSource: 'evolution', statusError: 'Connection not found' };
+      try {
+        const token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
+        const payload = await new EvolutionGoClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY, instanceId: connection.instanceId, instanceToken: token }).status();
+        const state = evolutionState(payload);
+        return { ...summary, status: state === 'error' ? 'error' as const : 'active' as const, connectionState: state, phoneNumber: extractPhone(payload) ?? summary.phoneNumber, statusSource: 'evolution', statusCheckedAt: new Date().toISOString() };
+      } catch (_) {
+        return { ...summary, status: 'error' as const, connectionState: 'error' as const, statusSource: 'evolution', statusError: 'Evolution Go status unavailable', statusCheckedAt: new Date().toISOString() };
+      }
+    }));
+    return ok(live);
+  });
   server.registerTool('connection_status', { title: 'Connection status', inputSchema: z.object(connectionInput), outputSchema: dataOutput }, async ({ connectionId }) => read('connection_status', connectionId, (c) => c.status()));
   server.registerTool('search_contacts', { title: 'Search contacts', inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200), ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));
   server.registerTool('list_conversations', { title: 'List captured conversations', description: 'Lists conversations observed after this connection webhook was configured. Evolution Go has no retroactive find-chats endpoint.', inputSchema: z.object({ ...connectionInput, ...pageInput }), outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => captured('list_conversations', connectionId, async () => ({ source: 'webhook_capture', ...(await listCapturedConversations(env.DB, ensured.id, connectionId, cursor, limit)) })));

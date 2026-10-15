@@ -10,7 +10,7 @@ export async function ensureUser(db: D1Database, user: AuthenticatedUser): Promi
 }
 
 export async function listConnections(db: D1Database, userId: string): Promise<ConnectionSummary[]> {
-  const result = await db.prepare('SELECT id, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, status, connection_state as connectionState, is_default as isDefault, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE user_id = ?1 ORDER BY is_default DESC, friendly_name').bind(userId).all<ConnectionSummary>();
+  const result = await db.prepare('SELECT id, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, is_default as isDefault, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE user_id = ?1 ORDER BY is_default DESC, friendly_name').bind(userId).all<ConnectionSummary>();
   return result.results ?? [];
 }
 

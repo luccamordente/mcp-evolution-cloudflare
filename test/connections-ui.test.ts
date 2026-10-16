@@ -14,6 +14,14 @@ describe('connections workspace page', () => {
     expect(html).toContain('luccamordente@gmail.com');
     expect(html).toContain('WaPilot — verde-carvao, inline');
     expect(html).toContain("window.location.hash === '#onboarding'");
+    expect(html).toContain('Autorizações');
+    expect(html).toContain('authorization-list');
+    expect(html).toContain('/api/authorizations');
+    expect(html).toContain('Desconectar');
+    expect(html).toContain('Nenhuma autorização ativa');
+    expect(html).toContain('Não foi possível carregar as autorizações');
+    expect(html).toContain('clientName');
+    expect(html).toContain('expiresAt');
     expect(html).not.toContain('id="dashboard-add"');
     expect(html).not.toContain('id="activity-nav"');
     expect(html).not.toContain('class="notice"');

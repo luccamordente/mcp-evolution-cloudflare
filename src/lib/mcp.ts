@@ -85,9 +85,70 @@ function ok(data: unknown) {
   const safeData = toJsonValue(data);
   return { content: [{ type: 'text' as const, text: JSON.stringify(safeData) }], structuredContent: { data: safeData } };
 }
-function fail(error: unknown) {
-  const message = error instanceof EvolutionApiError ? error.message : error instanceof Error ? error.message : 'Unexpected error';
-  return { isError: true, content: [{ type: 'text' as const, text: message }] };
+
+export type McpErrorCode =
+  | 'connection_not_found'
+  | 'no_default_connection'
+  | 'multiple_default_connections'
+  | 'evolution_unreachable'
+  | 'evolution_http_error'
+  | 'media_too_large'
+  | 'invalid_base64'
+  | 'token_decryption_failed'
+  | 'unexpected_error';
+
+export interface McpToolError {
+  code: McpErrorCode;
+  status: number;
+  retryable: boolean;
+  operation: string;
+  message: string;
+  hint: string;
+}
+
+function sanitizedMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  return message
+    .replace(/(token|api[-_ ]?key|password|secret)[=:]?\s*[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 240) || fallback;
+}
+
+export function classifyMcpError(error: unknown, operation: string): McpToolError {
+  const message = sanitizedMessage(error, 'Unexpected error');
+  if (message === 'Connection not found') {
+    return { code: 'connection_not_found', status: 404, retryable: false, operation, message, hint: 'Call list_connections and retry with an existing connectionId.' };
+  }
+  if (message.startsWith('No default connection configured')) {
+    return { code: 'no_default_connection', status: 409, retryable: false, operation, message, hint: 'Call list_connections and pass a connectionId, or configure one default connection.' };
+  }
+  if (message === 'Multiple default connections configured') {
+    return { code: 'multiple_default_connections', status: 409, retryable: false, operation, message, hint: 'Call list_connections and pass a connectionId, then fix the default selection in the connections UI.' };
+  }
+  if (message === 'dataBase64 is invalid') {
+    return { code: 'invalid_base64', status: 400, retryable: false, operation, message, hint: 'Send valid base64 content without a data URL prefix.' };
+  }
+  if (message.startsWith('Media exceeds configured limit')) {
+    return { code: 'media_too_large', status: 413, retryable: false, operation, message, hint: 'Reduce the attachment below the configured byte limit and retry.' };
+  }
+  if (error instanceof EvolutionApiError) {
+    if (message === 'Evolution Go is unreachable') {
+      return { code: 'evolution_unreachable', status: 503, retryable: true, operation, message, hint: 'Retry the operation for a read, or verify Evolution Go availability before retrying a write.' };
+    }
+    const status = error.status;
+    const retryable = status === 408 || status === 429 || status >= 500;
+    return { code: 'evolution_http_error', status, retryable, operation, message, hint: retryable ? 'Retry after a short delay; writes must not be replayed automatically.' : 'Use the status and message to correct authentication, destination, or request data before retrying.' };
+  }
+  if (message === 'Invalid encrypted token') {
+    return { code: 'token_decryption_failed', status: 500, retryable: false, operation, message, hint: 'The stored connection credential cannot be decrypted; repair the server configuration or connection.' };
+  }
+  return { code: 'unexpected_error', status: 500, retryable: false, operation, message, hint: 'Inspect server logs; no automatic retry is safe.' };
+}
+
+function fail(operation: string, error: unknown) {
+  const errorData = classifyMcpError(error, operation);
+  const payload = { error: errorData };
+  return { isError: true, content: [{ type: 'text' as const, text: JSON.stringify(payload) }], structuredContent: { data: payload } };
 }
 
 function auditFailure(error: unknown): { error: string; status?: number } {
@@ -122,7 +183,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       } catch {
         // An audit failure must not replace the operation error being reported.
       }
-      return fail(error);
+      return fail(operation, error);
     }
   };
 
@@ -151,7 +212,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       } catch {
         // An audit failure must not replace the operation error being reported.
       }
-      return fail(error);
+      return fail(operation, error);
     }
   };
 
@@ -159,10 +220,10 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   server.registerTool('reply_to_message', { title: 'Reply to a message', description: TOOL_DESCRIPTIONS.reply_to_message, inputSchema: replyToMessageInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, text, messageId, participant }) => send('reply_to_message', connectionId, (c) => c.sendText(to, text, messageId, participant)));
   server.registerTool('send_media', { title: 'Send media', description: TOOL_DESCRIPTIONS.send_media, inputSchema: sendMediaInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, mimeType, fileName, dataBase64, caption, replyTo }) => {
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
-    if (dataBase64.length > max * 1.4) return fail(new Error(`Media exceeds configured limit of ${max} bytes`));
+    if (dataBase64.length > max * 1.4) return fail('send_media', new Error(`Media exceeds configured limit of ${max} bytes`));
     let data: ArrayBuffer;
-    try { const binary = atob(dataBase64.replace(/\s/g, '')); data = Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer; } catch { return fail(new Error('dataBase64 is invalid')); }
-    if (data.byteLength > max) return fail(new Error(`Media exceeds configured limit of ${max} bytes`));
+    try { const binary = atob(dataBase64.replace(/\s/g, '')); data = Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer; } catch { return fail('send_media', new Error('dataBase64 is invalid')); }
+    if (data.byteLength > max) return fail('send_media', new Error(`Media exceeds configured limit of ${max} bytes`));
     return send('send_media', connectionId, (c) => c.sendMedia(to, { mimeType, fileName, data, caption }, replyTo));
   });
 

@@ -38,11 +38,23 @@ describe('worker scaffold', () => {
     expect((await response.json() as { protocol: string }).protocol).toBe(MCP_PROTOCOL_VERSION);
   });
 
-  it('maps Evolution Go connected/loggedIn status booleans', () => {
-    expect(evolutionState({ message: 'success', data: { connected: true, loggedIn: true, myJid: '5511999999999@s.whatsapp.net' } })).toBe('connected');
-    expect(evolutionState({ message: 'success', data: { Connected: true, LoggedIn: true, MyJid: '5511999999999@s.whatsapp.net' } })).toBe('connected');
-    expect(evolutionState({ message: 'success', data: { connected: false, loggedIn: false } })).toBe('qr');
-    expect(evolutionState({ message: 'success', data: { connected: false, loggedIn: true } })).toBe('offline');
+  it('maps JSON:API connection resources from Evolution Go status responses', () => {
+    const connected = {
+      jsonapi: { version: '1.1' },
+      data: {
+        type: 'connection',
+        id: 'instance-1',
+        attributes: { connected: true, loggedIn: true, phone: '5511999999999@s.whatsapp.net' },
+      },
+    };
+    expect(evolutionState(connected)).toBe('connected');
+    expect(evolutionState({ ...connected, data: { ...connected.data, attributes: { connected: false, loggedIn: false } } })).toBe('qr');
+    expect(evolutionState({ ...connected, data: { ...connected.data, attributes: { connected: false, loggedIn: true } } })).toBe('offline');
+  });
+
+  it('rejects non JSON:API status payloads instead of applying a legacy fallback', () => {
+    expect(evolutionState({ message: 'success', data: { connected: true, loggedIn: true } })).toBe('error');
+    expect(evolutionState({ jsonapi: { version: '1.0' }, data: { type: 'connection', attributes: { connected: true, loggedIn: true } } })).toBe('error');
   });
 
   it('protects MCP and does not expose legacy /sse', async () => {
@@ -71,11 +83,12 @@ describe('worker scaffold', () => {
     let seen: { url: string; init: RequestInit } | undefined;
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid/', instanceId: 'instance-1', instanceToken: 'secret', globalApiKey: 'global', fetcher: async (request, init) => {
       seen = { url: String(request), init: init as RequestInit };
-      return new Response(JSON.stringify({ items: [{ jid: '1@s.whatsapp.net', name: 'Alice' }], next_cursor: 'next' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ jsonapi: { version: '1.1' }, data: [{ type: 'chat', id: '1', attributes: { fullName: 'Alice' } }] }), { status: 200, headers: { 'content-type': 'application/vnd.api+json' } });
     } });
     const page = await client.searchContacts('Alice');
-    expect(page.nextCursor).toBe('next');
-    expect(page.hasMore).toBe(true);
+    expect(page.items).toEqual([{ id: '1', jid: '1', name: 'Alice' }]);
+    expect(page.nextCursor).toBeUndefined();
+    expect(page.hasMore).toBe(false);
     expect(new Headers(seen?.init.headers).get('apikey')).toBe('secret');
     expect(new Headers(seen?.init.headers).get('Authorization')).toBeNull();
     expect(seen?.url).not.toContain('secret');

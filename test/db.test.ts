@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { removeConnection, resolveConnection } from '../src/lib/db';
+import { ingestWebhookEvent, removeConnection, resolveConnection } from '../src/lib/db';
 
 type ConnectionRow = { id: string; userId: string; isDefault: number; createdAt: string };
 
@@ -103,4 +103,93 @@ describe('connection defaults', () => {
     await expect(resolveConnection(db as unknown as D1Database, 'user-1')).rejects.toThrow('Multiple default connections configured');
   });
 
+});
+
+describe('JSON:API webhook ingestion', () => {
+  it('persists message resources and redacts the webhook instance token', async () => {
+    const seen: Array<{ values: unknown[]; document: Record<string, unknown> }> = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...values: unknown[]) {
+            return {
+              async first<T>() {
+                if (sql.includes('webhook_secret_hash')) return { id: 'connection-1', instanceId: 'instance-1' } as T;
+                return undefined;
+              },
+              async run() {
+                if (sql.startsWith('INSERT OR IGNORE INTO webhook_events')) {
+                  const json = JSON.parse(String(values[5])) as Record<string, unknown>;
+                  seen.push({ values, document: json });
+                  return { meta: { changes: 1 } };
+                }
+                return { meta: { changes: 0 } };
+              },
+            };
+          },
+        };
+      },
+      async batch(statements: Array<{ run: () => Promise<{ meta?: { changes?: number } }> }>) {
+        return Promise.all(statements.map((statement) => statement.run()));
+      },
+    };
+
+    const result = await ingestWebhookEvent(db as unknown as D1Database, 'webhook-secret', {
+      jsonapi: { version: '1.1' },
+      meta: { event: 'Message', instanceId: 'instance-1', instanceToken: 'do-not-store', instanceName: 'lucca' },
+      data: {
+        type: 'message',
+        id: 'message-1',
+        attributes: { at: 1792164209000, encodingFormat: 'text/plain', body: { text: 'Olá' } },
+        relationships: { author: { data: { type: 'chat', id: '551142000028' } } },
+        meta: { chat: '551142000028', fromMe: false },
+      },
+    });
+
+    expect(result).toEqual({ accepted: true, status: 202 });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].values.slice(2, 5)).toEqual(['Message', 'message-1', '551142000028']);
+    expect(seen[0].document).toMatchObject({
+      jsonapi: { version: '1.1' },
+      data: { type: 'message', id: 'message-1' },
+      meta: { event: 'Message', instanceId: 'instance-1', instanceName: 'lucca' },
+    });
+    expect(JSON.stringify(seen[0].document)).not.toContain('do-not-store');
+  });
+
+  it('accepts a JSON:API collection for history sync', async () => {
+    let batchSize = 0;
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(..._values: unknown[]) {
+            return {
+              async first<T>() { return (sql.includes('webhook_secret_hash') ? { id: 'connection-1', instanceId: 'instance-1' } : undefined) as T | undefined; },
+              async run() { return { meta: { changes: 1 } }; },
+            };
+          },
+        };
+      },
+      async batch(statements: Array<{ run: () => Promise<unknown> }>) { batchSize = statements.length; return statements.map(() => ({ meta: { changes: 1 } })); },
+    };
+    await expect(ingestWebhookEvent(db as unknown as D1Database, 'webhook-secret', {
+      jsonapi: { version: '1.1' },
+      meta: { event: 'HistorySync', instanceId: 'instance-1' },
+      data: [
+        { type: 'message', id: 'message-1', attributes: { at: 1, encodingFormat: 'text/plain', body: { text: 'a' } }, meta: { chat: 'chat-1' } },
+        { type: 'message', id: 'message-2', attributes: { at: 2, encodingFormat: 'text/plain', body: { text: 'b' } }, meta: { chat: 'chat-1' } },
+      ],
+    })).resolves.toEqual({ accepted: true, status: 202 });
+    expect(batchSize).toBe(2);
+  });
+
+  it('rejects legacy envelopes and mismatched instance metadata', async () => {
+    const db = {
+      prepare(sql: string) {
+        return { bind(..._values: unknown[]) { return { async first<T>() { return (sql.includes('webhook_secret_hash') ? { id: 'connection-1', instanceId: 'instance-1' } : undefined) as T | undefined; } }; } };
+      },
+    };
+    await expect(ingestWebhookEvent(db as unknown as D1Database, 'webhook-secret', { event: 'Message', data: [] })).resolves.toMatchObject({ accepted: false, status: 400 });
+    await expect(ingestWebhookEvent(db as unknown as D1Database, 'webhook-secret', { jsonapi: { version: '1.1' }, meta: { event: 'Message', instanceId: 'other' }, data: [] })).resolves.toMatchObject({ accepted: false, status: 400, error: 'Webhook instance mismatch' });
+  });
 });

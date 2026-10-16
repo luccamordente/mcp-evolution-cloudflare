@@ -42,6 +42,10 @@ export async function findConnectionByInstanceId(db: D1Database, userId: string,
   return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE instance_id = ?1 AND user_id = ?2').bind(instanceId, userId).first<ConnectionRecord>();
 }
 
+export async function findConnectionByFriendlyName(db: D1Database, userId: string, friendlyName: string): Promise<ConnectionRecord | null> {
+  return db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE friendly_name = ?1 AND user_id = ?2 ORDER BY created_at ASC, id ASC LIMIT 1').bind(friendlyName, userId).first<ConnectionRecord>();
+}
+
 export async function createConnection(db: D1Database, encryptionKey: string, input: { userId: string; friendlyName: string; instanceId: string; phoneNumber?: string; token: string; connectionState?: ConnectionRecord['connectionState'] }): Promise<ConnectionSummary> {
   const id = crypto.randomUUID();
   const encryptedToken = await encryptToken(input.token, encryptionKey);
@@ -118,19 +122,45 @@ export async function ingestWebhookEvent(db: D1Database, secret: string, payload
   const hash = await sha256(secret);
   const connection = await db.prepare('SELECT id, instance_id as instanceId FROM whatsapp_connections WHERE webhook_secret_hash = ?1 AND status = \'active\'').bind(hash).first<{ id: string; instanceId: string }>();
   if (!connection) return { accepted: false, status: 404, error: 'Unknown webhook' };
-  const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
-  const eventName = typeof body.event === 'string' ? body.event : 'Message';
-  const data = (body.data && typeof body.data === 'object' ? body.data : {}) as Record<string, unknown>;
-  const info = (data.Info && typeof data.Info === 'object' ? data.Info : data.info && typeof data.info === 'object' ? data.info : {}) as Record<string, unknown>;
-  const key = (data.key && typeof data.key === 'object' ? data.key : data.Key && typeof data.Key === 'object' ? data.Key : {}) as Record<string, unknown>;
-  const instanceId = String(body.instanceId ?? body.instanceID ?? data.instanceId ?? '');
-  if (instanceId && instanceId !== connection.instanceId) return { accepted: false, status: 400, error: 'Webhook instance mismatch' };
-  const message = (data.Message && typeof data.Message === 'object' ? data.Message : data.message && typeof data.message === 'object' ? data.message : data) as Record<string, unknown>;
-  const messageId = String(info.ID ?? info.id ?? key.ID ?? key.id ?? message.id ?? '');
-  const conversationId = String(info.RemoteJID ?? info.remoteJid ?? info.Chat ?? info.chat ?? key.remoteJid ?? key.remoteJID ?? '');
-  const safe = { info, message, groupData: data.groupData ?? data.group_data };
-  const inserted = await db.prepare('INSERT OR IGNORE INTO webhook_events (id, connection_id, event_name, message_id, conversation_id, message_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(crypto.randomUUID(), connection.id, eventName, messageId || null, conversationId || null, JSON.stringify(safe)).run();
-  return { accepted: (inserted.meta?.changes ?? 0) > 0, status: (inserted.meta?.changes ?? 0) > 0 ? 202 : 200 };
+  const document = asRecord(payload);
+  const jsonApiVersion = asRecord(document.jsonapi)?.version;
+  if (jsonApiVersion !== '1.1' || 'errors' in document || !('data' in document)) return { accepted: false, status: 400, error: 'Invalid JSON:API document' };
+  const meta = asRecord(document.meta);
+  const eventName = typeof meta.event === 'string' && meta.event.trim() ? meta.event : undefined;
+  const instanceId = typeof meta.instanceId === 'string' ? meta.instanceId : undefined;
+  if (!eventName || !instanceId) return { accepted: false, status: 400, error: 'Webhook metadata is incomplete' };
+  if (instanceId !== connection.instanceId) return { accepted: false, status: 400, error: 'Webhook instance mismatch' };
+
+  const resources = Array.isArray(document.data) ? document.data : [document.data];
+  if (resources.some((resource) => !isJsonApiResource(resource))) {
+    return { accepted: false, status: 400, error: 'Invalid JSON:API data' };
+  }
+  const safeMeta = Object.fromEntries(Object.entries(meta).filter(([key]) => key !== 'instanceToken'));
+  const statements = resources.map((resource) => {
+    const item = resource as Record<string, unknown>;
+    const resourceId = typeof item.id === 'string' && item.id.trim() ? item.id : undefined;
+    const resourceMeta = asRecord(item.meta);
+    const conversationId = typeof resourceMeta.chat === 'string' && resourceMeta.chat.trim() ? resourceMeta.chat : undefined;
+    const safeDocument = { jsonapi: document.jsonapi, data: item, meta: safeMeta };
+    return db.prepare('INSERT OR IGNORE INTO webhook_events (id, connection_id, event_name, message_id, conversation_id, message_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+      .bind(crypto.randomUUID(), connection.id, eventName, resourceId ?? null, conversationId ?? null, JSON.stringify(safeDocument));
+  });
+  if (!statements.length) return { accepted: true, status: 202 };
+  const results = await db.batch(statements);
+  const inserted = results.reduce((count, result) => count + ((result.meta?.changes ?? 0) > 0 ? 1 : 0), 0);
+  return { accepted: inserted > 0, status: inserted > 0 ? 202 : 200 };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function isJsonApiResource(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const resource = value as Record<string, unknown>;
+  return (resource.type === 'message' || resource.type === 'connection' || resource.type === 'chat')
+    && typeof resource.id === 'string'
+    && resource.id.trim().length > 0;
 }
 
 function randomSecret(): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
+  classifyMcpError,
   MCP_SERVER_INSTRUCTIONS,
   MCP_SERVER_NAME,
   TOOL_ANNOTATIONS,
@@ -13,8 +14,29 @@ import {
   sendTextInput,
   toJsonValue
 } from '../src/lib/mcp';
+import { EvolutionApiError } from '../src/lib/evolution';
 
 describe('MCP tool output schema', () => {
+  it('classifies and sanitizes upstream errors without exposing details', () => {
+    const error = classifyMcpError(new EvolutionApiError(503, 'upstream token=secret-value', { token: 'secret-value', payload: 'private' }), 'search_contacts');
+    expect(error).toMatchObject({
+      code: 'evolution_http_error', status: 503, retryable: true, operation: 'search_contacts',
+      message: 'upstream token=[redacted]',
+    });
+    expect(error.hint).toContain('Retry');
+    expect(JSON.stringify(error)).not.toContain('secret-value');
+    expect(JSON.stringify(error)).not.toContain('private');
+  });
+
+  it('does not mark authentication or request errors as retryable', () => {
+    expect(classifyMcpError(new EvolutionApiError(401, 'not authorized'), 'send_text')).toMatchObject({
+      code: 'evolution_http_error', status: 401, retryable: false, operation: 'send_text',
+    });
+    expect(classifyMcpError(new Error('dataBase64 is invalid'), 'send_media')).toMatchObject({
+      code: 'invalid_base64', status: 400, retryable: false, operation: 'send_media',
+    });
+  });
+
   it('declares data as a JSON value instead of an unconstrained schema', () => {
     const schema = z.toJSONSchema(dataOutput) as {
       properties?: { data?: { $ref?: string } };

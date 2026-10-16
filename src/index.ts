@@ -5,6 +5,7 @@ import { EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
 import { evolutionState, extractPhone } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
+import { authorizationListOptions, listAuthorizations } from './lib/authorizations';
 
 type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
 type ProvisionRequest = { instances?: Array<{ ownerEmail?: string; name?: string; instanceId?: string; phoneNumber?: string }> };
@@ -91,6 +92,43 @@ app.get('/api/connections', async (c) => {
   const user = await ensureUser(c.env.DB, auth);
   return c.json({ connections: await connectionViews(c.env, user.id, true) });
 });
+
+async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  const base = (c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin).replace(/\/$/, '');
+  // Keep the Node-compatible Hono test surface free of the provider's
+  // cloudflare: ESM imports; production Worker routes load it on demand.
+  const [{ getOAuthApi }, { oauthOptions }] = await Promise.all([
+    import('@cloudflare/workers-oauth-provider'),
+    import('./lib/oauth'),
+  ]);
+  const oauth = getOAuthApi(oauthOptions(base), c.env);
+  const userId = encodeURIComponent(user.email);
+  if (!revokeId) {
+    try {
+      const page = await listAuthorizations(oauth, userId, authorizationListOptions(c.req.query('cursor'), c.req.query('limit')));
+      await audit(c.env.DB, { userId: user.id, operation: 'authorization_list', outcome: 'success' });
+      return c.json(page);
+    } catch (error) {
+      await audit(c.env.DB, { userId: user.id, operation: 'authorization_list', outcome: 'failure', metadata: { status: 502, message: safeErrorMessage(error, 'provider error') } });
+      return c.json({ error: 'Não foi possível carregar as autorizações.' }, 502);
+    }
+  }
+  try {
+    if (!/^[A-Za-z0-9._~-]{1,256}$/.test(revokeId)) return c.json({ error: 'Autorização inválida.' }, 400);
+    await oauth.revokeGrant(revokeId, userId);
+    await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'success', metadata: { grantId: revokeId } });
+    return c.json({ ok: true });
+  } catch (error) {
+    await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'failure', metadata: { grantId: revokeId, status: 502, message: safeErrorMessage(error, 'provider error') } });
+    return c.json({ error: 'Não foi possível revogar esta autorização.' }, 502);
+  }
+}
+
+app.get('/api/authorizations', (c) => authorizationApi(c));
+app.delete('/api/authorizations/:id', (c) => authorizationApi(c, c.req.param('id')));
+app.post('/api/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.param('id')));
 
 app.post('/api/connections/provision', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;

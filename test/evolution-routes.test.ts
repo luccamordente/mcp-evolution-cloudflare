@@ -51,6 +51,30 @@ describe('Evolution Go route contracts', () => {
     expect(attempts).toBe(3);
   });
 
+  it('starts pairing after logout and polls until a QR code is available', async () => {
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    let qrAttempts = 0;
+    const client = new EvolutionGoAdminClient({ baseUrl: 'https://evolution.invalid', globalApiKey: 'global-secret', fetcher: async (request, init) => {
+      const url = new URL(String(request));
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ path: url.pathname, method: String(init?.method ?? 'GET'), body });
+      if (url.pathname === '/instance/connect') return Response.json({ message: 'success' });
+      if (url.pathname === '/instance/qr') {
+        qrAttempts += 1;
+        if (qrAttempts < 2) return Response.json({ error: 'no QR code available' }, { status: 400 });
+        return Response.json({ message: 'success', data: { qrcode: 'a'.repeat(120) } });
+      }
+      return Response.json({ error: 'unexpected route' }, { status: 500 });
+    } });
+
+    await expect(client.renewQr('instance-secret', { subscribe: ['MESSAGE', 'CONNECTION'], retryDelayMs: 0 })).resolves.toMatchObject({ data: { qrcode: expect.any(String) } });
+    expect(calls).toEqual([
+      { path: '/instance/connect', method: 'POST', body: { subscribe: ['MESSAGE', 'CONNECTION'], immediate: true } },
+      { path: '/instance/qr', method: 'GET' },
+      { path: '/instance/qr', method: 'GET' },
+    ]);
+  });
+
   it('matches Evolution Go FullName and Jid, and treats whitespace as the whole book', async () => {
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored', instanceToken: 'secret', fetcher: async () => Response.json({
       data: [

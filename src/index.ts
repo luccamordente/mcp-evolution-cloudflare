@@ -174,8 +174,10 @@ app.post('/api/connections/:id/qr', async (c) => {
   try {
     const token = await revealConnectionToken(c.env.DB, c.env.TOKEN_ENCRYPTION_KEY, connection);
     const admin = new EvolutionGoAdminClient({ baseUrl: c.env.EVOLUTION_BASE_URL, globalApiKey: c.env.EVOLUTION_GLOBAL_API_KEY ?? '' });
-    await admin.reconnectInstance(token);
-    const qr = await admin.qr(token);
+    const qr = await admin.renewQr(token, {
+      subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'],
+      immediate: true,
+    });
     await updateConnection(c.env.DB, user.id, connection.id, { status: 'active', connectionState: 'qr' });
     await audit(c.env.DB, { userId: user.id, connectionId: connection.id, operation: 'connection_qr_refresh', outcome: 'success' });
     return c.json({ qr: qrDataUrl(qr), expiresIn: extractQrExpiry(qr) ?? 30 });

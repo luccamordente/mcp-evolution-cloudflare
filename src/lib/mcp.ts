@@ -1,8 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { AuthenticatedUser, Env } from '../types';
-import { EvolutionGoAdminClient, EvolutionGoClient, EvolutionApiError } from './evolution';
-import { audit, ensureUser, getConnection, resolveConnection, revealConnectionToken } from './db';
+import { EvolutionGoClient, EvolutionApiError } from './evolution';
+import { audit, ensureUser, getConnection, listConnections, resolveConnection, revealConnectionToken } from './db';
 
 const pageInput = {
   cursor: z.string().optional().describe('Opaque cursor returned by a previous page; omit it for the first page.'),
@@ -95,16 +95,6 @@ function auditFailure(error: unknown): { error: string; status?: number } {
   return { error: error instanceof Error ? error.message : 'Unexpected error' };
 }
 
-function redactInstances(payload: unknown): unknown[] {
-  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-  const values = Array.isArray(payload) ? payload : Array.isArray(root.data) ? root.data : [];
-  return values.map((value) => {
-    if (!value || typeof value !== 'object') return value;
-    const { token: _token, webhook: _webhook, qrcode: _qrcode, ...safe } = value as Record<string, unknown>;
-    return safe;
-  });
-}
-
 export async function createMcpServer(env: Env, user: AuthenticatedUser): Promise<McpServer> {
   const ensured = await ensureUser(env.DB, user);
   const server = new McpServer(
@@ -133,8 +123,10 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   };
 
   server.registerTool('list_connections', { title: 'List WhatsApp connections', description: TOOL_DESCRIPTIONS.list_connections, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async () => {
-    const payload = await new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' }).listInstances();
-    return ok(redactInstances(payload));
+    // The administrative /instance/all route is global to the Evolution server.
+    // Use the authenticated user's D1-owned connections as the source of truth
+    // so one user's MCP token can never enumerate another user's instances.
+    return ok(await listConnections(env.DB, ensured.id));
   });
   server.registerTool('connection_status', { title: 'Connection status', description: TOOL_DESCRIPTIONS.connection_status, inputSchema: z.object(connectionInput), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId }) => read('connection_status', connectionId, (c) => c.status()));
   server.registerTool('search_contacts', { title: 'Search contacts', description: TOOL_DESCRIPTIONS.search_contacts, inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200).describe('Name or phone fragment to search for.'), ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));

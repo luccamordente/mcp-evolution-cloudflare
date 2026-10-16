@@ -25,6 +25,8 @@ describe('connections workspace page', () => {
     expect(html).toContain('Number(value) * 1000');
     expect(html).toContain("const refreshed = await loadAuthorizations()");
     expect(html).toContain("ainda aparece como ativa");
+    expect(html).toContain("const more = state.authorizationCursor");
+    expect(html).toContain("Nenhuma autorização ativa</strong><p>Autorize um cliente MCP para vê-lo nesta lista.</p></div>' + more");
     expect(html).not.toContain('id="dashboard-add"');
     expect(html).not.toContain('id="activity-nav"');
     expect(html).not.toContain('class="notice"');

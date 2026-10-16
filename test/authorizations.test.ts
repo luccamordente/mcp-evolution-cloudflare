@@ -38,8 +38,8 @@ describe('OAuth authorization summaries', () => {
     vi.useRealTimers();
   });
 
-  it('clamps pagination input and bounds opaque cursors', () => {
-    expect(authorizationListOptions('x'.repeat(600), '-4')).toEqual({ limit: 1, cursor: 'x'.repeat(512) });
+  it('clamps pagination input while preserving opaque cursors', () => {
+    expect(authorizationListOptions('x'.repeat(600), '-4')).toEqual({ limit: 1, cursor: 'x'.repeat(600) });
     expect(authorizationListOptions(undefined, '999')).toEqual({ limit: 50 });
     expect(authorizationListOptions(undefined, 'invalid')).toEqual({ limit: 25 });
   });

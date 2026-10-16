@@ -62,5 +62,5 @@ export async function listAuthorizations(oauth: Pick<OAuthHelpers, 'listUserGran
 export function authorizationListOptions(cursor: string | undefined, rawLimit: string | undefined): ListOptions {
   const parsed = rawLimit ? Number(rawLimit) : 25;
   const limit = Number.isFinite(parsed) ? Math.min(Math.max(Math.floor(parsed), 1), 50) : 25;
-  return { limit, ...(cursor ? { cursor: cursor.slice(0, 512) } : {}) };
+  return { limit, ...(cursor ? { cursor } : {}) };
 }

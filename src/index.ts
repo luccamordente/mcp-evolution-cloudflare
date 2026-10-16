@@ -118,10 +118,10 @@ async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
   try {
     if (!isValidAuthorizationId(revokeId)) return c.json({ error: 'Autorização inválida.' }, 400);
     await oauth.revokeGrant(revokeId, userId);
-    await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'success', metadata: { grantId: revokeId } });
+    await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'success' });
     return c.json({ ok: true });
   } catch (error) {
-    await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'failure', metadata: { grantId: revokeId, status: 502, message: safeErrorMessage(error, 'provider error') } });
+    await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'failure', metadata: { status: 502, message: safeErrorMessage(error, 'provider error') } });
     return c.json({ error: 'Não foi possível revogar esta autorização.' }, 502);
   }
 }

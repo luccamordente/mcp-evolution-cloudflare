@@ -66,4 +66,46 @@ describe('list_connections ownership', () => {
     expect(fetcher).not.toHaveBeenCalled();
     fetcher.mockRestore();
   });
+
+  it('does not mask Connection not found with an audit foreign-key error', async () => {
+    let auditConnectionId: unknown = 'not-called';
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...values: unknown[]) {
+            return {
+              async first<T>() {
+                if (sql.startsWith('SELECT id, email FROM users')) {
+                  return { id: 'db-user-a', email: values[0] } as T;
+                }
+                return undefined;
+              },
+              async run() {
+                if (sql.startsWith('INSERT INTO audit_log')) {
+                  auditConnectionId = values[2];
+                  if (auditConnectionId !== null) throw new Error('D1_ERROR: FOREIGN KEY constraint failed');
+                }
+                return { meta: { changes: 1 } };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const server = await createMcpServer(
+      {
+        DB: db as unknown as D1Database,
+        TOKEN_ENCRYPTION_KEY: 'test-key',
+        EVOLUTION_BASE_URL: 'https://evolution.invalid',
+      } as never,
+      { id: 'claim-user-a', email: 'a@example.com', claims: {} },
+    );
+
+    const tool = (server as unknown as { _registeredTools: Record<string, { handler: (args: unknown) => Promise<unknown> }> })._registeredTools.connection_status;
+    const result = await tool.handler({ connectionId: 'c770126e-773a-408f-9405-89561d05447c' });
+
+    expect(result).toMatchObject({ isError: true, content: [{ text: 'Connection not found' }] });
+    expect(auditConnectionId).toBeNull();
+  });
 });

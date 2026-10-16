@@ -109,7 +109,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   }
 
   const read = async <T>(operation: string, connectionId: string | undefined, fn: (client: EvolutionGoClient) => Promise<T>) => {
-    let resolvedConnectionId = connectionId;
+    let resolvedConnectionId: string | undefined;
     try {
       const { client, connection } = await clientFor(connectionId);
       resolvedConnectionId = connection.id;
@@ -117,7 +117,11 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
       return ok(data);
     } catch (error) {
-      await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
+      try {
+        await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
+      } catch {
+        // An audit failure must not replace the operation error being reported.
+      }
       return fail(error);
     }
   };
@@ -134,7 +138,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   server.registerTool('list_messages', { title: 'Search messages', description: TOOL_DESCRIPTIONS.list_messages, inputSchema: listMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, text, limit }) => read('list_messages', connectionId, (c) => c.listMessages(text, limit)));
 
   const send = async (operation: string, connectionId: string | undefined, fn: (client: EvolutionGoClient) => Promise<unknown>) => {
-    let resolvedConnectionId = connectionId;
+    let resolvedConnectionId: string | undefined;
     try {
       const { client, connection } = await clientFor(connectionId);
       resolvedConnectionId = connection.id;
@@ -142,7 +146,11 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
       return ok(result);
     } catch (error) {
-      await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
+      try {
+        await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
+      } catch {
+        // An audit failure must not replace the operation error being reported.
+      }
       return fail(error);
     }
   };

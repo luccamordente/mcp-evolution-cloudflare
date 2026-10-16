@@ -14,6 +14,9 @@ describe('connections workspace page', () => {
     expect(html).toContain('luccamordente@gmail.com');
     expect(html).toContain('WaPilot — verde-carvao, inline');
     expect(html).toContain("window.location.hash === '#onboarding'");
+    expect(html).toContain("else if (window.location.hash === '#onboarding') showOnboarding(current)");
+    expect(html).toContain("if (connection.qr) setQrImage(connection.qr, connection.qrExpiresIn); startPolling();");
+    expect(html).not.toContain("if (connection.qr) setQrImage(connection.qr, connection.qrExpiresIn); else renewQr(); startPolling();");
     expect(html).toContain('Autorizações');
     expect(html).toContain('authorization-list');
     expect(html).toContain('/api/authorizations');

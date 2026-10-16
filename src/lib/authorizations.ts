@@ -16,6 +16,12 @@ export interface AuthorizationPage {
   nextCursor?: string;
 }
 
+/** Provider grant identifiers are opaque, but constrain them before passing
+ * them into a revocation call or audit record. */
+export function isValidAuthorizationId(value: string): boolean {
+  return /^[A-Za-z0-9._~-]{1,256}$/.test(value);
+}
+
 const FALLBACK_CLIENT_NAME = 'Cliente OAuth';
 
 /** Convert the provider's public grant summary into the deliberately small

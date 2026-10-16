@@ -5,7 +5,7 @@ import { EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
 import { evolutionState, extractPhone } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
-import { authorizationListOptions, listAuthorizations } from './lib/authorizations';
+import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
 
 type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
 type ProvisionRequest = { instances?: Array<{ ownerEmail?: string; name?: string; instanceId?: string; phoneNumber?: string }> };
@@ -116,7 +116,7 @@ async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
     }
   }
   try {
-    if (!/^[A-Za-z0-9._~-]{1,256}$/.test(revokeId)) return c.json({ error: 'Autorização inválida.' }, 400);
+    if (!isValidAuthorizationId(revokeId)) return c.json({ error: 'Autorização inválida.' }, 400);
     await oauth.revokeGrant(revokeId, userId);
     await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'success', metadata: { grantId: revokeId } });
     return c.json({ ok: true });

@@ -123,6 +123,13 @@ const PAGE = String.raw`<!doctype html>
     .activity-item strong { display:block; font-size:14px; }
     .activity-item > div span { display:block; color:var(--muted); font-size:13px; }
     .activity-time { color:var(--muted); font-size:12px; }
+    .authorizations { margin-top:42px; padding-top:33px; border-top:1px solid var(--line); }
+    .authorization-list { display:grid; gap:10px; margin:0; padding:0; list-style:none; }
+    .authorization-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; align-items:center; padding:16px 18px; background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:0 5px 16px rgba(16,32,25,.035); }
+    .authorization-row strong { display:block; font-size:14px; }
+    .authorization-row p { margin:4px 0 0; color:var(--muted); font-size:13px; line-height:1.4; }
+    .authorization-row .text-button { justify-self:end; color:var(--red); }
+    .authorization-state { padding:24px; color:var(--muted); background:var(--surface); border:1px solid var(--line); border-radius:14px; }
     .empty { padding:40px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); text-align:center; box-shadow:var(--shadow); }
     .empty h2 { font-size:30px; }
     .empty p { max-width:460px; margin:12px auto 22px; color:var(--muted); line-height:1.55; }
@@ -184,6 +191,10 @@ const PAGE = String.raw`<!doctype html>
       <section class="view" id="dashboard-view" aria-labelledby="dashboard-title">
         <div class="page-heading"><div><p class="eyebrow">Dashboard da conexão</p><h1 id="dashboard-title">Seu WhatsApp está pronto para trabalhar.</h1></div></div>
         <div id="dashboard-content"></div>
+        <section class="authorizations" aria-labelledby="authorizations-title">
+          <div class="section-heading"><div><h3 id="authorizations-title">Autorizações</h3><p class="lede">Autorizações registradas no OAuth. Isso não indica presença online nem garante que o cliente ainda conserva o refresh token.</p></div><button class="text-button" id="refresh-authorizations" type="button">Atualizar →</button></div>
+          <div id="authorization-list" class="authorization-list" aria-live="polite"><div class="authorization-state">Carregando autorizações…</div></div>
+        </section>
       </section>
       <section class="view" id="onboarding-view" hidden aria-labelledby="onboarding-title">
         <div class="onboarding-grid">
@@ -209,13 +220,18 @@ const PAGE = String.raw`<!doctype html>
       const contextMenu = document.querySelector('#context-menu');
       const contextTrigger = document.querySelector('#context-trigger');
       const contextOptions = document.querySelector('#context-options');
+      const authorizationList = document.querySelector('#authorization-list');
       const toast = document.querySelector('#toast');
-      const state = { connections: [], activeId: null, onboardingId: null, onboardingState: 'confirm', timer: null, poll: null, renewal: null, renewing: false, toastTimer: null };
+      const state = { connections: [], activeId: null, onboardingId: null, onboardingState: 'confirm', timer: null, poll: null, renewal: null, renewing: false, toastTimer: null, authorizations: [], authorizationCursor: null };
       const labels = { connected: 'Conectado', qr: 'Aguardando QR', expired: 'QR expirado', provisioning: 'Provisionando', offline: 'Offline', error: 'Erro de conexão' };
       const initials = (value) => (String(value || '—').trim().split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || '—');
       const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[character] || character);
       const showToast = (message) => { toast.textContent = message; toast.classList.add('is-visible'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2800); };
       const api = async (path, options) => { const response = await fetch(path, Object.assign({ headers: { 'Accept':'application/json', 'Content-Type':'application/json' }, credentials:'same-origin' }, options || {})); const text = await response.text(); let body = {}; try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { error: text || 'Resposta inválida' }; } if (!response.ok) throw new Error(body.error || 'Não foi possível concluir a operação.'); return body; };
+      const formatDate = (value) => { if (value === undefined || value === null || value === '') return 'Sem expiração'; const numeric = typeof value === 'number' || (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value)); const date = new Date(numeric ? Number(value) * 1000 : value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('pt-BR', { dateStyle:'medium', timeStyle:'short' }); };
+      const renderAuthorizations = (error) => { if (error) { authorizationList.innerHTML = '<div class="authorization-state"><strong>Não foi possível carregar as autorizações.</strong><p>' + escapeHtml(error.message || 'Tente novamente em alguns instantes.') + '</p><button class="primary-btn" type="button" data-auth-retry>Tentar novamente</button></div>'; return; } const more = state.authorizationCursor ? '<button class="secondary" type="button" data-auth-more>Carregar mais</button>' : ''; if (!state.authorizations.length) { authorizationList.innerHTML = '<div class="authorization-state"><strong>Nenhuma autorização ativa</strong><p>Autorize um cliente MCP para vê-lo nesta lista.</p></div>' + more; return; } authorizationList.innerHTML = state.authorizations.map((grant) => { const label = grant.clientName || grant.client_name || grant.clientId || grant.client_id || 'Cliente OAuth'; const scopes = Array.isArray(grant.scopes) ? grant.scopes.join(', ') : String(grant.scopes || 'Escopos não informados'); const hint = grant.redirectHost || grant.redirect_host || grant.installationHint || grant.installation_hint || grant.resource || 'Recurso MCP'; const grantId = grant.grantId ?? grant.grant_id ?? grant.id; return '<article class="authorization-row" data-grant="' + escapeHtml(grantId) + '"><div><strong>' + escapeHtml(label) + '</strong><p>Escopos: ' + escapeHtml(scopes) + '</p><p>Criada em ' + escapeHtml(formatDate(grant.createdAt ?? grant.created_at)) + ' · Expira: ' + escapeHtml(formatDate(grant.expiresAt ?? grant.expires_at)) + ' · ' + escapeHtml(hint) + '</p></div><button class="text-button" type="button" data-revoke="' + escapeHtml(grantId) + '">Desconectar</button></article>'; }).join('') + more; };
+      const loadAuthorizations = async (cursor) => { if (!cursor) { authorizationList.innerHTML = '<div class="authorization-state">Carregando autorizações…</div>'; state.authorizations = []; } try { const result = await api('/api/authorizations' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : '')); const page = result.authorizations || result.grants || []; state.authorizations = cursor ? state.authorizations.concat(page) : page; state.authorizationCursor = result.nextCursor || null; renderAuthorizations(); return true; } catch (error) { renderAuthorizations(error); return false; } };
+      const revokeAuthorization = async (grantId) => { const button = Array.from(authorizationList.querySelectorAll('[data-revoke]')).find((item) => item.dataset.revoke === grantId); if (button) button.disabled = true; try { await api('/api/authorizations/' + encodeURIComponent(grantId), { method:'DELETE' }); const refreshed = await loadAuthorizations(); if (!refreshed || state.authorizations.some((grant) => (grant.grantId || grant.grant_id || grant.id) === grantId)) throw new Error('A autorização ainda aparece como ativa.'); showToast('Autorização desconectada.'); } catch (error) { if (button) button.disabled = false; showToast(error.message || 'Não foi possível desconectar a autorização.'); } };
       const active = () => state.connections.find((item) => item.id === state.activeId) || state.connections.find((item) => item.isDefault) || state.connections[0];
       const updateContextPosition = () => { const rect = contextTrigger.getBoundingClientRect(); contextMenu.style.setProperty('--context-menu-top', (rect.bottom + 9) + 'px'); contextMenu.style.setProperty('--context-menu-left', rect.left + 'px'); contextMenu.style.setProperty('--context-menu-width', rect.width + 'px'); };
       const setContextOpen = (open) => { contextTrigger.setAttribute('aria-expanded', String(open)); contextMenu.classList.toggle('is-open', open); if (open) updateContextPosition(); try { if (open && typeof contextMenu.showPopover === 'function' && !contextMenu.matches(':popover-open')) contextMenu.showPopover(); if (!open && typeof contextMenu.hidePopover === 'function' && contextMenu.matches(':popover-open')) contextMenu.hidePopover(); } catch (_) { contextMenu.hidden = !open; } };
@@ -251,8 +267,11 @@ const PAGE = String.raw`<!doctype html>
       document.querySelector('#retry-provision').addEventListener('click', provision);
       document.querySelector('#back-dashboard').addEventListener('click', (event) => { event.preventDefault(); showDashboard(); });
       document.querySelector('.brand').addEventListener('click', (event) => { event.preventDefault(); showDashboard(); });
+      document.querySelector('#refresh-authorizations').addEventListener('click', loadAuthorizations);
+      authorizationList.addEventListener('click', (event) => { const target = event.target.closest('button'); if (!target) return; if (target.dataset.revoke) revokeAuthorization(target.dataset.revoke); if (target.dataset.authRetry) loadAuthorizations(); if (target.dataset.authMore) loadAuthorizations(state.authorizationCursor); });
       dashboardContent.addEventListener('click', (event) => { const target = event.target.closest('button'); if (!target) return; if (target.dataset.refresh) load(true); if (target.dataset.open) { const connection = state.connections.find((item) => item.id === target.dataset.open); if (connection && connection.state === 'connected') showToast(connection.friendlyName + ' está conectado e pronto para uso.'); else if (connection) showOnboarding(connection); } if (target.dataset.activity) showToast('A atividade detalhada será disponibilizada nesta conexão.'); if (target.dataset.default) setDefault(target.dataset.default); });
       load(false);
+      loadAuthorizations();
     })();
   </script>
 </body>

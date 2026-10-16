@@ -114,6 +114,7 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       metadata: { email: user.email },
       scope: approved.request.scope,
       props: { user },
+      revokeExistingGrants: false,
     });
     return new Response(null, { status: 302, headers: { ...Object.fromEntries(approved.headers), Location: completed.redirectTo, 'Cache-Control': 'no-store' } });
   } catch (error) {

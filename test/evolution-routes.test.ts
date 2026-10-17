@@ -60,7 +60,7 @@ describe('Evolution Go route contracts', () => {
 
     expect(calls).toEqual([
       { url: 'https://evolution.invalid/instance/info/instance-1', method: 'GET', apiKey: 'global-secret' },
-      { url: 'https://evolution.invalid/user/avatar', method: 'POST', apiKey: 'instance-secret', body: { data: { type: 'chat', id: '5511999999999' } } },
+      { url: 'https://evolution.invalid/user/avatar', method: 'POST', apiKey: 'instance-secret', body: { data: { type: 'chat', id: '5511999999999', attributes: { preview: true } } } },
     ]);
   });
 

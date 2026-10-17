@@ -241,7 +241,7 @@ export class EvolutionGoAdminClient {
     return this.request('/user/avatar', token, {
       method: 'POST',
       timeoutMs: Math.min(this.timeoutMs, AVATAR_REQUEST_TIMEOUT_MS),
-      body: jsonApiBody({ type: 'chat', id: number }),
+      body: jsonApiBody({ type: 'chat', id: number, attributes: { preview: true } }),
     });
   }
 

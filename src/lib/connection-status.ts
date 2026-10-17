@@ -40,20 +40,31 @@ export function extractPhone(payload: unknown): string | undefined {
   if (!resource) return undefined;
   for (const wanted of ['phone', 'phoneNumber', 'number', 'ownerJid', 'jid', 'myJid']) {
     const value = resource.attributes[wanted] ?? resource.meta?.[wanted];
-    if (typeof value === 'string' && value.replace(/\D/g, '').length >= 8) return value.replace(/@.*$/, '');
+    const phone = normalizePhoneNumber(typeof value === 'string' ? value : undefined);
+    if (phone) return phone;
   }
   return undefined;
 }
 
-/** Build the full user JID accepted by Evolution Go's profile endpoint. */
+/** Normalize an Evolution Go account JID to the user-facing phone number. */
+export function normalizePhoneNumber(value: string | undefined): string | undefined {
+  const candidate = value?.trim();
+  if (!candidate) return undefined;
+  const [rawUser] = candidate.split('@', 2);
+  const user = rawUser.replace(/^\+/, '').split(':', 1)[0];
+  if (!/^\d+$/.test(user) || user.length < 8) return undefined;
+  return user;
+}
+
+/** Build the regular user JID accepted by Evolution Go's profile endpoint. */
 export function avatarJidFromPhone(value: string | undefined): string | undefined {
   const candidate = value?.trim();
   if (!candidate) return undefined;
-  const [rawUser, rawServer] = candidate.split('@', 2);
-  const user = rawUser.replace(/^\+/, '');
-  if (!/^\d+(?::\d+)?$/.test(user) || user.replace(/\D/g, '').length < 8) return undefined;
-  const server = rawServer?.trim() || 's.whatsapp.net';
-  return `${user}@${server}`;
+  const [, rawServer] = candidate.split('@', 2);
+  const server = rawServer?.trim().toLowerCase();
+  if (server && server !== 's.whatsapp.net') return undefined;
+  const user = normalizePhoneNumber(candidate);
+  return user ? `${user}@s.whatsapp.net` : undefined;
 }
 
 function extractStringByKeys(payload: unknown, wantedKeys: string[]): string | undefined {

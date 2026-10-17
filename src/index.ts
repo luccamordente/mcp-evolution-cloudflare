@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
 import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
-import { avatarJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone } from './lib/connection-status';
+import { avatarJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
 import { adminPage } from './ui/admin';
@@ -328,10 +328,10 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
       const admin = new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' });
       const result = await admin.status(token);
       const state = evolutionState(result);
-      let phoneNumber = extractPhone(result) ?? connection.phoneNumber;
+      let phoneNumber = extractPhone(result) ?? normalizePhoneNumber(connection.phoneNumber);
       if (!phoneNumber && env.EVOLUTION_GLOBAL_API_KEY) {
         try {
-          phoneNumber = extractPhone(await admin.instanceInfo(connection.instanceId));
+          phoneNumber = extractPhone(await admin.instanceInfo(connection.instanceId)) ?? phoneNumber;
         } catch {
           // The admin metadata route is only a fallback for providers that do
           // not include the account JID in /instance/status.

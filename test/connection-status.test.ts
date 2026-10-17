@@ -31,7 +31,7 @@ describe('Evolution profile response helpers', () => {
           name: 'Minha Conta',
         },
         meta: {
-          jid: '5511999999999@s.whatsapp.net',
+          jid: '5511999999999:21@s.whatsapp.net',
         },
       },
     };
@@ -39,10 +39,10 @@ describe('Evolution profile response helpers', () => {
     expect(extractPhone(payload)).toBe('5511999999999');
   });
 
-  it('preserves a device JID when preparing the avatar request', () => {
-    expect(avatarJidFromPhone('553187959283:21')).toBe('553187959283:21@s.whatsapp.net');
+  it('normalizes a device JID to the regular account JID for the avatar request', () => {
+    expect(avatarJidFromPhone('553187959283:21')).toBe('553187959283@s.whatsapp.net');
     expect(avatarJidFromPhone('5511999999999@s.whatsapp.net')).toBe('5511999999999@s.whatsapp.net');
-    expect(avatarJidFromPhone('+5511999999999')).toBe('5511999999999@s.whatsapp.net');
+    expect(avatarJidFromPhone('+5511999999999:21')).toBe('5511999999999@s.whatsapp.net');
   });
 
   it('extracts the avatar URL from the Evolution avatar envelope', () => {

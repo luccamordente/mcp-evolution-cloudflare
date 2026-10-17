@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
 import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
-import { avatarNumberFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
+import { avatarLookupJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
 import { adminPage } from './ui/admin';
@@ -21,32 +21,35 @@ async function requireAuth(c: any): Promise<{ info: import('@modelcontextprotoco
   try { return await authenticate(c.req.raw, c.env); } catch (error) { return authResponse(error instanceof AuthError ? error : new AuthError(500, 'Authentication failed')); }
 }
 
-/** Browser UI/API authentication is supplied by the path-scoped Cloudflare
- * Access application. MCP requests never use this helper; they are protected
- * by OAuthProvider in src/worker.ts. */
-async function requireUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
+/** Browser routes use the dashboard's path-scoped Cloudflare Access
+ * application. MCP requests never use this helper; they are protected by
+ * OAuthProvider in src/worker.ts. The deployed Access application also covers
+ * /admin so both surfaces receive the same audience and session. */
+async function requireAccessUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
   try {
     return await authenticateAccessRequest(c.req.raw, c.env);
   } catch (accessError) {
-    // Keep bearer access useful for API clients while preferring Access for the
-    // browser. The Access assertion is never accepted at /mcp.
-    if (c.req.header('authorization')) {
-      try { return (await authenticate(c.req.raw, c.env)).user; } catch (oauthError) {
-        return authResponse(oauthError instanceof AuthError ? oauthError : new AuthError(500, 'Authentication failed'));
-      }
-    }
     return authResponse(accessError instanceof AuthError ? accessError : new AuthError(500, 'Authentication failed'));
   }
+}
+
+async function requireUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
+  const access = await requireAccessUiAuth(c);
+  if (!(access instanceof Response)) return access;
+  // Keep bearer access useful for API clients while preferring Access for the
+  // browser. The Access assertion is never accepted at /mcp.
+  if (c.req.header('authorization')) {
+    try { return (await authenticate(c.req.raw, c.env)).user; } catch (oauthError) {
+      return authResponse(oauthError instanceof AuthError ? oauthError : new AuthError(500, 'Authentication failed'));
+    }
+  }
+  return access;
 }
 
 /** Administrative browser routes require the Access assertion itself. Unlike
  * the general dashboard helper, they do not accept bearer compatibility. */
 async function requireAdminUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
-  try {
-    return await authenticateAccessRequest(c.req.raw, c.env);
-  } catch (error) {
-    return authResponse(error instanceof AuthError ? error : new AuthError(500, 'Authentication failed'));
-  }
+  return requireAccessUiAuth(c);
 }
 
 app.get('/', (c) => c.html(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Evolution Go · MCP</title><body><main><h1>Evolution Go · MCP</h1><p>Interface protegida para cadastro local de conexões WhatsApp.</p><p>Use <code>/mcp</code> com OAuth 2.1/PKCE. A configuração completa exige autenticação Cloudflare Access.</p></main></body></html>`));
@@ -340,10 +343,10 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
       view.state = state;
       view.phoneNumber = phoneNumber;
       view.displayName = extractDisplayName(result) ?? connection.friendlyName;
-      const avatarNumber = avatarNumberFromPhone(phoneNumber);
-      if (state === 'connected' && avatarNumber) {
+      const avatarJid = avatarLookupJidFromPhone(phoneNumber);
+      if (state === 'connected' && avatarJid) {
         try {
-          const avatarPayload = await admin.avatar(token, avatarNumber);
+          const avatarPayload = await admin.avatar(token, avatarJid);
           view.avatarUrl = extractAvatarUrl(avatarPayload);
           console.info(JSON.stringify({ event: 'profile_avatar_lookup', outcome: 'success', hasUrl: Boolean(view.avatarUrl) }));
         } catch (error) {

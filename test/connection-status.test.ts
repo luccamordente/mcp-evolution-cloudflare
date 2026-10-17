@@ -40,9 +40,9 @@ describe('Evolution profile response helpers', () => {
   });
 
   it('normalizes a device JID to the canonical account JID for the avatar request', () => {
-    expect(avatarLookupJidFromPhone('553187959283:21')).toBe('+553187959283@s.whatsapp.net');
-    expect(avatarLookupJidFromPhone('5511999999999@s.whatsapp.net')).toBe('+5511999999999@s.whatsapp.net');
-    expect(avatarLookupJidFromPhone('+5511999999999:21')).toBe('+5511999999999@s.whatsapp.net');
+    expect(avatarLookupJidFromPhone('553187959283:21')).toBe('553187959283@s.whatsapp.net');
+    expect(avatarLookupJidFromPhone('5511999999999@s.whatsapp.net')).toBe('5511999999999@s.whatsapp.net');
+    expect(avatarLookupJidFromPhone('+5511999999999:21')).toBe('5511999999999@s.whatsapp.net');
   });
 
   it('extracts the avatar URL from the Evolution avatar envelope', () => {

@@ -10,7 +10,7 @@ As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID i
 | `connection_status` | Verificar a disponibilidade atual de uma conexão | Descobrir todas as conexões | Estado atual da conexão escolhida. |
 | `search_contacts` | Encontrar uma pessoa ou número antes de uma mensagem | Pesquisar mensagens | Contatos paginados filtrados por nome ou telefone. |
 | `list_groups` | Encontrar grupos e seus metadados básicos | Enviar uma mensagem sem confirmar o destino | Grupos paginados, com participantes básicos quando disponíveis. |
-| `list_messages` | Pesquisar mensagens capturadas ou retidas | Assumir que todo o histórico está disponível ou obter uma lista completa de conversas | Mensagens paginadas, com filtro textual opcional; a cobertura depende dos eventos retidos pelo serviço. |
+| `list_messages` | Pesquisar mensagens retidas na conexão ou em uma conversa específica | Assumir que todo o histórico está disponível ou obter uma lista completa de conversas | Até 25 mensagens por padrão (máximo 50), com filtros opcionais de conversa e texto; a cobertura depende da retenção no serviço. |
 | `send_text` | Enviar uma nova mensagem de texto | Responder citando uma mensagem existente | Resultado estruturado do envio; é uma ação externa e deve ter destino e texto finais. |
 | `reply_to_message` | Responder citando uma mensagem conhecida | Enviar uma mensagem nova sem referência | Resultado estruturado; requer destino, texto e `messageId` da mensagem citada. |
 | `send_media` | Enviar imagem, documento, áudio ou vídeo em base64 | Enviar apenas texto ou conteúdo ainda indisponível | Resultado estruturado; aceita legenda, nome de arquivo e referência opcional; respeita o limite de mídia configurado. |
@@ -23,6 +23,18 @@ As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID i
 4. Use `list_messages` somente para a história capturada ou retida; um resultado vazio é inconclusivo.
 5. Use `send_text` para uma nova mensagem, `reply_to_message` para uma citação e `send_media` para anexos.
 6. Antes de uma ação de envio, confirme o destinatário e o conteúdo quando a autorização do usuário não for explícita.
+
+## Consulta de mensagens
+
+Em `list_messages`, `connectionId` seleciona a conta WhatsApp do usuário; omita-o para usar a conexão padrão. `conversationId` seleciona um contato ou grupo dentro dessa conta e aceita uma string com número de contato (por exemplo, `5511999999999`), JID individual (`5511999999999@s.whatsapp.net`) ou JID de grupo (`120363123456789@g.us`). O campo é opcional, remove espaços nas extremidades e exige entre 1 e 200 caracteres após essa remoção. String vazia, somente espaços, `null` e valores de outros tipos são rejeitados.
+
+Combine `conversationId`, `text` e `limit` para pesquisar um assunto na conversa. Sem `text`, a consulta retorna as mensagens retidas mais recentes da conversa; sem `conversationId`, preserva a busca geral na conexão. Por exemplo:
+
+```json
+{ "conversationId": "120363123456789@g.us", "text": "reunião", "limit": 10 }
+```
+
+O cliente consulta diretamente `GET /message/search`, enviando a conversa como `chat`, o texto como `q` e o limite como `limit`. O Evolution Go aplica o filtro de conversa na consulta persistida, antes do limite; o Worker não filtra uma página geral posteriormente. A ordenação e o envelope de resposta permanecem os mesmos. A busca depende da retenção do Evolution Go, incluindo `DATABASE_SAVE_MESSAGES=true`, e não representa todo o histórico do WhatsApp: um resultado vazio é inconclusivo.
 
 ## Campos compartilhados
 

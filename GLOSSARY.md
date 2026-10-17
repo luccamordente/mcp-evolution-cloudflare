@@ -11,3 +11,31 @@ _Avoid_: conexão ativa, primeira conexão, conexão principal
 **Identificador de conexão**:
 O UUID interno que identifica uma conexão pertencente ao usuário e permite selecioná-la explicitamente em uma chamada MCP.
 _Avoid_: token da instância, nome da instância, ID da instância
+
+## Administração
+
+**Administrador operacional**:
+Pessoa autorizada a consultar a visão agregada de usuários, conexões e autorizações do serviço. Nesta decisão, Lucca e Heitor exercem esse papel com as mesmas permissões de leitura.
+
+**Painel administrativo**:
+Superfície de leitura usada por administradores operacionais para observar o estado agregado do serviço. Não inclui criação de instâncias, revogação de autorizações ou alterações nas conexões.
+
+**Snapshot administrativo**:
+Leitura coerente produzida por uma atualização manual do painel, contendo os dados disponíveis naquele momento e indicando individualmente fontes que falharam.
+
+**Estado live**:
+Disponibilidade atual informada diretamente pelo Evolution Go para uma conexão.
+_Avoid_: estado persistido, status cadastral
+
+**Estado persistido**:
+Dados registrados no D1 sobre uma conta ou conexão, incluindo cadastro, habilitação, conexão padrão e estado de onboarding.
+_Avoid_: estado live
+
+**Autorização OAuth ativa**:
+Grant vigente associado a um usuário e a um cliente OAuth, com seus escopos e datas relevantes; tokens e credenciais não fazem parte da visão administrativa.
+
+**Autorização OAuth expirada**:
+Grant cujo prazo terminou. Não aparece na lista de autorizações ativas, mas pode ser contabilizado separadamente quando essa informação estiver disponível.
+
+**Atenção operacional**:
+Sinal derivado usado para priorizar uma conta ou conexão quando o estado live diverge do estado persistido, quando o registro persistido não está ativo ou quando a fonte de status não pôde ser consultada.

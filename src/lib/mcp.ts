@@ -24,7 +24,7 @@ export const TOOL_DESCRIPTIONS = {
   connection_status: 'Read the current availability of one WhatsApp connection. Use when the user asks whether a connection is active or ready. Requires connectionId when the default connection is not unambiguous.',
   search_contacts: 'Find contacts in a WhatsApp connection by name or phone number. Use before messaging when the recipient is not yet identified. Do not use it to search message history.',
   list_groups: 'List groups available in a WhatsApp connection. Use when the user needs group names, IDs, or basic participant information. Results are paginated.',
-  list_messages: 'Search message history available for a WhatsApp connection. Use for messages captured or retained by the service; do not assume it is a complete historical archive. Results are limited and may be filtered by text.',
+  list_messages: 'Search partial retained message history in a WhatsApp account selected by connectionId (or the default connection). Optionally filter a contact or group conversation with conversationId and combine it with text and limit. Do not assume this is a complete historical archive; an empty result is inconclusive.',
   send_text: 'Send a new text message to an individual or group. Use only when the destination and final text are known. This creates an external side effect and must not be used to quote an existing message.',
   reply_to_message: 'Send a text reply quoting an existing message. Use only when the user explicitly wants a reply tied to a known message ID and destination. This creates an external side effect.',
   send_media: 'Send an image, document, audio, or video attachment to an individual or group. Use when the user requests media delivery and the content is available as base64. This creates an external side effect and is subject to the configured size limit.'
@@ -37,6 +37,7 @@ export const dataOutput = z.object({ data: z.json() });
 
 export const listMessagesInput = z.object({
   ...connectionInput,
+  conversationId: z.string().trim().min(1).max(200).optional().describe('Optional contact number, individual or group JID selecting a conversation within the WhatsApp account; connectionId selects the account. Surrounding whitespace is removed. Searches only partial retained history; an empty result is inconclusive.'),
   text: z.string().max(200).optional().describe('Optional text fragment to search for in retained messages.'),
   limit: z.number().int().min(1).max(50).default(25).describe('Maximum number of messages to return.')
 });
@@ -196,7 +197,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   server.registerTool('connection_status', { title: 'Connection status', description: TOOL_DESCRIPTIONS.connection_status, inputSchema: z.object(connectionInput), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId }) => read('connection_status', connectionId, (c) => c.status()));
   server.registerTool('search_contacts', { title: 'Search contacts', description: TOOL_DESCRIPTIONS.search_contacts, inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200).describe('Name or phone fragment to search for.'), ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));
   server.registerTool('list_groups', { title: 'List groups', description: TOOL_DESCRIPTIONS.list_groups, inputSchema: z.object({ ...connectionInput, ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('list_groups', connectionId, (c) => c.listGroups(cursor, limit)));
-  server.registerTool('list_messages', { title: 'Search messages', description: TOOL_DESCRIPTIONS.list_messages, inputSchema: listMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, text, limit }) => read('list_messages', connectionId, (c) => c.listMessages(text, limit)));
+  server.registerTool('list_messages', { title: 'Search messages', description: TOOL_DESCRIPTIONS.list_messages, inputSchema: listMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, conversationId, text, limit }) => read('list_messages', connectionId, (c) => c.listMessages(text, limit, conversationId)));
 
   const send = async (operation: string, connectionId: string | undefined, fn: (client: EvolutionGoClient) => Promise<unknown>) => {
     let resolvedConnectionId: string | undefined;

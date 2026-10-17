@@ -9,7 +9,7 @@ import { adminPage } from './ui/admin';
 import { buildAdminSnapshot, isAdminOperator, type AdminOAuthReader } from './lib/admin';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
 
-type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
+export type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
 type ProvisionRequest = { instances?: Array<{ ownerEmail?: string; name?: string; instanceId?: string; phoneNumber?: string }> };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -438,7 +438,8 @@ function extractQrExpiry(payload: unknown): number | undefined {
   return undefined;
 }
 
-async function provisionEvolution(env: Env, base: string, inputs: ProvisionInput[], refreshInstanceIds = new Set<string>()): Promise<{ instances: Array<Record<string, unknown>> }> {
+/** @internal Exported for focused provisioning outcome tests. */
+export async function provisionEvolution(env: Env, base: string, inputs: ProvisionInput[], refreshInstanceIds = new Set<string>()): Promise<{ instances: Array<Record<string, unknown>> }> {
   if (!env.EVOLUTION_GLOBAL_API_KEY) throw new Error('Evolution administrative key is not configured');
   const admin = new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY });
   const results: Array<Record<string, unknown>> = [];

@@ -8,6 +8,9 @@
     "directory": "./public",
     "not_found_handling": "none"
   },
+  "routes": [
+    { "pattern": "storage.wapilot.com.br", "custom_domain": true }
+  ],
   "workers_dev": true,
   "observability": { "enabled": true },
   "d1_databases": [{

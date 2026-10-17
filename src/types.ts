@@ -12,6 +12,7 @@ export interface Env {
   ALLOWED_EMAILS?: string;
   ENVIRONMENT?: string;
   MAX_MEDIA_BYTES?: string;
+  MEDIA_TRACKING_ENDPOINT?: string;
   MCP_PUBLIC_URL?: string;
 }
 

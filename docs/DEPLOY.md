@@ -34,6 +34,23 @@ npx wrangler deploy
 
 Cadastre cada instância em `/connections` ou `POST /api/connections` com nome amigável, ID da instância, número opcional e token específico. A resposta de criação entrega uma única URL de webhook; não reutilize nem registre o segredo. Configure no Evolution Go os eventos `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC` e `GROUP` para essa URL.
 
+## Proxy de mídia e domínio `storage.wapilot.com.br`
+
+O proxy usa o mesmo Worker `mcp-evolution-cloudflare`. O arquivo `wrangler.jsonc` declara o domínio customizado; o domínio cobre todos os caminhos (`storage.wapilot.com.br/*`) e não cria um segundo Worker.
+
+1. No Cloudflare Dashboard, abra **DNS** da zona `wapilot.com.br` e crie o registro `CNAME` `storage` apontando para `mcp-evolution-cloudflare.luccamordente.workers.dev`. Deixe o proxy laranja ativado.
+2. Em **Workers & Pages → mcp-evolution-cloudflare → Settings → Domains & Routes**, adicione `storage.wapilot.com.br` como domínio customizado. A configuração deve ficar equivalente a `{ "pattern": "storage.wapilot.com.br", "custom_domain": true }`.
+3. Se houver um coletor de métricas, configure a variável não secreta `MEDIA_TRACKING_ENDPOINT` com a URL HTTPS desse coletor. O Worker envia `source` e `path` por `POST`, sem repassar query assinada. Sem essa variável, o redirect continua funcionando e nenhum evento externo é enviado.
+4. Valide o comportamento com uma URL assinada de teste. A resposta deve ser `302`; o `Location` deve apontar para `https://neurau.com.br`, manter a sequência completa de `X-Amz-*` e remover somente `utm_*`. O MCP nunca retorna o hostname bruto: ele entrega a URL pública `storage.wapilot.com.br` com `utm_source=chatgpt`.
+
+```sh
+npx wrangler deploy --dry-run
+curl -sS -D - -o /dev/null \
+  'https://storage.wapilot.com.br/attachment-storage-production/evolution-go-medias/example.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=test&utm_source=chatgpt'
+```
+
+O `302` é intencional: o Worker não faz `fetch` do objeto e não duplica o tráfego de bytes. A origem de armazenamento aparece apenas no `Location` usado pelo cliente para seguir o redirect; ela não é emitida nos payloads MCP.
+
 ## Verificação
 
 ```sh

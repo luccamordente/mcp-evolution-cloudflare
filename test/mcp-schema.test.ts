@@ -13,6 +13,7 @@ import {
   sendTextInput,
   toJsonValue
 } from '../src/lib/mcp';
+import { MEDIA_PROXY_HOST } from '../src/lib/media-proxy';
 
 describe('MCP tool output schema', () => {
   it('declares data as a JSON value instead of an unconstrained schema', () => {
@@ -30,6 +31,11 @@ describe('MCP tool output schema', () => {
   it('removes undefined fields before structured content validation', () => {
     const safe = toJsonValue({ items: [{ jid: '1@s.whatsapp.net', name: undefined }], next: undefined });
     expect(dataOutput.parse({ data: safe })).toEqual({ data: { items: [{ jid: '1@s.whatsapp.net' }] } });
+  });
+
+  it('rewrites raw media URLs before they enter MCP structured content', () => {
+    const safe = toJsonValue({ items: [{ media: { url: 'https://neurau.com.br/media/image.jpg?X-Amz-Signature=abc' } }] });
+    expect(safe).toMatchObject({ items: [{ media: { url: `https://${MEDIA_PROXY_HOST}/media/image.jpg?X-Amz-Signature=abc&utm_source=chatgpt` } }] });
   });
 
   it('allows an omitted connectionId but rejects null', () => {

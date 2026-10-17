@@ -348,12 +348,7 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
         try {
           const avatarPayload = await admin.avatar(token, avatarJid);
           view.avatarUrl = extractAvatarUrl(avatarPayload);
-          const avatarDocument = avatarPayload && typeof avatarPayload === 'object' && !Array.isArray(avatarPayload) ? avatarPayload as Record<string, unknown> : undefined;
-          const avatarMeta = avatarDocument?.meta && typeof avatarDocument.meta === 'object' && !Array.isArray(avatarDocument.meta) ? avatarDocument.meta as Record<string, unknown> : undefined;
-          const avatarResult = avatarMeta?.result && typeof avatarMeta.result === 'object' && !Array.isArray(avatarMeta.result) ? avatarMeta.result as Record<string, unknown> : undefined;
-          const avatarData = avatarDocument?.data && typeof avatarDocument.data === 'object' && !Array.isArray(avatarDocument.data) ? avatarDocument.data as Record<string, unknown> : undefined;
-          const avatarAttributes = avatarData?.attributes && typeof avatarData.attributes === 'object' && !Array.isArray(avatarData.attributes) ? avatarData.attributes as Record<string, unknown> : undefined;
-          console.info(JSON.stringify({ event: 'profile_avatar_lookup', outcome: 'success', hasUrl: Boolean(view.avatarUrl), topKeys: Object.keys(avatarDocument ?? {}), dataKeys: Object.keys(avatarData ?? {}), attributeKeys: Object.keys(avatarAttributes ?? {}), metaKeys: Object.keys(avatarMeta ?? {}), resultKeys: Object.keys(avatarResult ?? {}) }));
+          console.info(JSON.stringify({ event: 'profile_avatar_lookup', outcome: 'success', hasUrl: Boolean(view.avatarUrl) }));
         } catch (error) {
           console.warn(JSON.stringify({ event: 'profile_avatar_lookup', outcome: 'error', status: error instanceof EvolutionApiError ? error.status : undefined }));
           // Profile pictures are optional and must not hide a live connection.

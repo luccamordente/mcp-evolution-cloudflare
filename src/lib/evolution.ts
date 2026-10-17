@@ -1,6 +1,10 @@
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
+const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+const AVATAR_REQUEST_TIMEOUT_MS = 3_000;
+
+type EvolutionRequestInit = RequestInit & { timeoutMs?: number };
 
 export interface EvolutionClientOptions {
   baseUrl: string;
@@ -8,6 +12,7 @@ export interface EvolutionClientOptions {
   instanceToken: string;
   instanceId: string;
   fetcher?: typeof fetch;
+  timeoutMs?: number;
 }
 
 export interface EvolutionInstanceCreateInput {
@@ -108,31 +113,39 @@ function isJsonApiDocument(value: unknown): boolean {
 }
 
 /** Shared HTTP boundary. GET reads retry transient 5xx/network failures; writes never retry. */
-async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
+async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: string, apiKey: string, init: EvolutionRequestInit = {}): Promise<T> {
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, signal: _parentSignal, ...fetchInit } = init;
+  const headers = new Headers(fetchInit.headers);
   headers.set('Accept', JSON_API_MEDIA_TYPE);
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', JSON_API_MEDIA_TYPE);
+  if (fetchInit.body && !headers.has('Content-Type')) headers.set('Content-Type', JSON_API_MEDIA_TYPE);
   headers.set('apikey', apiKey);
-  const method = (init.method ?? 'GET').toUpperCase();
+  const method = (fetchInit.method ?? 'GET').toUpperCase();
   const attempts = method === 'GET' ? 3 : 1;
   let lastStatus: number | undefined;
   let lastPayload: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     let response: Response;
+    let payload: unknown = undefined;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      response = await fetcher(`${baseUrl}${path}`, { ...init, headers });
+      response = await fetcher(`${baseUrl}${path}`, { ...fetchInit, headers, signal: controller.signal });
+      const text = await response.text();
+      if (text) {
+        try { payload = JSON.parse(text); } catch { payload = text; }
+      }
     } catch (error) {
+      clearTimeout(timeout);
+      if (controller.signal.aborted) {
+        throw new EvolutionApiError(504, 'Evolution Go request timed out', { path, timeoutMs });
+      }
       if (attempt + 1 < attempts) {
         await retryDelay(attempt);
         continue;
       }
       throw new EvolutionApiError(503, 'Evolution Go is unreachable', { cause: error instanceof Error ? error.message : String(error) });
     }
-    const text = await response.text();
-    let payload: unknown = undefined;
-    if (text) {
-      try { payload = JSON.parse(text); } catch { payload = text; }
-    }
+    clearTimeout(timeout);
     if (response.ok) {
       if (payload !== undefined && !isJsonApiDocument(payload)) {
         throw new EvolutionApiError(502, 'Evolution Go returned an invalid JSON:API document', payload);
@@ -153,15 +166,17 @@ export class EvolutionGoAdminClient {
   private readonly fetcher: typeof fetch;
   private readonly baseUrl: string;
   private readonly globalApiKey: string;
+  private readonly timeoutMs: number;
 
-  constructor(options: { baseUrl: string; globalApiKey: string; fetcher?: typeof fetch }) {
+  constructor(options: { baseUrl: string; globalApiKey: string; fetcher?: typeof fetch; timeoutMs?: number }) {
     this.fetcher = options.fetcher ?? fetch.bind(globalThis);
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.globalApiKey = options.globalApiKey;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
-  private request<T>(path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
-    return requestJson(this.fetcher, this.baseUrl, path, apiKey, init);
+  private request<T>(path: string, apiKey: string, init: EvolutionRequestInit = {}): Promise<T> {
+    return requestJson(this.fetcher, this.baseUrl, path, apiKey, { ...init, timeoutMs: init.timeoutMs ?? this.timeoutMs });
   }
 
   async createInstance(input: EvolutionInstanceCreateInput): Promise<unknown> {
@@ -225,6 +240,7 @@ export class EvolutionGoAdminClient {
   async avatar(token: string, number: string): Promise<unknown> {
     return this.request('/user/avatar', token, {
       method: 'POST',
+      timeoutMs: Math.min(this.timeoutMs, AVATAR_REQUEST_TIMEOUT_MS),
       body: jsonApiBody({ type: 'chat', id: number }),
     });
   }
@@ -311,6 +327,7 @@ export class EvolutionGoClient {
   private readonly instanceToken: string;
   private readonly instanceId: string;
   private readonly globalApiKey?: string;
+  private readonly timeoutMs: number;
 
   constructor(options: EvolutionClientOptions) {
     this.fetcher = options.fetcher ?? fetch.bind(globalThis);
@@ -318,10 +335,11 @@ export class EvolutionGoClient {
     this.instanceToken = options.instanceToken;
     this.instanceId = options.instanceId;
     this.globalApiKey = options.globalApiKey;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
-  private request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    return requestJson(this.fetcher, this.baseUrl, path, this.instanceToken, init);
+  private request<T>(path: string, init: EvolutionRequestInit = {}): Promise<T> {
+    return requestJson(this.fetcher, this.baseUrl, path, this.instanceToken, { ...init, timeoutMs: init.timeoutMs ?? this.timeoutMs });
   }
 
   private page<T>(payload: unknown, expectedType: string, mapper: (value: unknown) => T): Page<T> {

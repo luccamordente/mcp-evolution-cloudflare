@@ -45,6 +45,17 @@ export function extractPhone(payload: unknown): string | undefined {
   return undefined;
 }
 
+/** Build the full user JID accepted by Evolution Go's profile endpoint. */
+export function avatarJidFromPhone(value: string | undefined): string | undefined {
+  const candidate = value?.trim();
+  if (!candidate) return undefined;
+  const [rawUser, rawServer] = candidate.split('@', 2);
+  const user = rawUser.replace(/^\+/, '');
+  if (!/^\d+(?::\d+)?$/.test(user) || user.replace(/\D/g, '').length < 8) return undefined;
+  const server = rawServer?.trim() || 's.whatsapp.net';
+  return `${user}@${server}`;
+}
+
 function extractStringByKeys(payload: unknown, wantedKeys: string[]): string | undefined {
   const wanted = new Set(wantedKeys.map((key) => key.toLowerCase()));
   const visit = (value: unknown): string | undefined => {

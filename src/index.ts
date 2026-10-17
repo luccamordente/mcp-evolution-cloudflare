@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
 import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
-import { evolutionState, extractAvatarUrl, extractDisplayName, extractPhone } from './lib/connection-status';
+import { avatarJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
@@ -289,10 +289,10 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
       view.state = state;
       view.phoneNumber = phoneNumber;
       view.displayName = extractDisplayName(result) ?? connection.friendlyName;
-      const avatarNumber = phoneNumber?.replace(/@.*$/, '').split(':')[0];
-      if (state === 'connected' && avatarNumber) {
+      const avatarJid = avatarJidFromPhone(phoneNumber);
+      if (state === 'connected' && avatarJid) {
         try {
-          view.avatarUrl = extractAvatarUrl(await admin.avatar(token, avatarNumber));
+          view.avatarUrl = extractAvatarUrl(await admin.avatar(token, avatarJid));
         } catch {
           // Profile pictures are optional and must not hide a live connection.
         }

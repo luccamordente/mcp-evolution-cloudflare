@@ -64,6 +64,22 @@ describe('Evolution Go route contracts', () => {
     ]);
   });
 
+  it('bounds avatar requests and returns a timeout error when Evolution Go stalls', async () => {
+    const client = new EvolutionGoAdminClient({
+      baseUrl: 'https://evolution.invalid',
+      globalApiKey: 'global-secret',
+      timeoutMs: 10,
+      fetcher: async (_request, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      }),
+    });
+
+    await expect(client.avatar('instance-secret', '5511999999999@s.whatsapp.net')).rejects.toMatchObject({
+      status: 504,
+      message: 'Evolution Go request timed out',
+    });
+  });
+
   it('uses the Go text route and quoted message shape', async () => {
     let seen: { url: string; init: RequestInit } | undefined;
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored-by-go', instanceToken: 'instance-secret', fetcher: async (request, init) => {

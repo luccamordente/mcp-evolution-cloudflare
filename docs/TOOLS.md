@@ -34,6 +34,17 @@ As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID i
 - `dataBase64`: conteúdo do anexo codificado em Base64, sem prefixo de URL de dados.
 - `replyTo`: identificador opcional da mensagem que será citada junto com o anexo.
 
-Todas as respostas bem-sucedidas usam `structuredContent.data` e podem conter objetos, listas, strings, números, booleanos ou `null`. Erros de execução devem explicar o dado ausente, inválido ou indisponível para que o agente consiga corrigir a chamada.
+Todas as respostas bem-sucedidas usam `structuredContent.data` e podem conter objetos, listas, strings, números, booleanos ou `null`. Erros de execução usam `isError: true`, repetem um envelope sanitizado em `content[0].text` e em `structuredContent.data.error`, com os campos:
+
+- `code`: classificação estável (`connection_not_found`, `no_default_connection`, `multiple_default_connections`, `evolution_unreachable`, `evolution_http_error`, `media_too_large`, `invalid_base64`, `token_decryption_failed` ou `unexpected_error`);
+- `status`: status HTTP sem payload upstream;
+- `retryable`: indica se uma nova tentativa é plausível; operações de escrita não devem ser repetidas automaticamente;
+- `operation`: nome da ferramenta que falhou;
+- `message`: mensagem textual limitada e redigida;
+- `hint`: próxima ação segura para o agente.
+
+O envelope nunca inclui tokens, chaves, credenciais, payloads ou `details` do Evolution Go. Erros HTTP do upstream preservam somente o status e uma mensagem sanitizada.
+
+As respostas MCP são normalizadas pelo Worker, mas a origem Evolution Go é JSON:API 1.1. `list_messages` lê a coleção diretamente de `data`; cada mensagem usa `id`, `attributes.at` em milissegundos, `attributes.encodingFormat`, `attributes.body`, `relationships.author` e `meta.chat`. Recibos são mensagens próprias com `body.state` e `relationships.target`. O cliente não depende de `data.items`, `raw`, `message_id`, `timestamp` ou de um `status` na mensagem.
 
 Administração de conexões, logout, exclusão de mensagens ou grupos e gestão ampla de participantes não fazem parte desta superfície MCP.

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
-import { audit, createConnection, ensureUser, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
-import { EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
+import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
+import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
 import { evolutionState, extractPhone } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
@@ -322,16 +322,17 @@ function formatRelativeTime(value: string): string {
 async function provisionUserConnection(env: Env, user: { id: string; email: string; claims: Record<string, unknown> }, input: { friendlyName?: string; phoneNumber?: string }): Promise<Record<string, unknown>> {
   if (!env.EVOLUTION_GLOBAL_API_KEY) throw new Error('O provisionamento ainda não está configurado neste ambiente.');
   const name = input.friendlyName?.trim().slice(0, 64) || 'Novo WhatsApp';
-  const instanceId = `wapilot-${crypto.randomUUID().replaceAll('-', '').slice(0, 18)}`;
   const token = randomInstanceToken();
   const admin = new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY });
   const owner = await ensureUser(env.DB, user);
-  await admin.createInstance({ name, instanceId, token });
+  const created = await admin.createInstance({ name, token });
+  const instanceId = connectionIdFromResponse(created);
+  if (!instanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
   let connection: ConnectionSummary | undefined;
   try {
     connection = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: name, instanceId, phoneNumber: input.phoneNumber?.trim() || undefined, token, connectionState: 'qr' });
     const base = env.MCP_PUBLIC_URL ?? 'https://app.wapilot.com.br';
-    await admin.connectInstance(token, { webhookUrl: connection.webhookSecret ? `${base}/webhooks/evolution/${connection.webhookSecret}` : undefined, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'], immediate: true });
+    await admin.connectInstance(token, { instanceId: connection.instanceId, webhookUrl: connection.webhookSecret ? `${base}/webhooks/evolution/${connection.webhookSecret}` : undefined, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
     let qr: unknown;
     try { qr = await admin.qr(token); } catch (error) {
       if (error instanceof EvolutionApiError && error.status === 500) qr = undefined;
@@ -346,14 +347,13 @@ async function provisionUserConnection(env: Env, user: { id: string; email: stri
 }
 
 function extractQrExpiry(payload: unknown): number | undefined {
-  if (!payload || typeof payload !== 'object') return undefined;
-  const record = payload as Record<string, unknown>;
+  const record = jsonApiConnectionAttributes(payload);
+  if (!record) return undefined;
   for (const key of ['expiresIn', 'expires_in', 'ttl', 'timeout']) {
     const value = record[key];
     if (typeof value === 'number' && value > 0 && value < 3600) return Math.round(value);
     if (typeof value === 'string' && /^\d+$/.test(value)) return Math.min(3600, Number(value));
   }
-  for (const value of Object.values(record)) { const found = extractQrExpiry(value); if (found) return found; }
   return undefined;
 }
 
@@ -363,7 +363,8 @@ async function provisionEvolution(env: Env, base: string, inputs: ProvisionInput
   const results: Array<Record<string, unknown>> = [];
   for (const item of inputs) {
     const owner = await ensureUser(env.DB, { id: item.ownerEmail, email: item.ownerEmail, claims: {} });
-    const existingConnection = await findConnectionByInstanceId(env.DB, owner.id, item.instanceId);
+    const existingConnection = await findConnectionByInstanceId(env.DB, owner.id, item.instanceId)
+      ?? await findConnectionByFriendlyName(env.DB, owner.id, item.name);
     let connection = existingConnection;
     let summary: ConnectionSummary;
     let token: string;
@@ -372,18 +373,20 @@ async function provisionEvolution(env: Env, base: string, inputs: ProvisionInput
       token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
       summary = { id: connection.id, friendlyName: connection.friendlyName, instanceId: connection.instanceId, phoneNumber: connection.phoneNumber, status: connection.status };
       if (refreshInstanceIds.has(item.instanceId)) {
-        await admin.reconnectInstance(token);
+        await admin.reconnectInstance(token, connection.instanceId);
         await updateConnection(env.DB, owner.id, connection.id, { status: 'active', connectionState: 'qr' });
       }
     } else {
       token = randomInstanceToken();
-      await admin.createInstance({ name: item.name, instanceId: item.instanceId, token });
-      summary = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: item.name, instanceId: item.instanceId, phoneNumber: item.phoneNumber, token, connectionState: 'qr' });
+      const createdResponse = await admin.createInstance({ name: item.name, token });
+      const canonicalInstanceId = connectionIdFromResponse(createdResponse);
+      if (!canonicalInstanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
+      summary = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: item.name, instanceId: canonicalInstanceId, phoneNumber: item.phoneNumber, token, connectionState: 'qr' });
       created = true;
       await audit(env.DB, { userId: owner.id, connectionId: summary.id, operation: 'connection_provision', outcome: 'success' });
     }
     const webhookUrl = 'webhookSecret' in summary && summary.webhookSecret ? `${base}/webhooks/evolution/${summary.webhookSecret}` : undefined;
-    if (webhookUrl) await admin.connectInstance(token, { webhookUrl, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'], immediate: true });
+    if (webhookUrl) await admin.connectInstance(token, { instanceId: summary.instanceId, webhookUrl, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
     let qr: unknown;
     try { qr = await admin.qr(token); } catch (error) {
       if (error instanceof EvolutionApiError && error.status === 500) qr = { status: 'not_available', message: error.message };
@@ -433,14 +436,19 @@ function randomInstanceToken(): string {
 }
 
 function qrDataUrl(value: unknown): string | undefined {
-  if (typeof value === 'string') return value.startsWith('data:image/') ? value : value.length > 100 ? `data:image/png;base64,${value}` : undefined;
-  if (Array.isArray(value)) { for (const item of value) { const found = qrDataUrl(item); if (found) return found; } return undefined; }
-  if (!value || typeof value !== 'object') return undefined;
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (/^(base64|qrcode|qr|code)$/i.test(key)) { const found = qrDataUrl(child); if (found) return found; }
-    const nested = qrDataUrl(child); if (nested) return nested;
-  }
-  return undefined;
+  const qr = jsonApiConnectionAttributes(value)?.qr;
+  if (typeof qr !== 'string') return undefined;
+  return qr.startsWith('data:image/') ? qr : qr.length > 100 ? `data:image/png;base64,${qr}` : undefined;
+}
+
+function jsonApiConnectionAttributes(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const document = value as Record<string, unknown>;
+  const version = document.jsonapi && typeof document.jsonapi === 'object' && !Array.isArray(document.jsonapi) ? (document.jsonapi as Record<string, unknown>).version : undefined;
+  const resource = document.data && typeof document.data === 'object' && !Array.isArray(document.data) ? document.data as Record<string, unknown> : undefined;
+  if (version !== '1.1' || resource?.type !== 'connection') return undefined;
+  const attributes = resource.attributes;
+  return attributes && typeof attributes === 'object' && !Array.isArray(attributes) ? attributes as Record<string, unknown> : undefined;
 }
 
 function redactEvolutionSecrets(value: unknown): unknown {

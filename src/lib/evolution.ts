@@ -1,5 +1,7 @@
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 
+const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
+
 export interface EvolutionClientOptions {
   baseUrl: string;
   globalApiKey?: string;
@@ -10,11 +12,12 @@ export interface EvolutionClientOptions {
 
 export interface EvolutionInstanceCreateInput {
   name: string;
-  instanceId: string;
   token: string;
 }
 
 export interface EvolutionConnectInput {
+  /** JSON:API connection resource id. The token still authenticates the request. */
+  instanceId?: string;
   webhookUrl?: string;
   subscribe?: string[];
   immediate?: boolean;
@@ -32,8 +35,120 @@ export class EvolutionApiError extends Error {
   }
 }
 
-/** Administrative client used only by the owner-protected provisioning route.
- * It keeps the global key separate from per-instance credentials. */
+type JsonApiResource = {
+  type?: unknown;
+  id?: unknown;
+  attributes?: unknown;
+  relationships?: unknown;
+  meta?: unknown;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function resource(value: unknown): JsonApiResource | undefined {
+  return asRecord(value) as JsonApiResource | undefined;
+}
+
+function documentData(value: unknown): unknown {
+  return asRecord(value)?.data;
+}
+
+/** Return the canonical Evolution Go connection UUID from a JSON:API response. */
+export function connectionIdFromResponse(value: unknown): string | undefined {
+  return stringValue(resource(documentData(value))?.id);
+}
+
+function resourceAttributes(value: unknown): Record<string, unknown> {
+  return asRecord(resource(value)?.attributes) ?? {};
+}
+
+function resourceMeta(value: unknown): Record<string, unknown> {
+  return asRecord(resource(value)?.meta) ?? {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function relationshipResource(value: unknown, name: string): JsonApiResource | undefined {
+  const relationships = asRecord(resource(value)?.relationships);
+  const relationship = asRecord(relationships?.[name]);
+  return resource(relationship?.data);
+}
+
+function jsonApiBody(data: JsonApiResource | JsonApiResource[]): string {
+  return JSON.stringify({ data });
+}
+
+function errorMessage(payload: unknown, status: number): string {
+  const document = asRecord(payload);
+  const errors = Array.isArray(document?.errors) ? document.errors : [];
+  const first = asRecord(errors[0]);
+  return stringValue(first?.detail) ?? stringValue(first?.title) ?? `Evolution Go request failed (${status})`;
+}
+
+function sanitizeErrorMessage(value: string): string {
+  return value
+    .replace(/(token|api[-_ ]?key|password|secret)[=:]?\s*[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 240) || 'Evolution Go request failed';
+}
+
+function isJsonApiDocument(value: unknown): boolean {
+  const document = asRecord(value);
+  const jsonapi = asRecord(document?.jsonapi);
+  if (jsonapi?.version !== '1.1' || !document) return false;
+  const hasData = 'data' in document;
+  const hasErrors = 'errors' in document;
+  if (hasData && hasErrors) return false;
+  if (hasErrors && !Array.isArray(document.errors)) return false;
+  return hasData || hasErrors || 'meta' in document;
+}
+
+/** Shared HTTP boundary. GET reads retry transient 5xx/network failures; writes never retry. */
+async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set('Accept', JSON_API_MEDIA_TYPE);
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', JSON_API_MEDIA_TYPE);
+  headers.set('apikey', apiKey);
+  const method = (init.method ?? 'GET').toUpperCase();
+  const attempts = method === 'GET' ? 3 : 1;
+  let lastStatus: number | undefined;
+  let lastPayload: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetcher(`${baseUrl}${path}`, { ...init, headers });
+    } catch (error) {
+      if (attempt + 1 < attempts) {
+        await retryDelay(attempt);
+        continue;
+      }
+      throw new EvolutionApiError(503, 'Evolution Go is unreachable', { cause: error instanceof Error ? error.message : String(error) });
+    }
+    const text = await response.text();
+    let payload: unknown = undefined;
+    if (text) {
+      try { payload = JSON.parse(text); } catch { payload = text; }
+    }
+    if (response.ok) {
+      if (payload !== undefined && !isJsonApiDocument(payload)) {
+        throw new EvolutionApiError(502, 'Evolution Go returned an invalid JSON:API document', payload);
+      }
+      return payload as T;
+    }
+    lastStatus = response.status;
+    lastPayload = payload;
+    if (response.status < 500 || response.status > 599 || attempt + 1 >= attempts) break;
+    await retryDelay(attempt);
+  }
+  const status = lastStatus ?? 502;
+  throw new EvolutionApiError(status, sanitizeErrorMessage(errorMessage(lastPayload, status)), lastPayload);
+}
+
+/** Administrative client used only by the owner-protected provisioning route. */
 export class EvolutionGoAdminClient {
   private readonly fetcher: typeof fetch;
   private readonly baseUrl: string;
@@ -45,35 +160,26 @@ export class EvolutionGoAdminClient {
     this.globalApiKey = options.globalApiKey;
   }
 
-  private async request<T>(path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
-    const headers = new Headers(init.headers);
-    headers.set('Accept', 'application/json');
-    if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    headers.set('apikey', apiKey);
-    let response: Response;
-    try {
-      response = await this.fetcher(`${this.baseUrl}${path}`, { ...init, headers });
-    } catch (error) {
-      throw new EvolutionApiError(503, 'Evolution Go is unreachable', { cause: error instanceof Error ? error.message : String(error) });
-    }
-    const text = await response.text();
-    let payload: unknown = undefined;
-    if (text) {
-      try { payload = JSON.parse(text); } catch { payload = text; }
-    }
-    if (!response.ok) {
-      const message = typeof payload === 'object' && payload && 'message' in payload ? String((payload as { message: unknown }).message) : `Evolution Go request failed (${response.status})`;
-      throw new EvolutionApiError(response.status, message, payload);
-    }
-    return payload as T;
+  private request<T>(path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
+    return requestJson(this.fetcher, this.baseUrl, path, apiKey, init);
   }
 
   async createInstance(input: EvolutionInstanceCreateInput): Promise<unknown> {
-    return this.request('/instance/create', this.globalApiKey, { method: 'POST', body: JSON.stringify(input) });
+    return this.request('/instance/create', this.globalApiKey, {
+      method: 'POST',
+      body: jsonApiBody({ type: 'connection', attributes: { name: input.name, token: input.token } }),
+    });
   }
 
   async connectInstance(token: string, input: EvolutionConnectInput): Promise<unknown> {
-    return this.request('/instance/connect', token, { method: 'POST', body: JSON.stringify(input) });
+    const attributes: Record<string, unknown> = {};
+    if (input.webhookUrl !== undefined) attributes.webhookUrl = input.webhookUrl;
+    if (input.subscribe !== undefined) attributes.subscribe = input.subscribe;
+    if (input.immediate !== undefined) attributes.immediate = input.immediate;
+    return this.request('/instance/connect', token, {
+      method: 'POST',
+      body: jsonApiBody({ type: 'connection', ...(input.instanceId ? { id: input.instanceId } : {}), attributes }),
+    });
   }
 
   async qr(token: string): Promise<unknown> {
@@ -101,8 +207,11 @@ export class EvolutionGoAdminClient {
     throw new Error('Evolution Go QR renewal did not complete');
   }
 
-  async reconnectInstance(token: string): Promise<unknown> {
-    return this.request('/instance/reconnect', token, { method: 'POST', body: JSON.stringify({}) });
+  async reconnectInstance(token: string, instanceId?: string): Promise<unknown> {
+    return this.request('/instance/reconnect', token, {
+      method: 'POST',
+      body: jsonApiBody({ type: 'connection', ...(instanceId ? { id: instanceId } : {}) }),
+    });
   }
 
   async status(token: string): Promise<unknown> {
@@ -114,39 +223,77 @@ export class EvolutionGoAdminClient {
   }
 }
 
-function field(record: Record<string, unknown>, ...names: string[]): string {
-  for (const name of names) {
-    const value = record[name];
-    if (typeof value === 'string' && value.trim()) return value;
-  }
-  const lowered = new Map(Object.entries(record).map(([key, value]) => [key.toLowerCase(), value]));
-  for (const name of names) {
-    const value = lowered.get(name.toLowerCase());
-    if (typeof value === 'string' && value.trim()) return value;
-  }
-  return '';
-}
-
-/** Evolution Go returns PascalCase contact fields (`FullName`, `Jid`). */
+/** JSON:API exposes contacts as chat resources. */
 function normalizeContact(value: unknown): Contact {
-  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const fullName = field(record, 'FullName', 'fullName', 'name');
-  const firstName = field(record, 'FirstName', 'firstName');
-  const pushName = field(record, 'PushName', 'pushName');
-  const businessName = field(record, 'BusinessName', 'businessName');
+  const item = resource(value);
+  const attributes = resourceAttributes(value);
+  const id = stringValue(item?.id);
   return {
-    jid: field(record, 'Jid', 'jid'),
-    name: fullName || firstName || pushName || businessName || undefined,
-    pushName: pushName || undefined,
-    phoneNumber: field(record, 'phoneNumber', 'phone') || undefined,
+    id,
+    jid: id,
+    name: stringValue(attributes.fullName) ?? stringValue(attributes.firstName) ?? stringValue(attributes.name) ?? stringValue(attributes.businessName),
+    pushName: stringValue(attributes.pushName),
+    phoneNumber: stringValue(attributes.phoneNumber) ?? stringValue(attributes.phone),
+    avatarUrl: stringValue(attributes.pictureUrl),
   };
 }
 
-/**
- * Narrow HTTP client for Evolution Go. Paths are kept in one place because the
- * backend's contract is versioned independently from Evolution API v2.
- * No credential is ever placed in a URL or returned to callers.
- */
+function normalizeGroup(value: unknown): Group {
+  const item = resource(value);
+  const attributes = resourceAttributes(value);
+  const participants = asRecord(item?.relationships)?.participants;
+  const participantData = asRecord(participants)?.data;
+  const participantItems = Array.isArray(participantData) ? participantData : [];
+  return {
+    id: stringValue(item?.id),
+    jid: stringValue(item?.id),
+    name: stringValue(attributes.subject),
+    description: stringValue(attributes.description),
+    owner: stringValue(attributes.owner),
+    participants: participantItems.map((participant) => ({ jid: stringValue(resource(participant)?.id) })),
+  };
+}
+
+function normalizeMessage(value: unknown): Message {
+  const item = resource(value);
+  const attributes = resourceAttributes(value);
+  const body = asRecord(attributes.body) ?? {};
+  const meta = resourceMeta(value);
+  const author = stringValue(relationshipResource(value, 'author')?.id);
+  const chat = stringValue(meta.chat);
+  const at = typeof attributes.at === 'number' && Number.isFinite(attributes.at) ? attributes.at : undefined;
+  const message: Message = {
+    id: stringValue(item?.id),
+    conversationId: chat,
+    jid: chat,
+    sender: author,
+    direction: typeof meta.fromMe === 'boolean' ? (meta.fromMe ? 'outbound' : 'inbound') : undefined,
+    timestamp: at === undefined ? undefined : new Date(at).toISOString(),
+    type: stringValue(attributes.encodingFormat),
+  };
+  if (typeof body.text === 'string') message.text = body.text;
+  const media = asRecord(body.media);
+  if (media && typeof media.url === 'string') {
+    message.media = { mimeType: stringValue(attributes.encodingFormat), url: media.url };
+  }
+  return message;
+}
+
+function normalizeSendResult(payload: unknown, recipientId?: string): SendMessageResult {
+  const item = resource(documentData(payload));
+  const messageId = stringValue(item?.id);
+  if (!item || item.type !== 'message' || !messageId) throw new EvolutionApiError(502, 'Evolution Go returned an invalid message resource', payload);
+  const meta = resourceMeta(item);
+  const recipient = relationshipResource(item, 'recipient')?.id ?? recipientId;
+  return {
+    accepted: true,
+    messageId,
+    conversationId: stringValue(meta.chat) ?? stringValue(recipient),
+    jid: stringValue(meta.chat) ?? stringValue(recipient),
+  };
+}
+
+/** Narrow HTTP client for the Evolution Go JSON:API 1.1 contract. */
 export class EvolutionGoClient {
   private readonly fetcher: typeof fetch;
   private readonly baseUrl: string;
@@ -162,51 +309,14 @@ export class EvolutionGoClient {
     this.globalApiKey = options.globalApiKey;
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const headers = new Headers(init.headers);
-    headers.set('Accept', 'application/json');
-    if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    // Evolution Go authenticates instance routes with the instance token in `apikey`.
-    // The global key is retained for administrative routes only and is never sent to user tools.
-    headers.set('apikey', this.instanceToken);
-    const method = (init.method ?? 'GET').toUpperCase();
-    const attempts = method === 'GET' ? 3 : 1;
-    let lastStatus: number | undefined;
-    let lastPayload: unknown;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      let response: Response;
-      try {
-        response = await this.fetcher(`${this.baseUrl}${path}`, { ...init, headers });
-      } catch (error) {
-        if (attempt + 1 < attempts) {
-          await retryDelay(attempt);
-          continue;
-        }
-        throw new EvolutionApiError(503, 'Evolution Go is unreachable', { cause: error instanceof Error ? error.message : String(error) });
-      }
-      const text = await response.text();
-      let payload: unknown = undefined;
-      if (text) {
-        try { payload = JSON.parse(text); } catch { payload = text; }
-      }
-      if (response.ok) return payload as T;
-      lastStatus = response.status;
-      lastPayload = payload;
-      if (response.status < 500 || response.status > 599 || attempt + 1 >= attempts) break;
-      await retryDelay(attempt);
-    }
-    const message = typeof lastPayload === 'object' && lastPayload && 'message' in lastPayload ? String((lastPayload as { message: unknown }).message) : `Evolution Go request failed (${lastStatus ?? 502})`;
-    throw new EvolutionApiError(lastStatus ?? 502, message, lastPayload);
+  private request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return requestJson(this.fetcher, this.baseUrl, path, this.instanceToken, init);
   }
 
-  private page<T>(payload: unknown, mapper: (value: unknown) => T): Page<T> {
-    if (Array.isArray(payload)) return { items: payload.map(mapper), hasMore: false };
-    const object = (payload ?? {}) as Record<string, unknown>;
-    const raw = object.items ?? object.data ?? object.results ?? [];
-    const items = Array.isArray(raw) ? raw.map(mapper) : [];
-    const nextCursor = typeof object.nextCursor === 'string' ? object.nextCursor : typeof object.next_cursor === 'string' ? object.next_cursor : undefined;
-    const hasMore = Boolean(object.hasMore ?? object.has_more ?? nextCursor);
-    return { items, nextCursor, hasMore };
+  private page<T>(payload: unknown, expectedType: string, mapper: (value: unknown) => T): Page<T> {
+    const data = documentData(payload);
+    if (!Array.isArray(data)) return { items: [], hasMore: false };
+    return { items: data.filter((item) => resource(item)?.type === expectedType).map(mapper), hasMore: false };
   }
 
   async status(): Promise<Record<string, unknown>> {
@@ -217,25 +327,21 @@ export class EvolutionGoClient {
     const needle = query.trim().toLowerCase();
     const path = needle ? `/user/contacts?search=${encodeURIComponent(needle)}` : '/user/contacts';
     const payload = await this.request<unknown>(path);
-    const object = payload && typeof payload === 'object' ? payload as Record<string, unknown> : undefined;
-    const values = Array.isArray(payload) ? payload : (Array.isArray(object?.data) ? object.data : Array.isArray(object?.items) ? object.items : payload);
-    const digits = needle.replace(/\D/g, '');
-    const contacts = (Array.isArray(values) ? values : []).map(normalizeContact).filter((contact) => {
+    const contacts = this.page(payload, 'chat', normalizeContact).items.filter((contact) => {
       if (!needle) return true;
       const haystack = [contact.name, contact.pushName, contact.phoneNumber, contact.jid].filter(Boolean).join(' ').toLowerCase();
-      if (haystack.includes(needle)) return true;
-      return Boolean(digits) && (contact.jid ?? '').replace(/\D/g, '').includes(digits);
+      const digits = needle.replace(/\D/g, '');
+      return haystack.includes(needle) || Boolean(digits && (contact.jid ?? '').replace(/\D/g, '').includes(digits));
     });
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
     const items = contacts.slice(offset, offset + limit);
-    const nextCursor = typeof object?.next_cursor === 'string' ? object.next_cursor : typeof object?.nextCursor === 'string' ? object.nextCursor : offset + limit < contacts.length ? String(offset + limit) : undefined;
+    const nextCursor = offset + limit < contacts.length ? String(offset + limit) : undefined;
     return { items, nextCursor, hasMore: Boolean(nextCursor) };
   }
 
   async listGroups(cursor?: string, limit = 50): Promise<Page<Group>> {
     const payload = await this.request<unknown>('/group/list');
-    const values = Array.isArray(payload) ? payload : ((payload as Record<string, unknown> | undefined)?.data ?? payload);
-    const groups = Array.isArray(values) ? values.map((value) => value as Group) : [];
+    const groups = this.page(payload, 'chat', normalizeGroup).items;
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
     const items = groups.slice(offset, offset + limit);
     const nextCursor = offset + limit < groups.length ? String(offset + limit) : undefined;
@@ -248,43 +354,36 @@ export class EvolutionGoClient {
     const params = new URLSearchParams({ limit: String(boundedLimit) });
     if (query) params.set('q', query);
     const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
-    return this.page(payload, normalizeStoredMessage);
+    return this.page(payload, 'message', normalizeMessage);
   }
 
   async sendText(to: string, text: string, replyTo?: string, participant?: string): Promise<SendMessageResult> {
-    return this.request('/send/text', {
-      method: 'POST', body: JSON.stringify({ number: to, text, ...(replyTo ? { quoted: { messageId: replyTo, ...(participant ? { participant } : {}) } } : {}) }),
+    const relationships: Record<string, unknown> = {
+      recipient: { data: { type: 'chat', id: to } },
+    };
+    const body: Record<string, unknown> = { text };
+    if (replyTo) relationships.quoted = { data: { type: 'message', id: replyTo, ...(participant ? { meta: { participant } } : {}) } };
+    const payload = await this.request<unknown>('/send/text', {
+      method: 'POST',
+      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: 'text/plain', body }, relationships }),
     });
+    return normalizeSendResult(payload, to);
   }
 
   async sendMedia(to: string, media: { mimeType: string; fileName?: string; data: ArrayBuffer; caption?: string }, replyTo?: string): Promise<SendMessageResult> {
     const bytes = new Uint8Array(media.data);
-    let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
-    // Evolution Go accepts only image, video, audio, or document here. MIME
-    // types such as application/pdf must be sent as `document`, not `application`.
-    const mimeType = media.mimeType.toLowerCase();
-    const type = mimeType.startsWith('image/') ? 'image'
-      : mimeType.startsWith('video/') ? 'video'
-        : mimeType.startsWith('audio/') ? 'audio' : 'document';
-    return this.request('/send/media', {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    const relationships: Record<string, unknown> = { recipient: { data: { type: 'chat', id: to } } };
+    const body: Record<string, unknown> = { media: { url: btoa(binary) } };
+    if (media.caption) body.text = media.caption;
+    if (replyTo) relationships.quoted = { data: { type: 'message', id: replyTo } };
+    const payload = await this.request<unknown>('/send/media', {
       method: 'POST',
-      body: JSON.stringify({ number: to, url: btoa(binary), type, caption: media.caption, filename: media.fileName, ...(replyTo ? { quoted: { messageId: replyTo } } : {}) }),
+      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: media.mimeType.toLowerCase(), body }, relationships }),
     });
+    return normalizeSendResult(payload, to);
   }
-
-}
-
-function normalizeStoredMessage(value: unknown): Message {
-  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const id = record.message_id ?? record.messageId ?? record.id;
-  const text = record.body ?? record.text;
-  return {
-    id: typeof id === 'string' ? id : undefined,
-    timestamp: typeof record.timestamp === 'string' ? record.timestamp : undefined,
-    text: typeof text === 'string' ? text : undefined,
-    type: typeof record.source === 'string' ? record.source : undefined,
-    raw: value,
-  };
 }
 
 async function retryDelay(attempt: number): Promise<void> {

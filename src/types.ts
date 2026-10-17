@@ -93,7 +93,6 @@ export interface Message {
   type?: string;
   text?: string;
   media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string };
-  raw?: unknown;
 }
 
 export interface SendMessageResult {
@@ -101,5 +100,4 @@ export interface SendMessageResult {
   conversationId?: string;
   jid?: string;
   accepted: boolean;
-  raw?: unknown;
 }

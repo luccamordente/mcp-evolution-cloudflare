@@ -105,7 +105,14 @@ describe('list_connections ownership', () => {
     const tool = (server as unknown as { _registeredTools: Record<string, { handler: (args: unknown) => Promise<unknown> }> })._registeredTools.connection_status;
     const result = await tool.handler({ connectionId: 'c770126e-773a-408f-9405-89561d05447c' });
 
-    expect(result).toMatchObject({ isError: true, content: [{ text: 'Connection not found' }] });
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: { data: { error: {
+        code: 'connection_not_found', status: 404, retryable: false, operation: 'connection_status',
+        message: 'Connection not found',
+      } } },
+    });
+    expect(JSON.stringify(result)).not.toContain('FOREIGN KEY');
     expect(auditConnectionId).toBeNull();
   });
 });

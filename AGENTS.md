@@ -63,3 +63,17 @@ Comece cada tarefa com `git status --short --branch` e `git diff`. Preserve alte
 - O provisionamento de Lucca e Heitor foi implementado para usar chave global na criação, token por instância no cadastro e webhook por conexão. IDs, tokens, QR e supostos testes daquela sessão são dados operacionais; faça read-back atual antes de reutilizá-los.
 
 Quando uma mudança alterar contratos, autenticação, rotas, histórico ou mídia, atualize o documento correspondente em `docs/` e os testes junto com o código.
+
+## Agent skills
+
+### Issue tracker
+
+Issues e especificações vivem no GitHub Issues deste repositório e usam `gh`. Veja `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Usar as labels padrão `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human` e `wontfix`. Veja `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Repositório single-context: `GLOSSARY.md` na raiz e `docs/adr/` para ADRs. Veja `docs/agents/domain.md`.

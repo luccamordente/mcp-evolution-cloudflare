@@ -74,6 +74,47 @@ export interface AuditSummary {
   createdAt: string;
 }
 
+/** Read-only records used by the administrative operational snapshot. The
+ * encrypted token is kept inside the server-side aggregation seam and is
+ * never part of the returned snapshot. */
+export interface AdminUserRecord {
+  id: string;
+  email: string;
+  status: 'active' | 'disabled' | string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminConnectionRecord {
+  id: string;
+  userId: string;
+  friendlyName: string;
+  instanceId: string;
+  phoneNumber?: string;
+  encryptedToken: string;
+  status: ConnectionRecord['status'];
+  connectionState?: ConnectionRecord['connectionState'];
+  isDefault: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listAdminUsers(db: D1Database): Promise<AdminUserRecord[]> {
+  const result = await db.prepare('SELECT id, email, status, created_at as createdAt, updated_at as updatedAt FROM users ORDER BY email, id').all<AdminUserRecord>();
+  return result.results ?? [];
+}
+
+export async function listAdminConnections(db: D1Database): Promise<AdminConnectionRecord[]> {
+  const result = await db.prepare('SELECT id, user_id as userId, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, encrypted_token as encryptedToken, status, connection_state as connectionState, is_default as isDefault, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections ORDER BY user_id, is_default DESC, friendly_name, id').all<AdminConnectionRecord>();
+  return result.results ?? [];
+}
+
+export async function listAdminAudit(db: D1Database, userId: string, connectionId: string, limit = 3): Promise<AuditSummary[]> {
+  const boundedLimit = Math.min(Math.max(Math.floor(limit), 1), 3);
+  const result = await db.prepare('SELECT operation, outcome, created_at as createdAt FROM audit_log WHERE user_id = ?1 AND connection_id = ?2 ORDER BY created_at DESC, id DESC LIMIT ?3').bind(userId, connectionId, boundedLimit).all<AuditSummary>();
+  return result.results ?? [];
+}
+
 export async function listRecentAudit(db: D1Database, userId: string, connectionId: string, limit = 3): Promise<AuditSummary[]> {
   const rows = await db.prepare('SELECT operation, outcome, created_at as createdAt FROM audit_log WHERE user_id = ?1 AND connection_id = ?2 ORDER BY created_at DESC LIMIT ?3').bind(userId, connectionId, Math.min(Math.max(limit, 1), 10)).all<AuditSummary>();
   return rows.results ?? [];

@@ -10,6 +10,8 @@ export interface Env {
   LOCAL_DEV_USER_EMAIL?: string;
   CONSENT_SECRET?: string;
   ALLOWED_EMAILS?: string;
+  /** Separate allowlist for the read-only operational admin panel. */
+  ADMIN_EMAILS?: string;
   ENVIRONMENT?: string;
   MAX_MEDIA_BYTES?: string;
   MCP_PUBLIC_URL?: string;

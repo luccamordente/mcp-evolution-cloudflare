@@ -5,6 +5,8 @@ import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } f
 import { avatarJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
+import { adminPage } from './ui/admin';
+import { buildAdminSnapshot, isAdminOperator, type AdminOAuthReader } from './lib/admin';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
 
 type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
@@ -34,6 +36,16 @@ async function requireUiAuth(c: any): Promise<import('./types').AuthenticatedUse
       }
     }
     return authResponse(accessError instanceof AuthError ? accessError : new AuthError(500, 'Authentication failed'));
+  }
+}
+
+/** Administrative browser routes require the Access assertion itself. Unlike
+ * the general dashboard helper, they do not accept bearer compatibility. */
+async function requireAdminUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
+  try {
+    return await authenticateAccessRequest(c.req.raw, c.env);
+  } catch (error) {
+    return authResponse(error instanceof AuthError ? error : new AuthError(500, 'Authentication failed'));
   }
 }
 
@@ -76,6 +88,45 @@ app.get('/connections', async (c) => {
     return c.html(adminProvisionPage());
   }
   return c.html(connectionsPage(auth));
+});
+
+/**
+ * Aggregated operational view. Access authentication and the independent
+ * operator allowlist are both required; the page itself only reads the
+ * server-side snapshot and contains no provisioning or revocation controls.
+ */
+app.get('/admin', async (c) => {
+  const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Admin access required' }, 403);
+  c.header('Cache-Control', 'no-store');
+  return c.html(adminPage());
+});
+
+/** The browser performs one request here per initial load or explicit refresh. */
+app.get('/admin/data', async (c) => {
+  const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Admin access required' }, 403);
+  c.header('Cache-Control', 'no-store');
+  const base = (c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin).replace(/\/$/, '');
+  try {
+    // Keep the OAuth Provider import out of the module evaluation path so the
+    // Hono test surface remains usable without Cloudflare runtime bindings.
+    let oauth: AdminOAuthReader | undefined;
+    try {
+      const [{ getOAuthApi }, { oauthOptions }] = await Promise.all([
+        import('@cloudflare/workers-oauth-provider'),
+        import('./lib/oauth'),
+      ]);
+      oauth = getOAuthApi(oauthOptions(base), c.env);
+    } catch {
+      // The snapshot still returns D1 and Evolution data when the provider or
+      // its KV binding is unavailable; each user's OAuth source is marked
+      // unavailable by the aggregator.
+    }
+    return c.json(await buildAdminSnapshot(c.env, { oauth }));
+  } catch (error) {
+    return c.json({ error: safeErrorMessage(error, 'Não foi possível produzir o snapshot administrativo.') }, 502);
+  }
 });
 
 // Keep the browser UI under the same path-scoped Access application as the
@@ -448,6 +499,7 @@ function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (c
 function safeErrorMessage(error: unknown, fallback: string): string {
   if (!(error instanceof Error)) return fallback;
   return error.message
+    .replace(/(authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?[^\s,;]+/gi, '$1=[redacted]')
     .replace(/(token|api[-_ ]?key|password|secret)[=:]?\s*[^\s,;]+/gi, '$1=[redacted]')
     .slice(0, 240) || fallback;
 }

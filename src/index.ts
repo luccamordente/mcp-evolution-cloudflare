@@ -343,8 +343,11 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
       const avatarJid = avatarJidFromPhone(phoneNumber);
       if (state === 'connected' && avatarJid) {
         try {
-          view.avatarUrl = extractAvatarUrl(await admin.avatar(token, avatarJid));
-        } catch {
+          const avatarPayload = await admin.avatar(token, avatarJid);
+          view.avatarUrl = extractAvatarUrl(avatarPayload);
+          console.info(JSON.stringify({ event: 'profile_avatar_lookup', outcome: 'success', hasUrl: Boolean(view.avatarUrl) }));
+        } catch (error) {
+          console.warn(JSON.stringify({ event: 'profile_avatar_lookup', outcome: 'error', status: error instanceof EvolutionApiError ? error.status : undefined }));
           // Profile pictures are optional and must not hide a live connection.
         }
       }

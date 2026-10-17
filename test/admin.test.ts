@@ -43,11 +43,15 @@ const baseEnv = {
   TOKEN_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
 } as any;
 
+function statusPayload(attributes: Record<string, unknown>): unknown {
+  return { jsonapi: { version: '1.1' }, data: { type: 'connection', id: 'connection-1', attributes } };
+}
+
 function dependencies(overrides: Partial<AdminSnapshotDependencies> = {}): AdminSnapshotDependencies {
   return {
     now: () => new Date('2026-10-17T12:00:00.000Z'),
     decryptToken: async () => 'instance-secret',
-    readLiveStatus: async () => ({ data: { connected: true, loggedIn: true, myJid: '5511999999999@s.whatsapp.net' } }),
+    readLiveStatus: async () => statusPayload({ connected: true, loggedIn: true, myJid: '5511999999999@s.whatsapp.net' }),
     oauth: {
       listUserGrants: async () => ({ items: [] }),
       lookupClient: async () => null,
@@ -107,7 +111,7 @@ describe('administrative operational snapshot', () => {
     const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, []) }, dependencies({
       readLiveStatus: async (connection) => {
         if (connection.id === 'c-2') throw new Error('Authorization: Bearer token-secret upstream failed');
-        return { data: { connected: true, loggedIn: true } };
+        return statusPayload({ connected: true, loggedIn: true });
       },
       oauth: {
         listUserGrants: async (userId) => {
@@ -142,8 +146,8 @@ describe('administrative operational snapshot', () => {
       readLiveStatus: async (connection, instanceToken) => {
         liveCalls.push([connection.id, instanceToken]);
         return instanceToken === 'instance-one'
-          ? { data: { connected: true, loggedIn: true, myJid: '5511000000000@s.whatsapp.net' } }
-          : { data: { connected: false, loggedIn: true, myJid: '5511000000001@s.whatsapp.net' } };
+          ? statusPayload({ connected: true, loggedIn: true, myJid: '5511000000000@s.whatsapp.net' })
+          : statusPayload({ connected: false, loggedIn: true, myJid: '5511000000001@s.whatsapp.net' });
       },
       oauth: {
         listUserGrants: async (userId) => {
@@ -165,7 +169,7 @@ describe('administrative operational snapshot', () => {
     const connections: Connection[] = [{ id: 'c-1', userId: 'u-1', friendlyName: 'One', instanceId: 'instance-one', encryptedToken: 'encrypted-one', status: 'active', connectionState: 'connected', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
     const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, []) }, dependencies({
       oauth: undefined,
-      readLiveStatus: async () => ({ data: { connected: true, loggedIn: true, myJid: '5511000000000@s.whatsapp.net' } }),
+      readLiveStatus: async () => statusPayload({ connected: true, loggedIn: true, myJid: '5511000000000@s.whatsapp.net' }),
     }));
 
     expect(snapshot.users).toHaveLength(1);
@@ -187,7 +191,7 @@ describe('administrative operational snapshot', () => {
     const users: User[] = [{ id: 'u-1', email: 'one@example.com', status: 'active', createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
     const connections: Connection[] = [{ id: 'c-1', userId: 'u-1', friendlyName: 'Needs review', instanceId: 'instance-1', encryptedToken: 'x', status: 'disabled', connectionState: 'qr', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
     const audits: Audit[] = Array.from({ length: 5 }, (_, index) => ({ userId: 'u-1', connectionId: 'c-1', operation: `op-${index}`, outcome: index === 1 ? 'failure' : 'success', createdAt: `2026-10-0${index + 1}` }));
-    const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, audits) }, dependencies({ readLiveStatus: async () => ({ data: { connected: true, loggedIn: true } }) }));
+    const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, audits) }, dependencies({ readLiveStatus: async () => statusPayload({ connected: true, loggedIn: true }) }));
     const connection = snapshot.users[0].connections[0];
     expect(connection.attention).toBe(true);
     expect(connection.attentionReasons).toEqual(expect.arrayContaining(['persisted_inactive', 'state_mismatch']));

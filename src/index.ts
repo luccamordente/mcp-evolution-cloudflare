@@ -447,32 +447,44 @@ async function provisionEvolution(env: Env, base: string, inputs: ProvisionInput
     const existingConnection = await findConnectionByInstanceId(env.DB, owner.id, item.instanceId)
       ?? await findConnectionByFriendlyName(env.DB, owner.id, item.name);
     let connection = existingConnection;
-    let summary: ConnectionSummary;
+    let summary: ConnectionSummary | undefined;
     let token: string;
     let created = false;
-    if (connection) {
-      token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
-      summary = { id: connection.id, friendlyName: connection.friendlyName, instanceId: connection.instanceId, phoneNumber: connection.phoneNumber };
-      if (refreshInstanceIds.has(item.instanceId)) {
-        await admin.reconnectInstance(token, connection.instanceId);
+    try {
+      if (connection) {
+        token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
+        summary = { id: connection.id, friendlyName: connection.friendlyName, instanceId: connection.instanceId, phoneNumber: connection.phoneNumber };
+        if (refreshInstanceIds.has(item.instanceId)) {
+          await admin.reconnectInstance(token, connection.instanceId);
+        }
+      } else {
+        token = randomInstanceToken();
+        const createdResponse = await admin.createInstance({ name: item.name, token });
+        const canonicalInstanceId = connectionIdFromResponse(createdResponse);
+        if (!canonicalInstanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
+        summary = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: item.name, instanceId: canonicalInstanceId, phoneNumber: item.phoneNumber, token });
+        created = true;
       }
-    } else {
-      token = randomInstanceToken();
-      const createdResponse = await admin.createInstance({ name: item.name, token });
-      const canonicalInstanceId = connectionIdFromResponse(createdResponse);
-      if (!canonicalInstanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
-      summary = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: item.name, instanceId: canonicalInstanceId, phoneNumber: item.phoneNumber, token });
-      created = true;
+      if (!summary) throw new Error('Connection registry record was not created');
+      const webhookUrl = 'webhookSecret' in summary && summary.webhookSecret ? `${base}/webhooks/evolution/${summary.webhookSecret}` : undefined;
+      if (webhookUrl) await admin.connectInstance(token, { instanceId: summary.instanceId, webhookUrl, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
+      let qr: unknown;
+      try { qr = await admin.qr(token); } catch (error) {
+        if (error instanceof EvolutionApiError && error.status === 500) qr = { status: 'not_available', message: error.message };
+        else throw error;
+      }
       await audit(env.DB, { userId: owner.id, connectionId: summary.id, operation: 'connection_provision', outcome: 'success' });
+      results.push({ ownerEmail: item.ownerEmail, friendlyName: summary.friendlyName, instanceId: summary.instanceId, connectionId: summary.id, created, qr: redactEvolutionSecrets(qr) });
+    } catch (error) {
+      if (summary) {
+        try {
+          await audit(env.DB, { userId: owner.id, connectionId: summary.id, operation: 'connection_provision', outcome: 'failure', metadata: { status: error instanceof EvolutionApiError ? error.status : 500, message: safeErrorMessage(error, 'Provisioning failed') } });
+        } catch {
+          // Preserve the original provisioning failure when audit persistence is unavailable.
+        }
+      }
+      throw error;
     }
-    const webhookUrl = 'webhookSecret' in summary && summary.webhookSecret ? `${base}/webhooks/evolution/${summary.webhookSecret}` : undefined;
-    if (webhookUrl) await admin.connectInstance(token, { instanceId: summary.instanceId, webhookUrl, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
-    let qr: unknown;
-    try { qr = await admin.qr(token); } catch (error) {
-      if (error instanceof EvolutionApiError && error.status === 500) qr = { status: 'not_available', message: error.message };
-      else throw error;
-    }
-    results.push({ ownerEmail: item.ownerEmail, friendlyName: summary.friendlyName, instanceId: summary.instanceId, connectionId: summary.id, created, qr: redactEvolutionSecrets(qr) });
   }
   return { instances: results };
 }

@@ -15,7 +15,6 @@ import {
   toJsonValue
 } from '../src/lib/mcp';
 import { EvolutionApiError } from '../src/lib/evolution';
-import { MEDIA_PROXY_HOST, RAW_MEDIA_HOST } from '../src/lib/media-proxy';
 
 describe('MCP tool output schema', () => {
   it('classifies and sanitizes upstream errors without exposing details', () => {
@@ -55,10 +54,9 @@ describe('MCP tool output schema', () => {
     expect(dataOutput.parse({ data: safe })).toEqual({ data: { items: [{ jid: '1@s.whatsapp.net' }] } });
   });
 
-  it('rewrites provider media URLs before returning MCP structured content', () => {
-    const safe = toJsonValue({ media: { url: `https://${RAW_MEDIA_HOST}/attachment-storage-production/evolution-go-medias/file.jpg?X-Amz-Signature=abc` } });
-    expect(safe).toEqual({ media: { url: `https://${MEDIA_PROXY_HOST}/r/file.jpg?X-Amz-Signature=abc` } });
-    expect(JSON.stringify(safe)).not.toContain(RAW_MEDIA_HOST);
+  it('preserves media URLs returned by the provider', () => {
+    const url = 'https://example.com/file.jpg?signature=abc';
+    expect(toJsonValue({ media: { url } })).toEqual({ media: { url } });
   });
 
   it('allows an omitted connectionId but rejects null', () => {

@@ -130,6 +130,13 @@ app.get('/api/authorizations', (c) => authorizationApi(c));
 app.delete('/api/authorizations/:id', (c) => authorizationApi(c, c.req.param('id')));
 app.post('/api/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.param('id')));
 
+// The dashboard is protected by the /connections Access application. Keep
+// its authorization requests under that same path so browser fetches do not
+// cross into the separately protected /api Access application.
+app.get('/connections/authorizations', (c) => authorizationApi(c));
+app.delete('/connections/authorizations/:id', (c) => authorizationApi(c, c.req.param('id')));
+app.post('/connections/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.param('id')));
+
 app.post('/api/connections/provision', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
   try {

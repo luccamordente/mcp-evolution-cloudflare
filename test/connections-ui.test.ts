@@ -19,7 +19,8 @@ describe('connections workspace page', () => {
     expect(html).not.toContain("if (connection.qr) setQrImage(connection.qr, connection.qrExpiresIn); else renewQr(); startPolling();");
     expect(html).toContain('Autorizações');
     expect(html).toContain('authorization-list');
-    expect(html).toContain('/api/authorizations');
+    expect(html).toContain("'/connections/authorizations'");
+    expect(html).not.toContain("api('/api/authorizations");
     expect(html).toContain('Desconectar');
     expect(html).toContain('Nenhuma autorização ativa');
     expect(html).toContain('Não foi possível carregar as autorizações');

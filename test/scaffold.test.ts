@@ -51,10 +51,12 @@ describe('worker scaffold', () => {
     expect((await app.request('/sse', {}, env)).status).toBe(404);
   });
 
-  it('protects authorization management with the same browser authentication boundary', async () => {
-    const response = await app.request('/api/authorizations', {}, env);
-    expect(response.status).toBe(401);
-    expect((await response.json() as { error: string }).error).toContain('Cloudflare Access');
+  it('protects authorization management on the UI and API surfaces', async () => {
+    for (const path of ['/connections/authorizations', '/api/authorizations']) {
+      const response = await app.request(path, {}, env);
+      expect(response.status).toBe(401);
+      expect((await response.json() as { error: string }).error).toContain('Cloudflare Access');
+    }
   });
 
   it('allows the synthetic UI identity only in the local environment', async () => {

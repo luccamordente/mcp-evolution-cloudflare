@@ -9,8 +9,7 @@
     "not_found_handling": "none"
   },
   "routes": [
-    { "pattern": "app.wapilot.com.br", "custom_domain": true },
-    { "pattern": "media.wapilot.com.br", "custom_domain": true }
+    { "pattern": "app.wapilot.com.br", "custom_domain": true }
   ],
   "workers_dev": true,
   "observability": { "enabled": true },

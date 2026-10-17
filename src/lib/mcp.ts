@@ -21,7 +21,7 @@ export const MCP_SERVER_INSTRUCTIONS =
 export const MCP_SERVER_NAME = 'whatsapp-mcp';
 
 export const TOOL_DESCRIPTIONS = {
-  list_connections: 'List the user\'s available WhatsApp connections. Use this to discover connection IDs or resolve which connection to use. Returns connection metadata and current availability; credentials and pairing data are never returned.',
+  list_connections: 'List the user\'s registered WhatsApp connections. Use this to discover connection IDs or resolve which connection to use. Returns configuration metadata only; call connection_status for current availability. Credentials and pairing data are never returned.',
   connection_status: 'Read the current availability of one WhatsApp connection. Use when the user asks whether a connection is active or ready. Requires connectionId when the default connection is not unambiguous.',
   search_contacts: 'Find contacts in a WhatsApp connection by name or phone number. Use before messaging when the recipient is not yet identified. Do not use it to search message history.',
   list_groups: 'List groups available in a WhatsApp connection. Use when the user needs group names, IDs, or basic participant information. Results are paginated.',

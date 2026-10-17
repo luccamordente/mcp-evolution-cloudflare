@@ -6,7 +6,7 @@ As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID i
 
 | Ferramenta | Use quando | Não use para | Resultado e limites |
 | --- | --- | --- | --- |
-| `list_connections` | Descobrir conexões ou resolver uma escolha ambígua | Enviar mensagens ou consultar histórico | Registro de configuração e disponibilidade consultada no Evolution Go; credenciais e dados de pareamento são omitidos. |
+| `list_connections` | Descobrir conexões ou resolver uma escolha ambígua | Enviar mensagens ou consultar histórico | Registro de configuração; use `connection_status` para disponibilidade live. Credenciais e dados de pareamento são omitidos. |
 | `connection_status` | Verificar a disponibilidade atual de uma conexão | Descobrir todas as conexões | Estado atual da conexão escolhida. |
 | `search_contacts` | Encontrar uma pessoa ou número antes de uma mensagem | Pesquisar mensagens | Contatos paginados filtrados por nome ou telefone. |
 | `list_groups` | Encontrar grupos e seus metadados básicos | Enviar uma mensagem sem confirmar o destino | Grupos paginados, com participantes básicos quando disponíveis. |

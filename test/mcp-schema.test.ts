@@ -82,6 +82,8 @@ describe('MCP tool output schema', () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain('only to inspect or choose');
     expect(MCP_SERVER_INSTRUCTIONS).not.toContain('send_text');
     expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/evolution|upstream|downstream/i);
+    expect(TOOL_DESCRIPTIONS.list_connections).toContain('configuration metadata only');
+    expect(TOOL_DESCRIPTIONS.list_connections).toContain('connection_status');
     expect(MCP_SERVER_NAME).toBe('whatsapp-mcp');
     expect(MCP_SERVER_NAME).not.toMatch(/evolution|upstream|downstream/i);
   });

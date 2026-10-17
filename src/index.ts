@@ -407,15 +407,24 @@ async function provisionUserConnection(env: Env, user: { id: string; email: stri
   const instanceId = connectionIdFromResponse(created);
   if (!instanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
   const connection = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: name, instanceId, phoneNumber: input.phoneNumber?.trim() || undefined, token });
-  const base = env.MCP_PUBLIC_URL ?? 'https://app.wapilot.com.br';
-  await admin.connectInstance(token, { instanceId: connection.instanceId, webhookUrl: connection.webhookSecret ? `${base}/webhooks/evolution/${connection.webhookSecret}` : undefined, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
-  let qr: unknown;
-  try { qr = await admin.qr(token); } catch (error) {
-    if (error instanceof EvolutionApiError && error.status === 500) qr = undefined;
-    else throw error;
+  try {
+    const base = env.MCP_PUBLIC_URL ?? 'https://app.wapilot.com.br';
+    await admin.connectInstance(token, { instanceId: connection.instanceId, webhookUrl: connection.webhookSecret ? `${base}/webhooks/evolution/${connection.webhookSecret}` : undefined, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
+    let qr: unknown;
+    try { qr = await admin.qr(token); } catch (error) {
+      if (error instanceof EvolutionApiError && error.status === 500) qr = undefined;
+      else throw error;
+    }
+    await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'success' });
+    return { connection, state: 'qr', qr: qrDataUrl(qr), expiresIn: extractQrExpiry(qr) ?? 30 };
+  } catch (error) {
+    try {
+      await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'failure', metadata: { status: error instanceof EvolutionApiError ? error.status : 500, message: safeErrorMessage(error, 'Provisioning failed') } });
+    } catch {
+      // Preserve the original provisioning failure when audit persistence is unavailable.
+    }
+    throw error;
   }
-  await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'success' });
-  return { connection, state: 'qr', qr: qrDataUrl(qr), expiresIn: extractQrExpiry(qr) ?? 30 };
 }
 
 function extractQrExpiry(payload: unknown): number | undefined {

@@ -38,4 +38,4 @@ Grant vigente associado a um usuário e a um cliente OAuth, com seus escopos e d
 Grant cujo prazo terminou. Não aparece na lista de autorizações ativas, mas pode ser contabilizado separadamente quando essa informação estiver disponível.
 
 **Atenção operacional**:
-Sinal derivado usado para priorizar uma conta ou conexão quando o estado live diverge do estado persistido, quando o registro persistido não está ativo ou quando a fonte de status não pôde ser consultada.
+Sinal derivado usado para priorizar uma conta ou conexão quando o Evolution Go informa indisponibilidade, desconexão ou falha de leitura do estado live.

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
 import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
-import { avatarJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
+import { avatarNumberFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
 import { adminPage } from './ui/admin';
@@ -340,10 +340,10 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
       view.state = state;
       view.phoneNumber = phoneNumber;
       view.displayName = extractDisplayName(result) ?? connection.friendlyName;
-      const avatarJid = avatarJidFromPhone(phoneNumber);
-      if (state === 'connected' && avatarJid) {
+      const avatarNumber = avatarNumberFromPhone(phoneNumber);
+      if (state === 'connected' && avatarNumber) {
         try {
-          const avatarPayload = await admin.avatar(token, avatarJid);
+          const avatarPayload = await admin.avatar(token, avatarNumber);
           view.avatarUrl = extractAvatarUrl(avatarPayload);
           console.info(JSON.stringify({ event: 'profile_avatar_lookup', outcome: 'success', hasUrl: Boolean(view.avatarUrl) }));
         } catch (error) {

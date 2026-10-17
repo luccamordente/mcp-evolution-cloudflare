@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avatarJidFromPhone, extractAvatarUrl, extractDisplayName, extractPhone } from '../src/lib/connection-status';
+import { avatarNumberFromPhone, extractAvatarUrl, extractDisplayName, extractPhone } from '../src/lib/connection-status';
 
 describe('Evolution profile response helpers', () => {
   it('extracts the account display name from nested status data', () => {
@@ -39,10 +39,10 @@ describe('Evolution profile response helpers', () => {
     expect(extractPhone(payload)).toBe('5511999999999');
   });
 
-  it('normalizes a device JID to the regular account JID for the avatar request', () => {
-    expect(avatarJidFromPhone('553187959283:21')).toBe('553187959283@s.whatsapp.net');
-    expect(avatarJidFromPhone('5511999999999@s.whatsapp.net')).toBe('5511999999999@s.whatsapp.net');
-    expect(avatarJidFromPhone('+5511999999999:21')).toBe('5511999999999@s.whatsapp.net');
+  it('normalizes a device JID to the bare account number for the avatar request', () => {
+    expect(avatarNumberFromPhone('553187959283:21')).toBe('553187959283');
+    expect(avatarNumberFromPhone('5511999999999@s.whatsapp.net')).toBe('5511999999999');
+    expect(avatarNumberFromPhone('+5511999999999:21')).toBe('5511999999999');
   });
 
   it('extracts the avatar URL from the Evolution avatar envelope', () => {

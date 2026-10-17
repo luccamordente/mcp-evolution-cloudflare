@@ -56,15 +56,9 @@ export function normalizePhoneNumber(value: string | undefined): string | undefi
   return user;
 }
 
-/** Build the regular user JID accepted by Evolution Go's profile endpoint. */
-export function avatarJidFromPhone(value: string | undefined): string | undefined {
-  const candidate = value?.trim();
-  if (!candidate) return undefined;
-  const [, rawServer] = candidate.split('@', 2);
-  const server = rawServer?.trim().toLowerCase();
-  if (server && server !== 's.whatsapp.net') return undefined;
-  const user = normalizePhoneNumber(candidate);
-  return user ? `${user}@s.whatsapp.net` : undefined;
+/** Build the bare account number accepted by Evolution Go's profile endpoint. */
+export function avatarNumberFromPhone(value: string | undefined): string | undefined {
+  return normalizePhoneNumber(value);
 }
 
 function extractStringByKeys(payload: unknown, wantedKeys: string[]): string | undefined {

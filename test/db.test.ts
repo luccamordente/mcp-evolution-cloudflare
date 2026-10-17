@@ -70,7 +70,7 @@ describe('connection defaults', () => {
           bind(...values: unknown[]) {
             return {
               async all<T>() {
-                return { results: defaults.map((row) => ({ id: row.id, userId: values[0], friendlyName: row.id, instanceId: row.id, encryptedToken: 'encrypted', status: 'active', connectionState: 'connected' })) as T[] };
+                return { results: defaults.map((row) => ({ id: row.id, userId: values[0], friendlyName: row.id, instanceId: row.id, encryptedToken: 'encrypted' })) as T[] };
               },
               async first<T>() {
                 if (sql.includes('WHERE id = ?1')) return explicit as T | undefined;
@@ -108,8 +108,10 @@ describe('connection defaults', () => {
 describe('JSON:API webhook ingestion', () => {
   it('persists message resources and redacts the webhook instance token', async () => {
     const seen: Array<{ values: unknown[]; document: Record<string, unknown> }> = [];
+    let lookupSql = '';
     const db = {
       prepare(sql: string) {
+        lookupSql = sql;
         return {
           bind(...values: unknown[]) {
             return {
@@ -155,6 +157,7 @@ describe('JSON:API webhook ingestion', () => {
       meta: { event: 'Message', instanceId: 'instance-1', instanceName: 'lucca' },
     });
     expect(JSON.stringify(seen[0].document)).not.toContain('do-not-store');
+    expect(lookupSql).not.toContain("status = 'active'");
   });
 
   it('accepts a JSON:API collection for history sync', async () => {

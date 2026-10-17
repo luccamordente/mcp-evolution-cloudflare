@@ -9,8 +9,6 @@ type Connection = {
   instanceId: string;
   phoneNumber?: string;
   encryptedToken: string;
-  status: 'active' | 'disabled' | 'error';
-  connectionState?: 'connected' | 'qr' | 'offline' | 'error';
   isDefault: number;
   createdAt: string;
   updatedAt: string;
@@ -75,7 +73,7 @@ describe('administrative operational snapshot', () => {
     ];
     const connections: Connection[] = [{
       id: 'c-1', userId: 'u-1', friendlyName: 'Lucca', instanceId: 'instance-1', phoneNumber: '5511999999999',
-      encryptedToken: 'encrypted-token-secret', status: 'active', connectionState: 'connected', isDefault: 1,
+      encryptedToken: 'encrypted-token-secret', isDefault: 1,
       createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-02T10:00:00Z',
     }];
     const oauth = {
@@ -105,8 +103,8 @@ describe('administrative operational snapshot', () => {
       { id: 'u-2', email: 'two@example.com', status: 'active', createdAt: '2026-10-01', updatedAt: '2026-10-01' },
     ];
     const connections: Connection[] = [
-      { id: 'c-1', userId: 'u-1', friendlyName: 'Online', instanceId: 'online', encryptedToken: 'x', status: 'active', connectionState: 'connected', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
-      { id: 'c-2', userId: 'u-2', friendlyName: 'Offline', instanceId: 'offline', encryptedToken: 'y', status: 'active', connectionState: 'connected', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
+      { id: 'c-1', userId: 'u-1', friendlyName: 'Online', instanceId: 'online', encryptedToken: 'x', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
+      { id: 'c-2', userId: 'u-2', friendlyName: 'Offline', instanceId: 'offline', encryptedToken: 'y', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
     ];
     const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, []) }, dependencies({
       readLiveStatus: async (connection) => {
@@ -136,8 +134,8 @@ describe('administrative operational snapshot', () => {
       { id: 'u-2', email: 'two@example.com', status: 'active', createdAt: '2026-10-01', updatedAt: '2026-10-01' },
     ];
     const connections: Connection[] = [
-      { id: 'c-1', userId: 'u-1', friendlyName: 'One', instanceId: 'instance-one', encryptedToken: 'encrypted-one', status: 'active', connectionState: 'connected', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
-      { id: 'c-2', userId: 'u-2', friendlyName: 'Two', instanceId: 'instance-two', encryptedToken: 'encrypted-two', status: 'active', connectionState: 'connected', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
+      { id: 'c-1', userId: 'u-1', friendlyName: 'One', instanceId: 'instance-one', encryptedToken: 'encrypted-one', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
+      { id: 'c-2', userId: 'u-2', friendlyName: 'Two', instanceId: 'instance-two', encryptedToken: 'encrypted-two', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' },
     ];
     const liveCalls: Array<[string, string]> = [];
     const oauthCalls: string[] = [];
@@ -166,7 +164,7 @@ describe('administrative operational snapshot', () => {
 
   it('preserves D1 and Evolution data when OAuth initialization is unavailable', async () => {
     const users: User[] = [{ id: 'u-1', email: 'one@example.com', status: 'active', createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
-    const connections: Connection[] = [{ id: 'c-1', userId: 'u-1', friendlyName: 'One', instanceId: 'instance-one', encryptedToken: 'encrypted-one', status: 'active', connectionState: 'connected', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
+    const connections: Connection[] = [{ id: 'c-1', userId: 'u-1', friendlyName: 'One', instanceId: 'instance-one', encryptedToken: 'encrypted-one', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
     const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, []) }, dependencies({
       oauth: undefined,
       readLiveStatus: async () => statusPayload({ connected: true, loggedIn: true, myJid: '5511000000000@s.whatsapp.net' }),
@@ -180,21 +178,23 @@ describe('administrative operational snapshot', () => {
 
   it('marks audit activity unavailable instead of presenting an empty audit as complete', async () => {
     const users: User[] = [{ id: 'u-1', email: 'one@example.com', status: 'active', createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
-    const connections: Connection[] = [{ id: 'c-1', userId: 'u-1', friendlyName: 'One', instanceId: 'instance-one', encryptedToken: 'encrypted-one', status: 'active', connectionState: 'connected', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
+    const connections: Connection[] = [{ id: 'c-1', userId: 'u-1', friendlyName: 'One', instanceId: 'instance-one', encryptedToken: 'encrypted-one', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
     const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, [], new Error('audit table unavailable')) }, dependencies());
 
     expect(snapshot.users[0].connections[0]).toMatchObject({ activity: [], activityStatus: 'unavailable' });
     expect(snapshot.sourceFailures).toEqual([expect.objectContaining({ source: 'audit', userId: 'u-1', connectionId: 'c-1' })]);
   });
 
-  it('derives attention from persisted/live divergence and bounds audit activity to three entries', async () => {
+  it('derives attention only from the live provider and bounds audit activity to three entries', async () => {
     const users: User[] = [{ id: 'u-1', email: 'one@example.com', status: 'active', createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
-    const connections: Connection[] = [{ id: 'c-1', userId: 'u-1', friendlyName: 'Needs review', instanceId: 'instance-1', encryptedToken: 'x', status: 'disabled', connectionState: 'qr', isDefault: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01' }];
+    const connections = [{ id: 'c-1', userId: 'u-1', friendlyName: 'Needs review', instanceId: 'instance-1', encryptedToken: 'x', isDefault: 1, status: 'error', connectionState: 'qr', createdAt: '2026-10-01', updatedAt: '2026-10-01' }] as Array<Connection & { status: string; connectionState: string }>;
     const audits: Audit[] = Array.from({ length: 5 }, (_, index) => ({ userId: 'u-1', connectionId: 'c-1', operation: `op-${index}`, outcome: index === 1 ? 'failure' : 'success', createdAt: `2026-10-0${index + 1}` }));
     const snapshot = await buildAdminSnapshot({ ...baseEnv, DB: fakeDb(users, connections, audits) }, dependencies({ readLiveStatus: async () => statusPayload({ connected: true, loggedIn: true }) }));
     const connection = snapshot.users[0].connections[0];
-    expect(connection.attention).toBe(true);
-    expect(connection.attentionReasons).toEqual(expect.arrayContaining(['persisted_inactive', 'state_mismatch']));
+    expect(connection.attention).toBe(false);
+    expect(connection.attentionReasons).toEqual([]);
+    expect(connection).not.toHaveProperty('persistedStatus');
+    expect(connection).not.toHaveProperty('persistedState');
     expect(connection.activity).toHaveLength(3);
     expect(connection.activity[1]).toMatchObject({ operation: 'op-1', outcome: 'failure' });
   });

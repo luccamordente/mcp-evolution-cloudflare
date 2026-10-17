@@ -15,7 +15,7 @@ import { summarizeGrant, type AuthorizationSummary } from './authorizations';
 
 export const DEFAULT_ADMIN_EMAILS = ['luccamordente@gmail.com', 'heitorsalazar@gmail.com'] as const;
 
-export type AdminAttentionReason = 'live_unavailable' | 'live_not_connected' | 'persisted_inactive' | 'state_mismatch';
+export type AdminAttentionReason = 'live_unavailable' | 'live_not_connected';
 
 export interface AdminSourceFailure {
   source: 'evolution' | 'oauth' | 'audit';
@@ -38,8 +38,6 @@ export interface AdminConnectionSnapshot {
   instanceId: string;
   phoneNumber?: string;
   isDefault: boolean;
-  persistedStatus: AdminConnectionRecord['status'];
-  persistedState?: AdminConnectionRecord['connectionState'];
   createdAt: string;
   updatedAt: string;
   live: AdminLiveStatus;
@@ -142,15 +140,13 @@ export async function buildAdminSnapshot(env: Env, dependencies: AdminSnapshotDe
       const activityStatus = 'error' in activityResult ? 'unavailable' : 'available';
       if ('error' in activityResult) failures.push({ source: 'audit', userId: user.id, connectionId: connection.id, message: safeSourceMessage(activityResult.error, 'Auditoria indisponível') });
 
-      const attentionReasons = deriveAttentionReasons(connection, live);
+      const attentionReasons = deriveAttentionReasons(live);
       return {
         id: connection.id,
         friendlyName: connection.friendlyName,
         instanceId: connection.instanceId,
         ...(connection.phoneNumber ? { phoneNumber: connection.phoneNumber } : {}),
         isDefault: connection.isDefault === 1,
-        persistedStatus: connection.status,
-        ...(connection.connectionState ? { persistedState: connection.connectionState } : {}),
         createdAt: connection.createdAt,
         updatedAt: connection.updatedAt,
         live,
@@ -202,12 +198,10 @@ function unavailableLive(checkedAt: string): AdminLiveStatus {
   return { available: false, state: 'unavailable', checkedAt };
 }
 
-function deriveAttentionReasons(connection: AdminConnectionRecord, live: AdminLiveStatus): AdminAttentionReason[] {
+function deriveAttentionReasons(live: AdminLiveStatus): AdminAttentionReason[] {
   const reasons: AdminAttentionReason[] = [];
   if (!live.available) reasons.push('live_unavailable');
   else if (live.state !== 'connected') reasons.push('live_not_connected');
-  if (connection.status !== 'active') reasons.push('persisted_inactive');
-  if (live.available && connection.connectionState && live.state !== connection.connectionState) reasons.push('state_mismatch');
   return reasons;
 }
 

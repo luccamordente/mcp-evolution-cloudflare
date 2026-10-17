@@ -25,11 +25,11 @@ Leitura coerente produzida por uma atualização manual do painel, contendo os d
 
 **Estado live**:
 Disponibilidade atual informada diretamente pelo Evolution Go para uma conexão.
-_Avoid_: estado persistido, status cadastral
+_Avoid_: estado persistido, status cadastral, cadastro
 
-**Estado persistido**:
-Dados registrados no D1 sobre uma conta ou conexão, incluindo cadastro, habilitação, conexão padrão e estado de onboarding.
-_Avoid_: estado live
+**Registro de conexão**:
+Dados de configuração registrados no D1 sobre uma conexão, incluindo usuário, instância, credencial cifrada, conexão padrão e webhook. O registro não representa a disponibilidade atual no WhatsApp.
+_Avoid_: estado live, status cadastral
 
 **Autorização OAuth ativa**:
 Grant vigente associado a um usuário e a um cliente OAuth, com seus escopos e datas relevantes; tokens e credenciais não fazem parte da visão administrativa.

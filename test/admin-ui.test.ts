@@ -45,6 +45,8 @@ describe('admin operational page', () => {
     expect(html).toContain('Auditoria indisponível');
     expect(html).toContain('Nenhuma autorização ativa');
     expect(html).toContain('Atualizar snapshot');
+    expect(html).toContain('Estado live:');
+    expect(html).not.toContain('>Cadastro: ');
     expect(html).not.toContain('/api/connections/provision');
     expect(html).not.toContain('revoke');
     expect(html).not.toContain('method="POST"');

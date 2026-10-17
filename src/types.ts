@@ -31,8 +31,6 @@ export interface ConnectionRecord {
   instanceId: string;
   phoneNumber?: string;
   encryptedToken: string;
-  status: 'active' | 'disabled' | 'error';
-  connectionState?: 'provisioning' | 'qr' | 'connected' | 'expired' | 'offline' | 'error';
   createdAt: string;
   updatedAt: string;
 }
@@ -42,8 +40,6 @@ export interface ConnectionSummary {
   friendlyName: string;
   instanceId: string;
   phoneNumber?: string;
-  status?: ConnectionRecord['status'];
-  connectionState?: ConnectionRecord['connectionState'];
   isDefault?: boolean;
   createdAt?: string;
   updatedAt?: string;

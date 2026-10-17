@@ -239,7 +239,6 @@ app.post('/api/connections/:id/qr', async (c) => {
       subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'],
       immediate: true,
     });
-    await updateConnection(c.env.DB, user.id, connection.id, { status: 'active', connectionState: 'qr' });
     await audit(c.env.DB, { userId: user.id, connectionId: connection.id, operation: 'connection_qr_refresh', outcome: 'success' });
     return c.json({ qr: qrDataUrl(qr), expiresIn: extractQrExpiry(qr) ?? 30 });
   } catch (error) {
@@ -261,7 +260,7 @@ app.post('/api/connections', async (c) => {
 
 app.patch('/api/connections/:id', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
-  const body = await c.req.json<{ friendlyName?: string; phoneNumber?: string; status?: 'active' | 'disabled' | 'error' }>().catch(() => ({}));
+  const body = await c.req.json<{ friendlyName?: string; phoneNumber?: string }>().catch(() => ({}));
   const user = await ensureUser(c.env.DB, auth);
   await updateConnection(c.env.DB, user.id, c.req.param('id'), body);
   await audit(c.env.DB, { userId: user.id, connectionId: c.req.param('id'), operation: 'connection_update', outcome: 'success' });
@@ -407,22 +406,16 @@ async function provisionUserConnection(env: Env, user: { id: string; email: stri
   const created = await admin.createInstance({ name, token });
   const instanceId = connectionIdFromResponse(created);
   if (!instanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
-  let connection: ConnectionSummary | undefined;
-  try {
-    connection = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: name, instanceId, phoneNumber: input.phoneNumber?.trim() || undefined, token, connectionState: 'qr' });
-    const base = env.MCP_PUBLIC_URL ?? 'https://app.wapilot.com.br';
-    await admin.connectInstance(token, { instanceId: connection.instanceId, webhookUrl: connection.webhookSecret ? `${base}/webhooks/evolution/${connection.webhookSecret}` : undefined, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
-    let qr: unknown;
-    try { qr = await admin.qr(token); } catch (error) {
-      if (error instanceof EvolutionApiError && error.status === 500) qr = undefined;
-      else throw error;
-    }
-    await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'success' });
-    return { connection, state: 'qr', qr: qrDataUrl(qr), expiresIn: extractQrExpiry(qr) ?? 30 };
-  } catch (error) {
-    if (connection) await updateConnection(env.DB, owner.id, connection.id, { status: 'error' });
-    throw error;
+  const connection = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: name, instanceId, phoneNumber: input.phoneNumber?.trim() || undefined, token });
+  const base = env.MCP_PUBLIC_URL ?? 'https://app.wapilot.com.br';
+  await admin.connectInstance(token, { instanceId: connection.instanceId, webhookUrl: connection.webhookSecret ? `${base}/webhooks/evolution/${connection.webhookSecret}` : undefined, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
+  let qr: unknown;
+  try { qr = await admin.qr(token); } catch (error) {
+    if (error instanceof EvolutionApiError && error.status === 500) qr = undefined;
+    else throw error;
   }
+  await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'success' });
+  return { connection, state: 'qr', qr: qrDataUrl(qr), expiresIn: extractQrExpiry(qr) ?? 30 };
 }
 
 function extractQrExpiry(payload: unknown): number | undefined {
@@ -450,17 +443,16 @@ async function provisionEvolution(env: Env, base: string, inputs: ProvisionInput
     let created = false;
     if (connection) {
       token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection);
-      summary = { id: connection.id, friendlyName: connection.friendlyName, instanceId: connection.instanceId, phoneNumber: connection.phoneNumber, status: connection.status };
+      summary = { id: connection.id, friendlyName: connection.friendlyName, instanceId: connection.instanceId, phoneNumber: connection.phoneNumber };
       if (refreshInstanceIds.has(item.instanceId)) {
         await admin.reconnectInstance(token, connection.instanceId);
-        await updateConnection(env.DB, owner.id, connection.id, { status: 'active', connectionState: 'qr' });
       }
     } else {
       token = randomInstanceToken();
       const createdResponse = await admin.createInstance({ name: item.name, token });
       const canonicalInstanceId = connectionIdFromResponse(createdResponse);
       if (!canonicalInstanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
-      summary = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: item.name, instanceId: canonicalInstanceId, phoneNumber: item.phoneNumber, token, connectionState: 'qr' });
+      summary = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: item.name, instanceId: canonicalInstanceId, phoneNumber: item.phoneNumber, token });
       created = true;
       await audit(env.DB, { userId: owner.id, connectionId: summary.id, operation: 'connection_provision', outcome: 'success' });
     }

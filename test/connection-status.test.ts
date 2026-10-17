@@ -50,6 +50,20 @@ describe('Evolution profile response helpers', () => {
       jsonapi: { version: '1.1' },
       meta: { result: { URL: 'https://pps.whatsapp.net/avatar' } },
     })).toBe('https://pps.whatsapp.net/avatar');
+
+    expect(extractAvatarUrl({
+      jsonapi: { version: '1.1' },
+      data: {
+        type: 'avatar',
+        id: '362313385',
+        attributes: {
+          url: 'https://pps.whatsapp.net/avatar.jpg',
+          avatarUrl: 'https://pps.whatsapp.net/avatar.jpg',
+          directPath: '/v/avatar.jpg',
+          type: 'image',
+        },
+      },
+    })).toBe('https://pps.whatsapp.net/avatar.jpg');
   });
 
   it('ignores blank profile values', () => {

@@ -245,9 +245,10 @@ app.post('/connections/provision', async (c) => {
 });
 
 app.get('/admin/evolution', async (c) => {
-  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
-  if (auth.email !== 'luccamordente@gmail.com') return c.text('Admin access required', 403);
-  return c.html(adminProvisionPage());
+  // Cloudflare Access protects the /connections application, not this legacy
+  // alias. Redirect before authenticating so the browser enters the Access
+  // challenge and then reaches the owner-only provision flow there.
+  return c.redirect('/connections?provision=1', 302);
 });
 
 async function connectionViews(env: Env, userId: string, _refresh: boolean): Promise<Array<ConnectionSummary & Record<string, unknown>>> {

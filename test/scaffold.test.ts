@@ -71,6 +71,12 @@ describe('worker scaffold', () => {
     }
   });
 
+  it('routes the legacy admin URL through the Access-protected connections surface', async () => {
+    const response = await app.request('/admin/evolution', {}, env);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('/connections?provision=1');
+  });
+
   it('allows the synthetic UI identity only in the local environment', async () => {
     await expect(authenticateAccessRequest(new Request('http://localhost/connections'), {
       ...env,

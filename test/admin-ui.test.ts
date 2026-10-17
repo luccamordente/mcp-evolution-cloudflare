@@ -12,6 +12,22 @@ const env = {
   ALLOWED_EMAILS: 'luccamordente@gmail.com,heitorsalazar@gmail.com',
 } as any;
 
+const dashboardDb = {
+  prepare() {
+    return {
+      first: async () => ({ id: 'local-user', email: 'luccamordente@gmail.com' }),
+      all: async () => ({ results: [] }),
+      bind(...values: unknown[]) {
+        return {
+          first: async () => ({ id: 'local-user', email: values[0] }),
+          all: async () => ({ results: [] }),
+          run: async () => ({ success: true }),
+        };
+      },
+    };
+  },
+} as unknown as D1Database;
+
 describe('admin operational page', () => {
   it('renders an explicitly read-only administrative workspace', () => {
     const html = adminPage();
@@ -61,5 +77,20 @@ describe('admin operational page', () => {
     }
     const outsider = await app.request('/admin', {}, { ...env, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'other@example.com' });
     expect(outsider.status).toBe(403);
+  });
+
+  it('uses the dashboard Access identity for both /connections and /admin', async () => {
+    const sharedAccessEnv = {
+      ...env,
+      DB: dashboardDb,
+      ENVIRONMENT: 'local',
+      LOCAL_DEV_USER_EMAIL: 'luccamordente@gmail.com',
+    };
+
+    const dashboard = await app.request('/connections', {}, sharedAccessEnv);
+    const admin = await app.request('/admin', {}, sharedAccessEnv);
+
+    expect(dashboard.status).toBe(200);
+    expect(admin.status).toBe(200);
   });
 });

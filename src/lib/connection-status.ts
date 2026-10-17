@@ -35,3 +35,36 @@ export function extractPhone(payload: unknown): string | undefined {
   }
   return undefined;
 }
+
+function extractStringByKeys(payload: unknown, wantedKeys: string[]): string | undefined {
+  const wanted = new Set(wantedKeys.map((key) => key.toLowerCase()));
+  const visit = (value: unknown): string | undefined => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = visit(item);
+        if (found) return found;
+      }
+      return undefined;
+    }
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    for (const [key, child] of Object.entries(record)) {
+      if (wanted.has(key.toLowerCase()) && typeof child === 'string' && child.trim()) return child.trim();
+    }
+    for (const child of Object.values(record)) {
+      const found = visit(child);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return visit(payload);
+}
+
+export function extractDisplayName(payload: unknown): string | undefined {
+  return extractStringByKeys(payload, ['displayName', 'profileName', 'pushName', 'name', 'fullName']);
+}
+
+export function extractAvatarUrl(payload: unknown): string | undefined {
+  const value = extractStringByKeys(payload, ['avatarUrl', 'pictureUrl', 'profilePictureUrl', 'profilePictureURL', 'url']);
+  return value && /^https?:\/\//i.test(value) ? value : undefined;
+}

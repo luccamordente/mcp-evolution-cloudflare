@@ -8,6 +8,10 @@ describe('connections workspace page', () => {
     expect(html).toContain('WaPilot · Conexões');
     expect(html).toContain('dashboard-view');
     expect(html).toContain('onboarding-view');
+    expect(html).toContain('displayName');
+    expect(html).toContain('avatarUrl');
+    expect(html).toContain('avatarMarkup');
+    expect(html).toContain('referrerpolicy="no-referrer"');
     expect(html).toContain('/api/connections/provision');
     expect(html).toContain("'/api/connections/'");
     expect(html).toContain("'/qr'");

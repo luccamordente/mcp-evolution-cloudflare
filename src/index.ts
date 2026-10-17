@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
 import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
-import { evolutionState, extractPhone } from './lib/connection-status';
+import { evolutionState, extractAvatarUrl, extractDisplayName, extractPhone } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
 import { connectionsPage } from './ui/connections';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
@@ -257,6 +257,8 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
     const view: ConnectionSummary & Record<string, unknown> = {
       ...connection,
       isDefault: Boolean(connection.isDefault),
+      displayName: connection.friendlyName,
+      avatarUrl: undefined,
       state: 'provisioning',
       statusDetail: undefined,
       lastVerified: 'verificando agora',
@@ -272,10 +274,29 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
       const record = await getConnection(env.DB, userId, connection.id);
       if (!record) throw new Error('Connection not found');
       const token = await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, record);
-      const result = await new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' }).status(token);
+      const admin = new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' });
+      const result = await admin.status(token);
       const state = evolutionState(result);
+      let phoneNumber = extractPhone(result) ?? connection.phoneNumber;
+      if (!phoneNumber && env.EVOLUTION_GLOBAL_API_KEY) {
+        try {
+          phoneNumber = extractPhone(await admin.instanceInfo(connection.instanceId));
+        } catch {
+          // The admin metadata route is only a fallback for providers that do
+          // not include the account JID in /instance/status.
+        }
+      }
       view.state = state;
-      view.phoneNumber = extractPhone(result) ?? connection.phoneNumber;
+      view.phoneNumber = phoneNumber;
+      view.displayName = extractDisplayName(result) ?? connection.friendlyName;
+      const avatarNumber = phoneNumber?.replace(/@.*$/, '').split(':')[0];
+      if (state === 'connected' && avatarNumber) {
+        try {
+          view.avatarUrl = extractAvatarUrl(await admin.avatar(token, avatarNumber));
+        } catch {
+          // Profile pictures are optional and must not hide a live connection.
+        }
+      }
       view.lastVerified = 'verificado agora';
       view.health = state === 'connected' ? 'Saudável' : state === 'offline' ? 'Desconectada' : state === 'error' ? 'Indisponível' : 'Aguardando ação';
       view.healthDetail = state === 'connected' ? 'Recebendo e enviando normalmente' : 'O provedor informou que esta conexão precisa de atenção';

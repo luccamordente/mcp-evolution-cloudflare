@@ -218,6 +218,17 @@ export class EvolutionGoAdminClient {
     return this.request('/instance/status', token);
   }
 
+  async instanceInfo(instanceId: string): Promise<unknown> {
+    return this.request(`/instance/info/${encodeURIComponent(instanceId)}`, this.globalApiKey);
+  }
+
+  async avatar(token: string, number: string): Promise<unknown> {
+    return this.request('/user/avatar', token, {
+      method: 'POST',
+      body: jsonApiBody({ type: 'chat', id: number }),
+    });
+  }
+
   async listInstances(): Promise<unknown> {
     return this.request('/instance/all', this.globalApiKey);
   }

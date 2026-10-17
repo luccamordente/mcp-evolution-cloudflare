@@ -37,6 +37,33 @@ describe('Evolution Go route contracts', () => {
     expect(seen?.headers.get('apikey')).toBe('global-secret');
   });
 
+  it('uses the global key for instance metadata and the instance token for avatars', async () => {
+    const calls: Array<{ url: string; method: string; apiKey: string | null; body?: unknown }> = [];
+    const client = new EvolutionGoAdminClient({
+      baseUrl: 'https://evolution.invalid',
+      globalApiKey: 'global-secret',
+      fetcher: async (request, init) => {
+        calls.push({
+          url: String(request),
+          method: String(init?.method ?? 'GET'),
+          apiKey: new Headers(init?.headers).get('apikey'),
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return Response.json(String(request).includes('/instance/info/')
+          ? { jsonapi: { version: '1.1' }, data: { type: 'connection', id: 'instance-1', attributes: { jid: '5511999999999@s.whatsapp.net' } } }
+          : { jsonapi: { version: '1.1' }, meta: { result: { URL: 'https://pps.whatsapp.net/avatar' } } });
+      },
+    });
+
+    await client.instanceInfo('instance-1');
+    await client.avatar('instance-secret', '5511999999999');
+
+    expect(calls).toEqual([
+      { url: 'https://evolution.invalid/instance/info/instance-1', method: 'GET', apiKey: 'global-secret' },
+      { url: 'https://evolution.invalid/user/avatar', method: 'POST', apiKey: 'instance-secret', body: { data: { type: 'chat', id: '5511999999999' } } },
+    ]);
+  });
+
   it('uses the Go text route and quoted message shape', async () => {
     let seen: { url: string; init: RequestInit } | undefined;
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored-by-go', instanceToken: 'instance-secret', fetcher: async (request, init) => {

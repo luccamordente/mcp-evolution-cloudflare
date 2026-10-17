@@ -5,7 +5,7 @@
 - Worker: `mcp-evolution-cloudflare`
 - URLs: `https://app.wapilot.com.br`, `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
 - Revisão publicada durante esta entrega: `37af8e4a-b506-4b8c-9d74-6e36ba276418`
-- D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`), migrations `0001_init` e `0002_webhook_events` aplicadas remotamente.
+- D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`). O último estado remoto registrado nesta nota tinha as migrations `0001_init` e `0002_webhook_events`; as migrations `0003_connection_defaults` e `0004_remove_connection_runtime_state` fazem parte desta entrega, mas ainda exigem aplicação remota e read-back antes de declarar o schema de produção atualizado.
 - KV OAuth: `3a5b420e14594ee4ae821b720a9bf74a`; preview `29bb2b67785b46bfa7c31d84bbbe9344`.
 
 ## Deploy automático

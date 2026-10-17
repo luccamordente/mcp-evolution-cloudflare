@@ -36,9 +36,9 @@ Cadastre cada instância em `/connections` ou `POST /api/connections` com nome a
 
 ## Proxy de mídia e domínio `media.wapilot.com.br`
 
-O proxy usa o mesmo Worker `mcp-evolution-cloudflare`. O `wrangler.jsonc` declara `media.wapilot.com.br` como domínio customizado e o Worker reconhece esse hostname antes do OAuth Provider. O MCP entrega URLs públicas no formato `/r/<arquivo>`; o proxy redireciona para o objeto em `storage.neurau.com.br` sem transferir os bytes pelo Worker.
+O proxy usa o mesmo Worker `mcp-evolution-cloudflare`. O `wrangler.jsonc` declara `app.wapilot.com.br` e `media.wapilot.com.br` como domínios customizados; o Worker reconhece o hostname de mídia antes do OAuth Provider e mantém a aplicação principal no hostname canônico. O MCP entrega URLs públicas no formato `/r/<arquivo>`; o proxy redireciona para o objeto em `storage.neurau.com.br` sem transferir os bytes pelo Worker.
 
-O domínio customizado é gerenciado pelo próprio Worker. Não deixe um CNAME externo para `media.wapilot.com.br` antes do deploy: a API de Custom Domains rejeita hostnames que já tenham registros DNS externos. O deploy com `custom_domain: true` cria o registro gerenciado (read-only, normalmente `AAAA 100::`) e o certificado; confirme em **Workers & Pages → mcp-evolution-cloudflare → Settings → Domains & Routes** e por uma leitura posterior da zona. A resposta de criação do domínio não substitui essa confirmação.
+Os dois domínios customizados são gerenciados pelo próprio Worker. Não deixe CNAMEs externos para `app.wapilot.com.br` ou `media.wapilot.com.br` antes do deploy: a API de Custom Domains rejeita hostnames que já tenham registros DNS externos. O deploy com `custom_domain: true` cria os registros gerenciados (read-only, normalmente `AAAA 100::`) e os certificados; confirme os dois hostnames em **Workers & Pages → mcp-evolution-cloudflare → Settings → Domains & Routes** e por uma leitura posterior da zona. A resposta de criação dos domínios não substitui essa confirmação.
 
 Valide uma URL assinada com `GET` e `HEAD`. A resposta deve ser `302` e o `Location` deve apontar para `https://storage.neurau.com.br/attachment-storage-production/evolution-go-medias/<arquivo>`, mantendo os seis parâmetros `X-Amz-*` com a mesma codificação e removendo qualquer parâmetro adicional.
 

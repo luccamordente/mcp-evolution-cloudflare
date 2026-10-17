@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { extractAvatarUrl, extractDisplayName, extractPhone } from '../src/lib/connection-status';
 
 describe('Evolution profile response helpers', () => {
-  it('extracts the account display name and JID from nested status data', () => {
+  it('extracts the account display name from nested status data', () => {
     const payload = {
       jsonapi: { version: '1.1' },
       data: {
@@ -12,12 +12,30 @@ describe('Evolution profile response helpers', () => {
           connected: true,
           loggedIn: true,
           name: 'Minha Conta',
-          myJid: '5511999999999@s.whatsapp.net',
         },
       },
     };
 
     expect(extractDisplayName(payload)).toBe('Minha Conta');
+  });
+
+  it('extracts the account JID from Evolution Go instance metadata', () => {
+    const payload = {
+      jsonapi: { version: '1.1' },
+      data: {
+        type: 'connection',
+        id: 'instance-1',
+        attributes: {
+          connected: true,
+          loggedIn: true,
+          name: 'Minha Conta',
+        },
+        meta: {
+          jid: '5511999999999@s.whatsapp.net',
+        },
+      },
+    };
+
     expect(extractPhone(payload)).toBe('5511999999999');
   });
 

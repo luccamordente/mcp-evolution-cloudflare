@@ -13,7 +13,7 @@ export function evolutionState(payload: unknown): ConnectionViewState {
   return 'error';
 }
 
-function connectionAttributes(payload: unknown): Record<string, unknown> | undefined {
+function connectionResourceParts(payload: unknown): { attributes: Record<string, unknown>; meta?: Record<string, unknown> } | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
   const document = payload as Record<string, unknown>;
   const jsonapi = document.jsonapi;
@@ -23,14 +23,23 @@ function connectionAttributes(payload: unknown): Record<string, unknown> | undef
   const resourceRecord = resource as Record<string, unknown>;
   if (resourceRecord.type !== 'connection') return undefined;
   const attributes = resourceRecord.attributes;
-  return attributes && typeof attributes === 'object' && !Array.isArray(attributes) ? attributes as Record<string, unknown> : undefined;
+  if (!attributes || typeof attributes !== 'object' || Array.isArray(attributes)) return undefined;
+  const meta = resourceRecord.meta;
+  return {
+    attributes: attributes as Record<string, unknown>,
+    meta: meta && typeof meta === 'object' && !Array.isArray(meta) ? meta as Record<string, unknown> : undefined,
+  };
+}
+
+function connectionAttributes(payload: unknown): Record<string, unknown> | undefined {
+  return connectionResourceParts(payload)?.attributes;
 }
 
 export function extractPhone(payload: unknown): string | undefined {
-  const attributes = connectionAttributes(payload);
-  if (!attributes) return undefined;
+  const resource = connectionResourceParts(payload);
+  if (!resource) return undefined;
   for (const wanted of ['phone', 'phoneNumber', 'number', 'ownerJid', 'jid', 'myJid']) {
-    const value = attributes[wanted];
+    const value = resource.attributes[wanted] ?? resource.meta?.[wanted];
     if (typeof value === 'string' && value.replace(/\D/g, '').length >= 8) return value.replace(/@.*$/, '');
   }
   return undefined;

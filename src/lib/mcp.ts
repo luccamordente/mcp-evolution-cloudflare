@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AuthenticatedUser, Env } from '../types';
 import { EvolutionGoClient, EvolutionApiError } from './evolution';
 import { audit, ensureUser, getConnection, listConnections, resolveConnection, revealConnectionToken } from './db';
+import { rewriteMediaUrl } from './media-proxy';
 
 const pageInput = {
   cursor: z.string().optional().describe('Opaque cursor returned by a previous page; omit it for the first page.'),
@@ -74,6 +75,7 @@ const sendAnnotations = TOOL_ANNOTATIONS.send;
 
 /** Remove undefined values before MCP validates structuredContent as JSON. */
 export function toJsonValue(value: unknown): unknown {
+  if (typeof value === 'string') return rewriteMediaUrl(value);
   if (Array.isArray(value)) return value.map((item) => item === undefined ? null : toJsonValue(item));
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, toJsonValue(item)]));

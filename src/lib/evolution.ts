@@ -20,6 +20,12 @@ export interface EvolutionConnectInput {
   instanceId?: string;
   webhookUrl?: string;
   subscribe?: string[];
+  immediate?: boolean;
+}
+
+export interface EvolutionQrRenewOptions extends EvolutionConnectInput {
+  maxAttempts?: number;
+  retryDelayMs?: number;
 }
 
 export class EvolutionApiError extends Error {
@@ -169,6 +175,7 @@ export class EvolutionGoAdminClient {
     const attributes: Record<string, unknown> = {};
     if (input.webhookUrl !== undefined) attributes.webhookUrl = input.webhookUrl;
     if (input.subscribe !== undefined) attributes.subscribe = input.subscribe;
+    if (input.immediate !== undefined) attributes.immediate = input.immediate;
     return this.request('/instance/connect', token, {
       method: 'POST',
       body: jsonApiBody({ type: 'connection', ...(input.instanceId ? { id: input.instanceId } : {}), attributes }),
@@ -177,6 +184,27 @@ export class EvolutionGoAdminClient {
 
   async qr(token: string): Promise<unknown> {
     return this.request('/instance/qr', token);
+  }
+
+  /** Start the existing instance again after logout and wait for its QR code.
+   * Reconnecting alone restarts the runtime, but the current Evolution Go
+   * contract requires /instance/connect to begin a new pairing flow. */
+  async renewQr(token: string, options: EvolutionQrRenewOptions = {}): Promise<unknown> {
+    const { maxAttempts = 3, retryDelayMs = 500, ...connectInput } = options;
+    const attempts = Math.max(1, Math.floor(maxAttempts));
+    await this.connectInstance(token, { ...connectInput, immediate: connectInput.immediate ?? true });
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await this.qr(token);
+      } catch (error) {
+        const retryable = error instanceof EvolutionApiError && (error.status === 400 || error.status >= 500);
+        if (!retryable || attempt === attempts) throw error;
+        if (retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+
+    throw new Error('Evolution Go QR renewal did not complete');
   }
 
   async reconnectInstance(token: string, instanceId?: string): Promise<unknown> {

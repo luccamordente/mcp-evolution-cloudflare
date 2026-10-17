@@ -34,6 +34,20 @@ npx wrangler deploy
 
 Cadastre cada instância em `/connections` ou `POST /api/connections` com nome amigável, ID da instância, número opcional e token específico. A resposta de criação entrega uma única URL de webhook; não reutilize nem registre o segredo. Configure no Evolution Go os eventos `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC` e `GROUP` para essa URL.
 
+## Proxy de mídia e domínio `media.wapilot.com.br`
+
+O proxy usa o mesmo Worker `mcp-evolution-cloudflare`. O `wrangler.jsonc` declara `media.wapilot.com.br` como domínio customizado e o Worker reconhece esse hostname antes do OAuth Provider. O MCP entrega URLs públicas no formato `/r/<arquivo>`; o proxy redireciona para o objeto em `storage.neurau.com.br` sem transferir os bytes pelo Worker.
+
+O domínio customizado é gerenciado pelo próprio Worker. Não deixe um CNAME externo para `media.wapilot.com.br` antes do deploy: a API de Custom Domains rejeita hostnames que já tenham registros DNS externos. O deploy com `custom_domain: true` cria o registro gerenciado (read-only, normalmente `AAAA 100::`) e o certificado; confirme em **Workers & Pages → mcp-evolution-cloudflare → Settings → Domains & Routes** e por uma leitura posterior da zona. A resposta de criação do domínio não substitui essa confirmação.
+
+Valide uma URL assinada com `GET` e `HEAD`. A resposta deve ser `302` e o `Location` deve apontar para `https://storage.neurau.com.br/attachment-storage-production/evolution-go-medias/<arquivo>`, mantendo os seis parâmetros `X-Amz-*` com a mesma codificação e removendo qualquer parâmetro adicional.
+
+```sh
+npx wrangler deploy --dry-run
+curl -sS -D - -o /dev/null \
+  'https://media.wapilot.com.br/r/example.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2Fcredential&X-Amz-Date=20261016T175902Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=test&utm_source=some_source'
+```
+
 ## Verificação
 
 ```sh

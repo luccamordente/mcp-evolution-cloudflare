@@ -13,6 +13,7 @@ import {
   sendTextInput,
   toJsonValue
 } from '../src/lib/mcp';
+import { MEDIA_PROXY_HOST, RAW_MEDIA_HOST } from '../src/lib/media-proxy';
 
 describe('MCP tool output schema', () => {
   it('declares data as a JSON value instead of an unconstrained schema', () => {
@@ -30,6 +31,12 @@ describe('MCP tool output schema', () => {
   it('removes undefined fields before structured content validation', () => {
     const safe = toJsonValue({ items: [{ jid: '1@s.whatsapp.net', name: undefined }], next: undefined });
     expect(dataOutput.parse({ data: safe })).toEqual({ data: { items: [{ jid: '1@s.whatsapp.net' }] } });
+  });
+
+  it('rewrites provider media URLs before returning MCP structured content', () => {
+    const safe = toJsonValue({ media: { url: `https://${RAW_MEDIA_HOST}/attachment-storage-production/evolution-go-medias/file.jpg?X-Amz-Signature=abc` } });
+    expect(safe).toEqual({ media: { url: `https://${MEDIA_PROXY_HOST}/r/file.jpg?X-Amz-Signature=abc` } });
+    expect(JSON.stringify(safe)).not.toContain(RAW_MEDIA_HOST);
   });
 
   it('allows an omitted connectionId but rejects null', () => {

@@ -29,7 +29,7 @@ button:focus-visible { outline: 3px solid var(--gallery-green-deep); outline-off
 h1, h2 { font-family: Manrope, "DM Sans", sans-serif; letter-spacing: -.04em; font-weight: 700; margin: 0; }
 h1 { font-size: clamp(22px, 1rem + 1.2vw, 30px); line-height: 1.12; }
 h2 { font-size: 22px; line-height: 1.2; }
-.refresh, .close {
+.refresh, .close, .select-image, .clear-selection {
   flex-shrink: 0; padding: 11px 16px; min-height: 44px;
   border: 1px solid var(--gallery-line); border-radius: 999px; font-weight: 800;
   background: var(--gallery-surface);
@@ -38,6 +38,16 @@ h2 { font-size: 22px; line-height: 1.2; }
 .refresh:hover:not(:disabled) { background: #18b65b; border-color: #18b65b; }
 .close:hover { border-color: var(--gallery-green-deep); background: var(--gallery-mint); }
 .gallery-status { margin: 10px 0 0; color: var(--gallery-muted); font-size: 13px; }
+.selection-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: -8px 0 24px; }
+.selection-status { flex: 1 1 260px; margin: 0; color: var(--gallery-muted); overflow-wrap: anywhere; }
+.selection-status[data-state="confirmed"] { color: var(--gallery-green-deep); }
+.selection-status[data-state="error"], .selection-status[data-state="uncertain"] { color: light-dark(#935b06, #f3d18a); }
+.clear-selection { font-size: 12px; }
+.select-image { display: block; width: 100%; margin-top: 12px; font-size: 12px; }
+.select-image:hover:not(:disabled), .clear-selection:hover:not(:disabled) { border-color: var(--gallery-green-deep); background: var(--gallery-mint); }
+.select-image[aria-pressed="true"] { border-color: var(--gallery-green-deep); color: var(--gallery-green-deep); background: var(--gallery-mint); }
+.select-image[aria-busy="true"] { border-style: dashed; }
+.gallery-item:has(.select-image[aria-pressed="true"]) { border-color: var(--gallery-green-deep); }
 .gallery-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 20px; }
 .gallery-item { min-width: 0; padding: 10px; background: var(--gallery-surface); border: 1px solid var(--gallery-line); border-radius: 14px; box-shadow: 0 5px 16px rgb(16 32 25 / 3.5%); }
 figure { margin: 0; min-width: 0; }
@@ -65,5 +75,5 @@ figure { margin: 0; min-width: 0; }
   .image-dialog { padding: 16px; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .refresh, .close, .thumbnail { transition: background-color .15s, border-color .15s; }
+  .refresh, .close, .thumbnail, .select-image, .clear-selection { transition: background-color .15s, border-color .15s; }
 }

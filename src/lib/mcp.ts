@@ -1,6 +1,7 @@
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { IMAGE_GALLERY_HTML } from '../generated/image-gallery';
 import { approvedImageOrigins, galleryImage } from './image-gallery';
+import { GallerySelectionError, readSelectedGalleryImage } from './gallery-selection';
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { AuthenticatedUser, Env } from '../types';
@@ -48,6 +49,12 @@ export const listMessagesInput = z.object({
 
 export const imageGalleryInput = listMessagesInput.extend({
   limit: z.number().int().min(1).max(20).default(12).describe('Maximum number of image messages to load (default 12, maximum 20). No claim of complete history.'),
+}).strict();
+
+export const galleryImageInput = z.object({
+  connectionId: z.string().uuid().describe('Original resolved connection UUID of the gallery. Required; the default connection is never used.'),
+  conversationId: z.string().trim().min(1).max(200).describe('Original conversation identifier of the selected message.'),
+  messageId: z.string().min(1).max(200).describe('Identifier of the selected image message.'),
 }).strict();
 
 export const sendTextInput = z.object({
@@ -103,6 +110,10 @@ export type McpErrorCode =
   | 'evolution_http_error'
   | 'media_too_large'
   | 'invalid_base64'
+  | 'selected_image_unavailable'
+  | 'selected_image_too_large'
+  | 'selected_image_timeout'
+  | 'selected_image_invalid'
   | 'token_decryption_failed'
   | 'unexpected_error';
 
@@ -125,6 +136,9 @@ function sanitizedMessage(error: unknown, fallback: string): string {
 
 export function classifyMcpError(error: unknown, operation: string): McpToolError {
   const message = sanitizedMessage(error, 'Unexpected error');
+  if (error instanceof GallerySelectionError) {
+    return { code: error.code, status: error.status, retryable: error.retryable, operation, message, hint: 'Refresh the gallery or select another image; no image context was confirmed by this operation.' };
+  }
   if (message === 'Connection not found') {
     return { code: 'connection_not_found', status: 404, retryable: false, operation, message, hint: 'Call list_connections and retry with an existing connectionId.' };
   }
@@ -206,7 +220,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   server.registerTool('search_contacts', { title: 'Search contacts', description: TOOL_DESCRIPTIONS.search_contacts, inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200).describe('Name or phone fragment to search for.'), ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));
   server.registerTool('list_groups', { title: 'List groups', description: TOOL_DESCRIPTIONS.list_groups, inputSchema: z.object({ ...connectionInput, ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('list_groups', connectionId, (c) => c.listGroups(cursor, limit)));
   server.registerTool('list_messages', { title: 'Search messages', description: TOOL_DESCRIPTIONS.list_messages, inputSchema: listMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, conversationId, text, limit }) => read('list_messages', connectionId, (c) => c.listMessages(text, limit, conversationId)));
-  const galleryUri = 'ui://whatsapp/image-gallery-v2.html';
+  const galleryUri = 'ui://whatsapp/image-gallery-v3.html';
   const galleryOrigins = approvedImageOrigins(env.IMAGE_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL);
   const galleryCsp = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'none'; img-src ${galleryOrigins.join(' ') || "'none'"}; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
   const galleryHtml = IMAGE_GALLERY_HTML.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${galleryCsp}">`);
@@ -241,6 +255,40 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       const classified = classifyMcpError(safeError, 'show_image_gallery');
       try { await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation: 'show_image_gallery', outcome: 'failure', metadata: { code: classified.code, status: classified.status } }); } catch { /* Preserve the original safe operation result. */ }
       return { ...fail('show_image_gallery', safeError), ...(resolvedConnectionId ? { _meta: { gallery: toJsonValue({ connectionId: resolvedConnectionId, conversationId, text, limit, approvedOrigins: galleryOrigins, items: [] }) } } : {}) };
+    }
+  });
+
+  registerAppTool(server, 'get_gallery_image', {
+    title: 'Read selected WhatsApp image',
+    description: 'Read one explicitly selected retained image for the gallery context. Does not send a WhatsApp message or start a model response. The original connection, conversation and message identifiers are required. Image bytes and message metadata are private to the app result.',
+    inputSchema: galleryImageInput, outputSchema: dataOutput, annotations: readOnlyAnnotations,
+    _meta: { ui: { resourceUri: galleryUri, visibility: ['app'] } },
+  }, async ({ connectionId, conversationId, messageId }) => {
+    let resolvedConnectionId: string | undefined;
+    try {
+      const { client, connection } = await clientFor(connectionId);
+      resolvedConnectionId = connection.id;
+      // Revalidate through the instance-scoped conversation query. An older
+      // image outside this bounded window fails closed and can be refreshed.
+      const page = await client.listMessages(undefined, 50, conversationId, 'image/*');
+      const message = page.items.find(item => item.id === messageId && item.conversationId === conversationId);
+      if (!message) throw new GallerySelectionError('selected_image_unavailable', 404);
+      const content = await readSelectedGalleryImage(message, galleryOrigins);
+      await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation: 'get_gallery_image', outcome: 'success' });
+      return { ...ok({ available: true, note: 'Selected image read for the gallery. The host must accept the context update before visual context is confirmed.' }), _meta: { selection: toJsonValue({
+        content: [content],
+        message: { connectionId: connection.id, messageId: message.id, conversationId: message.conversationId, to: message.conversationId,
+          sender: message.sender, participant: conversationId.endsWith('@g.us') && message.sender && message.sender !== conversationId ? message.sender : undefined,
+          direction: message.direction, timestamp: message.timestamp, caption: message.text?.slice(0, 2000), mimeType: content.mimeType },
+      }) } };
+    } catch (error) {
+      const initial = classifyMcpError(error, 'get_gallery_image');
+      const status = error instanceof EvolutionApiError ? error.status : 502;
+      const safeError = error instanceof GallerySelectionError || ['connection_not_found', 'token_decryption_failed'].includes(initial.code)
+        ? error : new GallerySelectionError('selected_image_unavailable', status, status === 408 || status === 429 || status >= 500);
+      const classified = classifyMcpError(safeError, 'get_gallery_image');
+      try { await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation: 'get_gallery_image', outcome: 'failure', metadata: { code: classified.code, status: classified.status } }); } catch { /* Preserve the safe operation result. */ }
+      return fail('get_gallery_image', safeError);
     }
   });
 

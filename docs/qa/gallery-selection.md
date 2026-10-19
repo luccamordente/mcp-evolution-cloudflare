@@ -44,10 +44,14 @@ O caso de filtro textual foi reproduzido antes da correção no mesmo navegador:
 
 | Host | Caminho necessário | Resultado nesta entrega |
 | --- | --- | --- |
-| ChatGPT | Conector MCP com MCP Apps, recurso v3, capacidades de imagem/texto/contexto estruturado e próximo turno real | **Pendente.** A branch local não foi publicada nem carregada nesse host. Versão do cliente e capacidade negociada não foram verificadas. |
-| Codex desktop | Integração MCP Apps que carregue o recurso v3 e encaminhe `updateModelContext` ao próximo turno | **Pendente.** O código local não foi instalado/publicado na integração real. A disponibilidade de ferramentas MCP nesta conversa não comprova o carregamento da View nem a transferência multimodal. |
+| ChatGPT | Conector MCP com MCP Apps, recurso v3, capacidades de imagem/texto/contexto estruturado e próximo turno real | **Pendente.** Código publicado para teste; carregamento do recurso, versão do cliente e capacidade negociada ainda não foram verificados nesse host. |
+| Codex desktop | Integração MCP Apps que carregue o recurso v3 e encaminhe `updateModelContext` ao próximo turno | **Pendente.** Código publicado para teste. A disponibilidade de ferramentas MCP nesta conversa não comprova o carregamento da View nem a transferência multimodal. |
 
-Esses dois critérios permanecem abertos no issue #10. Mocks, navegador local e basic-host não substituem a evidência acima. Nenhum deploy, push ou envio WhatsApp real faz parte desta validação local.
+Esses dois critérios permanecem abertos no issue #10. Mocks, navegador local e basic-host não substituem a evidência acima. A validação local anterior à publicação não incluiu deploy, push ou envio WhatsApp real.
+
+## Publicação autorizada para teste
+
+O mantenedor autorizou o deploy em 19 de outubro de 2026. O código `0666241` foi publicado na revisão `3f69a8cb-b12e-4559-9124-fcbfb0aa2154`, confirmada em 100% do tráfego às 19:04 (America/Bahia). Saúde e descoberta OAuth responderam `200`; `/mcp` sem bearer respondeu `401` tanto em GET quanto em POST. A publicação não executou ferramentas autenticadas nem enviou mensagens reais. Os testes por host acima continuam pendentes; abra uma nova galeria v3 para iniciá-los.
 
 ## Roteiro para concluir os critérios dos hosts
 

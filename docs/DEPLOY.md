@@ -4,9 +4,15 @@
 
 - Worker: `mcp-evolution-cloudflare`
 - URLs: `https://app.wapilot.com.br`, `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
-- Revisão publicada durante esta entrega: `dd42d725-737f-46f3-94a8-779364cfc97f`
+- Revisão publicada para teste do issue #10 em 19 de outubro de 2026: `3f69a8cb-b12e-4559-9124-fcbfb0aa2154`, código do commit `0666241`.
 - D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`), migrations `0001_init`, `0002_webhook_events`, `0003_connection_defaults` e `0004_remove_connection_runtime_state` aplicadas remotamente. O read-back de 17 de outubro de 2026 confirmou a remoção de `status`/`connection_state` e preservou os dois registros de conexão, seus `instance_id`, flags padrão e timestamps.
 - KV OAuth: `3a5b420e14594ee4ae821b720a9bf74a`; preview `29bb2b67785b46bfa7c31d84bbbe9344`.
+
+## Deploy do issue #10 para teste
+
+Em 19 de outubro de 2026, às 19:04 (America/Bahia), o mantenedor autorizou a publicação da branch `codex/issue-10-image-selection`. O Wrangler 4.150.0 publicou o código do commit `0666241` com `--keep-vars`. O read-back do deployment `ecc9c9ce-d5f2-413c-9c54-8a125e32d4f9` confirmou a revisão acima em 100% do tráfego. Não houve push, migration ou alteração de segredos.
+
+Depois da publicação, `/healthz` respondeu `200` com protocolo `2026-07-28`; GET e POST em `/mcp` sem bearer responderam `401` com metadata OAuth; `/.well-known/oauth-protected-resource/mcp` respondeu `200` com o recurso canônico. Isso confirma a publicação e a proteção HTTP, sem comprovar o fluxo visual em um host real. Para testar a seleção, atualize o catálogo do cliente e abra uma nova galeria com o recurso v3. A validação de próximo turno e preparação de reply em ChatGPT/Codex continua registrada em [qa/gallery-selection.md](qa/gallery-selection.md).
 
 ## Deploy automático
 

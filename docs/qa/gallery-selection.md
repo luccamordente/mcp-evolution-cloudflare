@@ -7,7 +7,7 @@ Data: 19 de outubro de 2026. Integração local: `codex/issue-10-image-selection
 - SDK MCP Apps fixado: `@modelcontextprotocol/ext-apps` 2.0.3; servidor/cliente MCP 2.3.1; protocolo HTTP stateless `2026-07-28`.
 - Recurso versionado: `ui://whatsapp/image-gallery-v3.html`.
 - Leitura auxiliar: `get_gallery_image`, somente leitura/visibilidade `app`, com UUID de conexão, conversa e ID de mensagem obrigatórios; URLs arbitrárias são rejeitadas.
-- Proveniência: busca autenticada das 50 imagens mais recentes da conversa e correspondência exata dos identificadores. Uma seleção antiga fora dessa janela pode falhar; atualizar a galeria é a recuperação disponível, sem lookup global de mensagem.
+- Proveniência: busca autenticada das 50 imagens mais recentes da conversa e correspondência exata dos identificadores. A revalidação não aplica o filtro textual: uma imagem antiga encontrada por texto pode continuar com miniatura disponível e falhar na seleção por estar fora dessa janela. Atualizar a galeria é a recuperação disponível, sem lookup global de mensagem.
 - Mídia selecionada: JPEG, PNG, GIF, WebP ou AVIF, até 5 MiB, leitura de storage em até 10 segundos, sem seguir redirects. MIME e assinatura precisam corresponder. A UI decodifica em memória e limita a 16.777.216 pixels; um formato pode ser recusado se o navegador não conseguir decodificá-lo.
 - Apenas os bytes escolhidos e a projeção da mensagem entram no contexto corrente. URLs assinadas, envelopes brutos, credenciais e outras imagens permanecem fora dele.
 
@@ -16,6 +16,10 @@ Data: 19 de outubro de 2026. Integração local: `codex/issue-10-image-selection
 O baseline anterior à mudança passou com 134 testes, typecheck e verificação do bundle. Os ciclos red→green exercitam as fronteiras confirmadas pelo mantenedor: ferramenta MCP de leitura autorizada, ações da galeria/ponte `updateModelContext` e contrato de `reply_to_message`.
 
 As capturas da ponte em testes devem conter PNG decodificável e metadados da mesma mensagem/conexão. Elas comprovam a forma do conteúdo enviado, não sua inclusão em um turno de um host real. A preparação de reply usa HTTP/D1 simulados; não envia mensagens reais.
+
+O backend integrado passou em 91 testes de seleção, galeria e catálogo. A captura de reply individual/grupo usa os metadados retornados pela seleção após trocar o padrão no D1 simulado, e confere uma única escrita no destino e na instância originais, com o participante conhecido do grupo. Não houve escrita antes do pedido explícito simulado. Fixtures não sensíveis dos cinco formatos aceitos foram decodificadas com Pillow 12.1.1; a UI ainda precisa decodificar cada arquivo antes da entrega.
+
+Um aviso após 15 segundos de espera pela confirmação do host não libera a fila de escritas: a promessa original continua pendente até se resolver. Rejeição da ponte, incluindo timeout do SDK ou perda de conexão, deixa o contexto incerto e bloqueia novas escritas nessa View. A UI identifica a última seleção confirmada e pede reabertura; não promete que um host com resposta perdida deixou de aplicar a imagem. Esse caso precisa ser conferido em cada integração real.
 
 ## Validação obrigatória por host
 

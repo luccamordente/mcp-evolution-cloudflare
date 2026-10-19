@@ -49,7 +49,7 @@ O cliente consulta diretamente `GET /message/search`, enviando a conversa como `
 
 Todas as respostas bem-sucedidas usam `structuredContent.data` e podem conter objetos, listas, strings, números, booleanos ou `null`. Erros de execução usam `isError: true`, repetem um envelope sanitizado em `content[0].text` e em `structuredContent.data.error`, com os campos:
 
-- `code`: classificação estável (`connection_not_found`, `no_default_connection`, `multiple_default_connections`, `evolution_unreachable`, `evolution_http_error`, `media_too_large`, `invalid_base64`, `token_decryption_failed` ou `unexpected_error`);
+- `code`: classificação estável (`connection_not_found`, `no_default_connection`, `multiple_default_connections`, `evolution_unreachable`, `evolution_http_error`, `media_too_large`, `invalid_base64`, `token_decryption_failed`, `selected_image_unavailable`, `selected_image_too_large`, `selected_image_timeout`, `selected_image_invalid` ou `unexpected_error`);
 - `status`: status HTTP sem payload upstream;
 - `retryable`: indica se uma nova tentativa é plausível; operações de escrita não devem ser repetidas automaticamente;
 - `operation`: nome da ferramenta que falhou;

@@ -39,3 +39,14 @@ Grant cujo prazo terminou. Não aparece na lista de autorizações ativas, mas p
 
 **Atenção operacional**:
 Sinal derivado usado para priorizar uma conta ou conexão quando o Evolution Go informa indisponibilidade, desconexão ou falha de leitura do estado live.
+
+## Galeria
+
+**Mensagem selecionada**:
+Referência à mensagem WhatsApp original escolhida explicitamente na galeria, incluindo o identificador da conexão resolvida, da conversa e da mensagem. Não autoriza envio nem muda com a conexão padrão.
+
+**Conteúdo visual selecionado**:
+Imagem da mensagem selecionada efetivamente entregue ao contexto do modelo pela ponte MCP Apps. A miniatura na galeria, sua legenda e sua URL não comprovam essa entrega; a confirmação depende da aceitação do host.
+
+**Seleção corrente da galeria**:
+Única mensagem selecionada confirmada para uma instância da galeria. Substituição e remoção atualizam o contexto dessa View para os próximos turnos; não apagam conteúdo já incorporado ao histórico do chat.

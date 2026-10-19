@@ -13,6 +13,8 @@ Este projeto não copia código dos dois servidores MCP analisados. Ele usa os r
 As licenças e versões fixadas estão no lockfile:
 
 - `@modelcontextprotocol/server` 2.3.1 — Apache-2.0; SDK oficial com suporte à revisão MCP `2026-07-28`.
+- `@modelcontextprotocol/client` 2.3.1 — Apache-2.0; peer do SDK MCP Apps v2.
+- `@modelcontextprotocol/ext-apps` 2.0.3 — SDK oficial MCP Apps. O pacote declara MIT, mas o arquivo LICENSE distribuído registra a transição de código para Apache-2.0, preservando trechos MIT; veja [texto integral preservado](third_party/mcp-ext-apps-LICENSE.txt). O build da UI mantém os avisos distribuídos.
 - `@cloudflare/workers-oauth-provider` 1.2.3 — MIT; OAuth 2.1, PKCE S256, RFC 8414/7591/8707/9207/9728 e armazenamento KV.
 - `hono` 4.13.13 — MIT; roteamento Web API para a interface e webhook.
 - `jose` 6.2.12 — MIT; validação JWT/JWKS de assertions do Cloudflare Access.

@@ -19,7 +19,8 @@ function approvedUrl(item: Item, origins: unknown[]): string | undefined {
   if (item.state !== 'ready' || !RASTER_MIMES.has(text(item.mimeType).trim().toLowerCase())) return;
   try {
     const url = new URL(text(item.url));
-    if (url.protocol !== 'https:' || url.username || url.password) return;
+    if (text(item.url).length > 8192 || url.protocol !== 'https:' || url.username || url.password || url.hash) return;
+    if (/\.(?:svg|html?|xhtml)(?:$|[/?])/i.test(decodeURIComponent(url.pathname))) return;
     if (!origins.includes(url.origin)) return;
     return url.href;
   } catch {
@@ -76,7 +77,7 @@ export function mountGallery(root: HTMLElement, bridge: GalleryBridge) {
   let busy = false;
   let generation = 0;
 
-  function fail(message = 'Não foi possível carregar as imagens. Atualize para tentar novamente.') {
+  function fail(message = query ? 'Não foi possível carregar as imagens. Atualize para tentar novamente.' : 'Não foi possível carregar as imagens. Peça ao agente para abrir a galeria novamente.') {
     root.dataset.state = 'error';
     status.textContent = message;
   }
@@ -102,7 +103,7 @@ export function mountGallery(root: HTMLElement, bridge: GalleryBridge) {
 
   function render(result: unknown) {
     const gallery = record(record(record(result)?._meta)?.gallery);
-    if (record(result)?.isError || !gallery || !Array.isArray(gallery.items) || !text(gallery.connectionId)) {
+    if (!gallery || !Array.isArray(gallery.items) || !text(gallery.connectionId)) {
       fail();
       return;
     }
@@ -110,6 +111,7 @@ export function mountGallery(root: HTMLElement, bridge: GalleryBridge) {
     if (text(gallery.conversationId)) query.conversationId = gallery.conversationId;
     if (text(gallery.text)) query.text = gallery.text;
     refresh.disabled = busy;
+    if (record(result)?.isError) { fail(); return; }
     if (dialog.open) dialog.close();
     grid.replaceChildren();
     const origins = Array.isArray(gallery.approvedOrigins) ? gallery.approvedOrigins : [];

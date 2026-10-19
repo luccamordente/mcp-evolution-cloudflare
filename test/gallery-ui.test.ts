@@ -35,13 +35,15 @@ describe('image gallery host bridge and DOM', () => {
       { state: 'ready', mimeType: 'text/html', url: 'https://images.example.test/a.html' },
       { state: 'ready', mimeType: 'image/png', url: 'https://user:secret@images.example.test/a.png' },
       { state: 'ready', mimeType: 'image/png', url: 'http://images.example.test/a.png' },
+      { state: 'ready', mimeType: 'image/png', url: 'https://images.example.test/active.svg' },
+      { state: 'ready', mimeType: 'image/png', url: 'https://images.example.test/active.html' },
       { state: 'ready', mimeType: 'image/png', url: 'https://images.example.test/safe.png' },
     ]));
     expect(root.querySelectorAll('img')).toHaveLength(1);
     expect(root.textContent).toContain('Arquivo não disponível');
     expect(root.textContent).toContain('Formato não suportado');
     expect(root.textContent).toContain('Imagem bloqueada');
-    expect(root.querySelectorAll('li')).toHaveLength(7);
+    expect(root.querySelectorAll('li')).toHaveLength(9);
   });
 
   it('refreshes through the host using the resolved connection and query, then renders renewed links', async () => {
@@ -115,4 +117,16 @@ describe('image gallery host bridge and DOM', () => {
     await vi.waitFor(() => expect(root.dataset.state).toBe('empty'));
     expect(callServerTool.mock.calls[0][0].arguments.limit).toBe(20);
   });
+  it('can retry an initial authorized storage error using the resolved connection', async () => {
+    const { root, bridge, callServerTool } = setup();
+    bridge.ontoolinput!({ arguments: {} });
+    bridge.ontoolresult!({ ...result([]), isError: true });
+    expect(root.dataset.state).toBe('error');
+    expect((root.querySelector('.refresh') as HTMLButtonElement).disabled).toBe(false);
+    callServerTool.mockResolvedValueOnce(result());
+    (root.querySelector('.refresh') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(root.dataset.state).toBe('ready'));
+    expect(callServerTool.mock.calls[0][0].arguments.connectionId).toBe('resolved-connection');
+  });
+
 });

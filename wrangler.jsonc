@@ -3,6 +3,7 @@
   "name": "mcp-evolution-cloudflare",
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-13",
+  "build": { "command": "npm run build:gallery", "watch_dir": ["ui", "scripts/build-gallery.mjs"] },
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
     "directory": "./public",

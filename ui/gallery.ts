@@ -167,7 +167,7 @@ export function mountGallery(root: HTMLElement, bridge: GalleryBridge) {
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        bridge.callServerTool({ name: 'get_gallery_image', arguments: { connectionId, messageId, conversationId } }, { timeout: 15000, signal: controller.signal }),
+        bridge.callServerTool({ name: 'get_gallery_image', arguments: { connectionId, messageId, conversationId, ...(typeof query?.text === 'string' ? { text: query.text } : {}) } }, { timeout: 15000, signal: controller.signal }),
         new Promise<never>((_resolve, reject) => {
           deadline = setTimeout(() => { controller.abort(); reject(new Error('media_timeout')); }, 15000);
         }),

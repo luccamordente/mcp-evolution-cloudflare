@@ -60,6 +60,7 @@ export const galleryImageInput = z.object({
   connectionId: z.string().uuid().describe('Original resolved connection UUID of the gallery. Required; the default connection is never used.'),
   conversationId: z.string().trim().min(1).max(200).describe('Original conversation identifier of the selected message.'),
   messageId: z.string().min(1).max(200).describe('Identifier of the selected image message.'),
+  text: listMessagesInput.shape.text.describe('Original optional gallery text filter; reapplied when revalidating the selected message.'),
 }).strict();
 
 export const sendTextInput = z.object({
@@ -268,14 +269,14 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     description: 'Read one explicitly selected retained image for the gallery context. Does not send a WhatsApp message or start a model response. The original connection, conversation and message identifiers are required. Image bytes and message metadata are private to the app result.',
     inputSchema: galleryImageInput, outputSchema: dataOutput, annotations: readOnlyAnnotations,
     _meta: { ui: { resourceUri: galleryUri, visibility: ['app'] } },
-  }, async ({ connectionId, conversationId, messageId }) => {
+  }, async ({ connectionId, conversationId, messageId, text }) => {
     let resolvedConnectionId: string | undefined;
     try {
       const { client, connection } = await clientFor(connectionId);
       resolvedConnectionId = connection.id;
-      // Revalidate through the instance-scoped conversation query. An older
-      // image outside this bounded window fails closed and can be refreshed.
-      const page = await client.listMessages(undefined, 50, conversationId, 'image/*');
+      // Reapply the original gallery filter in the instance-scoped conversation
+      // query. A message outside the current bounded result window fails closed.
+      const page = await client.listMessages(text, 50, conversationId, 'image/*');
       const message = page.items.find(item => item.id === messageId && item.conversationId === conversationId);
       if (!message) throw new GallerySelectionError('selected_image_unavailable', 404);
       const content = await readSelectedGalleryImage(message, galleryOrigins);

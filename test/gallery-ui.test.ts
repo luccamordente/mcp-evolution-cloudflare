@@ -39,7 +39,7 @@ describe('image gallery host bridge and DOM', () => {
     expect(select).not.toBeNull();
     select.click();
     await vi.waitFor(() => expect(updateModelContext).toHaveBeenCalledOnce());
-    expect(callServerTool).toHaveBeenCalledExactlyOnceWith({ name: 'get_gallery_image', arguments: { connectionId: 'resolved-connection', messageId: 'message-a', conversationId: 'chat' } }, expect.objectContaining({ timeout: 15000 }));
+    expect(callServerTool).toHaveBeenCalledExactlyOnceWith({ name: 'get_gallery_image', arguments: { connectionId: 'resolved-connection', messageId: 'message-a', conversationId: 'chat', text: 'photo' } }, expect.objectContaining({ timeout: 15000 }));
     const context = updateModelContext.mock.calls[0][0];
     expect(context.content).toContainEqual({ type: 'image', data: pixels, mimeType: 'image/png' });
     expect(context.content[0].text).toContain('O usuário selecionou a mensagem message-a');
@@ -47,6 +47,21 @@ describe('image gallery host bridge and DOM', () => {
     expect(JSON.stringify(context)).not.toMatch(/https:|signature|apikey|token/);
     await vi.waitFor(() => expect(select.getAttribute('aria-pressed')).toBe('true'));
     expect(root.textContent).toContain('Mensagem message-a selecionada');
+  });
+
+  it('selects an older image using the original gallery text filter', async () => {
+    const { root, bridge, callServerTool, updateModelContext } = setup();
+    const galleryResult = result([selectable('old-image')]);
+    galleryResult._meta.gallery.text = 'Foto antiga & família + viagem';
+    bridge.ontoolresult!(galleryResult);
+    callServerTool.mockImplementation(async request => request.arguments.text === 'Foto antiga & família + viagem'
+      ? selection('old-image') : { isError: true });
+    root.querySelector<HTMLButtonElement>('.select-image')!.click();
+    await vi.waitFor(() => expect(root.textContent).toContain('Mensagem old-image selecionada'));
+    expect(callServerTool).toHaveBeenCalledExactlyOnceWith({ name: 'get_gallery_image', arguments: {
+      connectionId: 'resolved-connection', messageId: 'old-image', conversationId: 'chat', text: 'Foto antiga & família + viagem',
+    } }, expect.objectContaining({ timeout: 15000 }));
+    expect(updateModelContext.mock.calls[0][0].structuredContent.selectedMessage.messageId).toBe('old-image');
   });
 
   it('explains unavailable image context support without reading or confirming a selection', () => {

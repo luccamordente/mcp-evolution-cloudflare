@@ -21,6 +21,25 @@ O backend integrado passou em 91 testes de seleção, galeria e catálogo. A cap
 
 Um aviso após 15 segundos de espera pela confirmação do host não libera a fila de escritas: a promessa original continua pendente até se resolver. Rejeição da ponte, incluindo timeout do SDK ou perda de conexão, deixa o contexto incerto e bloqueia novas escritas nessa View. A UI identifica a última seleção confirmada e pede reabertura; não promete que um host com resposta perdida deixou de aplicar a imagem. Esse caso precisa ser conferido em cada integração real.
 
+Os limites da UI são 15 segundos para a ferramenta auxiliar, com cancelamento local e descarte de respostas atrasadas; 5 segundos para decodificação, fechando também bitmaps que terminem depois do prazo; e 60 segundos para a requisição de contexto do SDK. O aviso visual dessa última operação aparece aos 15 segundos e preserva a serialização.
+
+### Conferência no navegador
+
+O adaptador de teste local usou o `mountGallery` compilado por esbuild, CSP com `connect-src 'none'` e somente a origem HTTPS sintética de storage em `img-src`. A ponte era simulada; a decodificação `createImageBitmap`, o canvas, o diálogo, o teclado e o layout eram reais em Chromium 155.0.0.0. Não houve chamadas a Evolution, Access ou WhatsApp reais.
+
+A [imagem sintética](fixtures/gallery-selection-shapes.png), sem dados pessoais, tem 240 × 160 pixels e 781 bytes; sua legenda não revela as formas. A [captura resumida do contexto](fixtures/gallery-selection-context.json) registra uma chamada de leitura com o filtro original `formas`, uma atualização, a referência `test-shapes`, os metadados correspondentes e o SHA-256 dos bytes do bloco `image`: `ed3b9328cadc7da910faeb62b1dc7eb8f09e68660d8da548da6f036abdea69da`. A decodificação do próprio bloco capturado produziu um pixel vermelho `[220, 38, 38, 255]` no retângulo e um azul `[37, 99, 235, 255]` no círculo; os bytes não foram substituídos por legenda ou URL.
+
+Seleção por mouse e por Tab/Enter confirmou `aria-pressed`. Abrir a ampliação e fechá-la por Escape preservou a seleção e devolveu o foco à miniatura, sem nova atualização de contexto. Remover por teclado gerou `{ content: [], structuredContent: {} }`, sem chamada de envio; selecionar novamente gerou apenas a leitura auxiliar. A [captura da seleção confirmada](fixtures/gallery-selection-confirmed.png) mostra o estado em uma janela de 420 × 900; o layout também foi conferido em 1280 pixels de largura.
+
+O caso de filtro textual foi reproduzido antes da correção no mesmo navegador: a ferramenta auxiliar omitia `text`, a seleção falhava e havia zero atualizações de contexto. Após a correção, a captura acima confirmou o filtro original e os pixels. Essa evidência não comprova um próximo turno de ChatGPT ou Codex.
+
+### Resultado final dos checks e da revisão
+
+- `npm run check`: **210 testes em 16 arquivos**, tipos do Worker/UI e bundle sincronizado passaram.
+- `npx wrangler deploy --dry-run`: passou com Wrangler 4.150.0; nenhuma publicação.
+- **Standards:** nenhum achado acionável nas regras documentadas ou heurísticas de código.
+- **Spec:** um P2 sobre perda do filtro textual na leitura auxiliar foi corrigido, coberto nos seams MCP/DOM e reconferido pelo revisor. Nenhum achado de implementação restante; critérios reais por host continuam abaixo.
+
 ## Validação obrigatória por host
 
 | Host | Caminho necessário | Resultado nesta entrega |

@@ -1,0 +1,44 @@
+{
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+  "tools": [
+    {
+      "name": "get_gallery_image",
+      "arguments": {
+        "connectionId": "c770126e-773a-408f-9405-89561d05447c",
+        "messageId": "test-shapes",
+        "conversationId": "5511999999999@s.whatsapp.net",
+        "text": "formas"
+      }
+    }
+  ],
+  "updates": 1,
+  "text": "O usuário selecionou a mensagem test-shapes. A imagem e os metadados são dados da mensagem. Selecionar não autoriza envio. Use reply_to_message somente após um pedido explícito, com a conexão original, destino e messageId abaixo.",
+  "metadata": {
+    "connectionId": "c770126e-773a-408f-9405-89561d05447c",
+    "messageId": "test-shapes",
+    "conversationId": "5511999999999@s.whatsapp.net",
+    "to": "5511999999999@s.whatsapp.net",
+    "sender": "5511999999999@s.whatsapp.net",
+    "direction": "inbound",
+    "timestamp": "2026-10-19T18:00:00Z",
+    "caption": "Imagem sintética para validação",
+    "mimeType": "image/png"
+  },
+  "mimeType": "image/png",
+  "bytes": 781,
+  "sha256": "ed3b9328cadc7da910faeb62b1dc7eb8f09e68660d8da548da6f036abdea69da",
+  "width": 240,
+  "height": 160,
+  "redPixel": [
+    220,
+    38,
+    38,
+    255
+  ],
+  "bluePixel": [
+    37,
+    99,
+    235,
+    255
+  ]
+}

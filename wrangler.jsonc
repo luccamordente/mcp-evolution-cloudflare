@@ -27,6 +27,7 @@
   }],
   "vars": {
     "EVOLUTION_BASE_URL": "https://zipt-zopt.neurau.com.br",
+    "IMAGE_STORAGE_ORIGINS": "https://storage.neurau.com.br",
     "MCP_PUBLIC_URL": "https://app.wapilot.com.br",
     "ALLOWED_EMAILS": "luccamordente@gmail.com,heitorsalazar@gmail.com",
     "MAX_MEDIA_BYTES": "8388608",

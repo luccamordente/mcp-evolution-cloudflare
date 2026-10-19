@@ -6,8 +6,8 @@ Data: 19 de outubro de 2026. Integração local: `codex/issue-10-image-selection
 
 - SDK MCP Apps fixado: `@modelcontextprotocol/ext-apps` 2.0.3; servidor/cliente MCP 2.3.1; protocolo HTTP stateless `2026-07-28`.
 - Recurso versionado: `ui://whatsapp/image-gallery-v3.html`.
-- Leitura auxiliar: `get_gallery_image`, somente leitura/visibilidade `app`, com UUID de conexão, conversa e ID de mensagem obrigatórios; URLs arbitrárias são rejeitadas.
-- Proveniência: busca autenticada das 50 imagens mais recentes da conversa e correspondência exata dos identificadores. A revalidação não aplica o filtro textual: uma imagem antiga encontrada por texto pode continuar com miniatura disponível e falhar na seleção por estar fora dessa janela. Atualizar a galeria é a recuperação disponível, sem lookup global de mensagem.
+- Leitura auxiliar: `get_gallery_image`, somente leitura/visibilidade `app`, com UUID de conexão, conversa e ID de mensagem obrigatórios e filtro `text` original opcional de até 200 caracteres; URLs arbitrárias são rejeitadas.
+- Proveniência: busca autenticada de até 50 imagens mais recentes da conversa, reaplicando o filtro textual original, e correspondência exata dos identificadores. Uma imagem antiga encontrada por texto continua selecionável mesmo fora da janela sem filtro. Se a mensagem deixou a janela atual dos resultados filtrados, atualizar a galeria é a recuperação disponível, sem lookup global de mensagem.
 - Mídia selecionada: JPEG, PNG, GIF, WebP ou AVIF, até 5 MiB, leitura de storage em até 10 segundos, sem seguir redirects. MIME e assinatura precisam corresponder. A UI decodifica em memória e limita a 16.777.216 pixels; um formato pode ser recusado se o navegador não conseguir decodificá-lo.
 - Apenas os bytes escolhidos e a projeção da mensagem entram no contexto corrente. URLs assinadas, envelopes brutos, credenciais e outras imagens permanecem fora dele.
 

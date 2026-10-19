@@ -83,6 +83,33 @@ describe('selected image MCP boundary', () => {
     expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('apikey')).toBeNull();
   });
 
+  it('selects an older image found by the gallery text filter outside the unfiltered recent window', async () => {
+    const { call, rpc, fetcher } = await selectionTool();
+    const filter = 'Foto antiga & família + viagem';
+    const oldImage = { ...retainedImage, id: 'old-image' };
+    fetcher.mockImplementation(async url => {
+      const request = new URL(String(url));
+      if (request.pathname === '/message/search') {
+        const items = request.searchParams.get('q') === filter
+          ? [oldImage]
+          : Array.from({ length: 50 }, (_, index) => ({ ...retainedImage, id: `recent-${index}` }));
+        return Response.json({ jsonapi: { version: '1.1' }, data: items });
+      }
+      return new Response(Uint8Array.from(atob(png), byte => byte.charCodeAt(0)), { headers: { 'content-type': 'image/png' } });
+    });
+    const gallery = await rpc<{ _meta: { gallery: { text: string; items: Array<{ id: string }> } } }>('tools/call', {
+      name: 'show_image_gallery', arguments: { connectionId, conversationId, text: filter },
+    });
+    expect(gallery.result._meta.gallery.items.map(item => item.id)).toEqual(['old-image']);
+    const { result } = await call({ messageId: 'old-image', text: gallery.result._meta.gallery.text });
+    expect(result.isError).not.toBe(true);
+    expect(result._meta?.selection).toMatchObject({
+      content: [{ type: 'image', data: png, mimeType: 'image/png' }],
+      message: { connectionId, conversationId, messageId: 'old-image' },
+    });
+    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[1][0])).searchParams)).toEqual({ q: filter, chat: conversationId, encodingFormat: 'image/*', limit: '50' });
+  });
+
   it('preserves the group destination and known participant for a quoted reply', async () => {
     const { call, fetcher } = await selectionTool();
     const groupId = '120363123456789@g.us';
@@ -120,6 +147,7 @@ describe('selected image MCP boundary', () => {
     { connectionId: undefined }, { connectionId: null }, { connectionId: 'instance-secret' },
     { conversationId: undefined }, { conversationId: '' }, { conversationId: 'x'.repeat(201) },
     { messageId: undefined }, { messageId: '' }, { messageId: 'x'.repeat(201) },
+    { text: null }, { text: 123 }, { text: 'x'.repeat(201) },
     { url: 'https://storage.example.test/injected.png?signature=arbitrary-url' },
   ])('rejects missing identity and arbitrary client inputs before reading media %j', async (args) => {
     const { call, fetcher } = await selectionTool();

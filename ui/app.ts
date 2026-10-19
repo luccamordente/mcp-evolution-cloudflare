@@ -1,5 +1,8 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
 import { mountGallery } from './gallery';
+import { loadGalleryFonts } from './fonts';
+
+void loadGalleryFonts();
 
 const app = new App({ name: 'WhatsApp image gallery', version: '1.0.0' }, {}, { autoResize: true });
 const gallery = mountGallery(document.querySelector<HTMLElement>('#gallery')!, app);

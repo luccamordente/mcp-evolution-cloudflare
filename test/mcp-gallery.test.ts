@@ -75,12 +75,16 @@ describe('image gallery MCP boundary', () => {
     const tool = result.tools.find(item => item.name === 'show_image_gallery')!;
     expect(tool).toBeDefined();
     expect(tool.annotations.readOnlyHint).toBe(true);
-    expect(tool._meta.ui.resourceUri).toBe('ui://whatsapp/image-gallery.html');
+    expect(tool._meta.ui.resourceUri).toBe('ui://whatsapp/image-gallery-v2.html');
     const resource = await rpc<{ contents: Array<{ text: string; mimeType: string; _meta: { ui: { csp: { resourceDomains: string[]; connectDomains: string[] } } } }> }>('resources/read', { uri: tool._meta.ui.resourceUri });
     expect(resource.result.contents[0].mimeType).toBe('text/html;profile=mcp-app');
     expect(resource.result.contents[0].text).toContain('<!doctype html>');
     expect(resource.result.contents[0].text).toContain("img-src https://storage.example.test; connect-src 'none'");
     expect(resource.result.contents[0].text).toContain("script-src 'unsafe-inline'");
+    expect(resource.result.contents[0].text).toContain("font-src 'none'");
+    expect(resource.result.contents[0].text).toContain('SIL OPEN FONT LICENSE');
+    expect(resource.result.contents[0].text).not.toContain('data:font/woff2');
+    expect(resource.result.contents[0].text).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com/);
     expect(resource.result.contents[0]._meta.ui.csp).toEqual({ resourceDomains: ['https://storage.example.test'], connectDomains: [], frameDomains: [], baseUriDomains: [] });
     expect(resource.result.contents[0].text).not.toMatch(/instance-secret|global-secret|db-user-a/);
     expect(fetcher).not.toHaveBeenCalled();
@@ -163,7 +167,7 @@ describe('image gallery MCP boundary', () => {
 
   it('fails closed for unapproved storage configuration in both CSP and results', async () => {
     const { rpc, call, fetcher } = await galleryTool(1, 'http://storage.example.test,https://*.example.test,https://storage.example.test/private,https://user:secret@storage.example.test');
-    const resource = await rpc<{ contents: Array<{ text: string; _meta: { ui: { csp: { resourceDomains: string[] } } } }> }>('resources/read', { uri: 'ui://whatsapp/image-gallery.html' });
+    const resource = await rpc<{ contents: Array<{ text: string; _meta: { ui: { csp: { resourceDomains: string[] } } } }> }>('resources/read', { uri: 'ui://whatsapp/image-gallery-v2.html' });
     expect(resource.result.contents[0]._meta.ui.csp.resourceDomains).toEqual([]);
     expect(resource.result.contents[0].text).toContain("img-src 'none'");
     fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{ ...retainedMessage, attributes: { encodingFormat: 'image/jpeg', body: { media: { url: 'https://storage.example.test/image.jpg' } } } }] }));
@@ -185,7 +189,7 @@ describe('image gallery MCP boundary', () => {
 
   it('never authorizes direct image requests to the Evolution API origin', async () => {
     const { rpc } = await galleryTool(1, 'https://storage.example.test,https://evolution.invalid');
-    const resource = await rpc<{ contents: Array<{ _meta: { ui: { csp: { resourceDomains: string[] } } } }> }>('resources/read', { uri: 'ui://whatsapp/image-gallery.html' });
+    const resource = await rpc<{ contents: Array<{ _meta: { ui: { csp: { resourceDomains: string[] } } } }> }>('resources/read', { uri: 'ui://whatsapp/image-gallery-v2.html' });
     expect(resource.result.contents[0]._meta.ui.csp.resourceDomains).toEqual(['https://storage.example.test']);
   });
 

@@ -5,11 +5,13 @@ import path from 'node:path';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sdkLicense = await readFile(path.join(root, 'node_modules/@modelcontextprotocol/ext-apps/LICENSE'), 'utf8');
+const fontLicenses = await Promise.all(['dm-sans', 'manrope'].map(name => readFile(path.join(root, `third_party/${name}-LICENSE.txt`), 'utf8')));
 const bundle = await build({
   entryPoints: [path.join(root, 'ui/app.ts')], bundle: true, write: false,
   format: 'esm', platform: 'browser', target: 'es2022', minify: true,
+  loader: { '.woff2': 'binary' },
   legalComments: 'inline',
-  banner: { js: `/*! @modelcontextprotocol/ext-apps\n${sdkLicense.replace(/\*\//g, '* /')}\n*/` },
+  banner: { js: `/*! @modelcontextprotocol/ext-apps\n${[sdkLicense, ...fontLicenses].join('\n').replace(/\*\//g, '* /')}\n*/` },
 });
 const styles = await transform(await readFile(path.join(root, 'ui/gallery.css'), 'utf8'), { loader: 'css', minify: true, target: 'es2022' });
 const html = (await readFile(path.join(root, 'ui/index.html'), 'utf8'))

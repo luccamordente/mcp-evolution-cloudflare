@@ -21,6 +21,7 @@ output/
 tmp/
 temp/
 .scratch/evolution-go/
+.scratch/validation/
 
 # Sistema e editores
 .DS_Store

@@ -206,9 +206,9 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   server.registerTool('search_contacts', { title: 'Search contacts', description: TOOL_DESCRIPTIONS.search_contacts, inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200).describe('Name or phone fragment to search for.'), ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));
   server.registerTool('list_groups', { title: 'List groups', description: TOOL_DESCRIPTIONS.list_groups, inputSchema: z.object({ ...connectionInput, ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('list_groups', connectionId, (c) => c.listGroups(cursor, limit)));
   server.registerTool('list_messages', { title: 'Search messages', description: TOOL_DESCRIPTIONS.list_messages, inputSchema: listMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, conversationId, text, limit }) => read('list_messages', connectionId, (c) => c.listMessages(text, limit, conversationId)));
-  const galleryUri = 'ui://whatsapp/image-gallery.html';
+  const galleryUri = 'ui://whatsapp/image-gallery-v2.html';
   const galleryOrigins = approvedImageOrigins(env.IMAGE_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL);
-  const galleryCsp = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src ${galleryOrigins.join(' ') || "'none'"}; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
+  const galleryCsp = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'none'; img-src ${galleryOrigins.join(' ') || "'none'"}; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
   const galleryHtml = IMAGE_GALLERY_HTML.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${galleryCsp}">`);
   const galleryResourceMeta = { ui: { csp: { resourceDomains: galleryOrigins, connectDomains: [], frameDomains: [], baseUriDomains: [] } } };
   registerAppResource(server, 'WhatsApp image gallery', galleryUri, { _meta: galleryResourceMeta }, async () => ({

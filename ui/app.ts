@@ -18,6 +18,7 @@ app.onhostcontextchanged = context => {
   }
 };
 app.onteardown = async () => {
+  gallery.destroy();
   document.querySelector<HTMLDialogElement>('dialog[open]')?.close();
   return {};
 };

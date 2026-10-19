@@ -10,8 +10,8 @@ As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID i
 | `connection_status` | Verificar a disponibilidade atual de uma conexão | Descobrir todas as conexões | Estado atual da conexão escolhida. |
 | `search_contacts` | Encontrar uma pessoa ou número antes de uma mensagem | Pesquisar mensagens | Contatos paginados filtrados por nome ou telefone. |
 | `list_groups` | Encontrar grupos e seus metadados básicos | Enviar uma mensagem sem confirmar o destino | Grupos paginados, com participantes básicos quando disponíveis. |
-| `list_messages` | Pesquisar mensagens retidas na conexão ou em uma conversa específica | Assumir que todo o histórico está disponível ou obter uma lista completa de conversas | Até 25 mensagens por padrão (máximo 50), com filtros opcionais de conversa e texto; a cobertura depende da retenção no serviço. |
-| `show_image_gallery` | Ver imagens recebidas e enviadas em miniaturas, com ampliação | Recuperar arquivos não retidos, baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
+| `list_messages` | Pesquisar mensagens retidas na conexão ou em uma conversa específica | Exibir uma galeria de imagens (use `show_image_gallery`), assumir que todo o histórico está disponível ou obter uma lista completa de conversas | Até 25 mensagens por padrão (máximo 50), com filtros opcionais de conversa e texto; a cobertura depende da retenção no serviço. |
+| `show_image_gallery` | Atender pedidos para ver, mostrar ou abrir fotos/imagens recebidas e enviadas, inclusive de uma conversa específica | Analisar conteúdo visual pelo resumo, recuperar arquivos não retidos, enviar anexos (use `send_media`), baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
 | `send_text` | Enviar uma nova mensagem de texto | Responder citando uma mensagem existente | Resultado estruturado do envio; é uma ação externa e deve ter destino e texto finais. |
 | `reply_to_message` | Responder citando uma mensagem conhecida | Enviar uma mensagem nova sem referência | Resultado estruturado; requer destino, texto e `messageId` da mensagem citada. |
 | `send_media` | Enviar imagem, documento, áudio ou vídeo em base64 | Enviar apenas texto ou conteúdo ainda indisponível | Resultado estruturado; aceita legenda, nome de arquivo e referência opcional; respeita o limite de mídia configurado. |
@@ -64,7 +64,9 @@ Administração de conexões, logout, exclusão de mensagens ou grupos e gestão
 
 ## Galeria de imagens MCP Apps
 
-Peça ao agente para abrir `show_image_gallery`. Os parâmetros são `connectionId` opcional, `conversationId` e `text` com os mesmos significados e limites de `list_messages`, e `limit` inteiro de 1 a 20 (padrão 12). Parâmetros desconhecidos, inclusive URLs fornecidas pelo cliente, são rejeitados. Por exemplo:
+Use `show_image_gallery` quando o usuário pedir para ver, mostrar, explorar ou abrir fotos/imagens do WhatsApp. A ferramenta pode ser chamada diretamente, sem consultar `list_messages` antes. `list_messages` pesquisa mensagens; `send_media` envia anexos.
+
+Os parâmetros são `connectionId` opcional, `conversationId` e `text` com os mesmos significados e limites de `list_messages`, e `limit` inteiro de 1 a 20 (padrão 12). O filtro `text` pesquisa texto das mensagens, não o conteúdo visual das imagens: buscar um assunto não equivale a reconhecer objetos nas fotos. Parâmetros desconhecidos, inclusive URLs fornecidas pelo cliente, são rejeitados. Por exemplo:
 
 ```json
 { "conversationId": "120363123456789@g.us", "limit": 12 }
@@ -78,4 +80,4 @@ A versão visual v2 usa os tokens de cor, botões arredondados e fontes DM Sans/
 
 O botão **Atualizar** consulta novamente pelo host autorizado e mantém o UUID da conexão resolvida originalmente, mesmo se a conexão padrão mudar. Não há polling nem tentativas automáticas de recarregar imagens quebradas. Uma falha de carregamento pode significar URL expirada, arquivo ausente ou falha de storage; a UI não consegue distinguir essas causas apenas pelo evento do navegador. A atualização pode renovar URLs de arquivos ainda retidos, mas não recuperar arquivos ausentes.
 
-`content` e `structuredContent.data` contêm somente contagens e a orientação de fallback. URLs assinadas, legendas e dados destinados ao componente ficam em `_meta.gallery`; nenhuma credencial de serviço ou mensagem bruta é enviada à UI. `list_messages` mantém seu contrato anterior. Clientes sem MCP Apps recebem o resumo textual, sem acesso aos links privados desta ferramenta. A galeria requer um host compatível com MCP Apps; a presença do servidor no catálogo MCP não garante a renderização da UI.
+`content` e `structuredContent.data` contêm somente contagens e a orientação de fallback. A galeria exibe imagens ao usuário, mas não fornece pixels ao modelo para análise visual. Um resultado vazio não prova ausência de imagens, e um arquivo indisponível não prova exclusão. URLs assinadas, legendas e dados destinados ao componente ficam em `_meta.gallery`; nenhuma credencial de serviço ou mensagem bruta é enviada à UI. `list_messages` mantém seu contrato anterior. Clientes sem MCP Apps recebem o resumo textual, sem acesso aos links privados desta ferramenta. A galeria requer um host compatível com MCP Apps; a presença do servidor no catálogo MCP não garante a renderização da UI.

@@ -45,3 +45,15 @@ curl -i https://app.wapilot.com.br/.well-known/oauth-protected-resource/mcp
 ```
 
 O teste com um cliente real MCP e qualquer envio WhatsApp dependem da autenticação do cliente e de uma conexão Evolution Go real. Não execute envio real sem destinatário e conteúdo definidos.
+
+## Configuração da galeria MCP Apps
+
+A galeria precisa que o Evolution Go retenha mensagens (`DATABASE_SAVE_MESSAGES=true`) e mídia em storage, e que a versão instalada implemente o filtro `encodingFormat` na busca. O contrato foi conferido no checkout canônico local do upstream; isso não comprova configuração, retenção ou disponibilidade em produção. A busca assina novamente as URLs dos arquivos que continuam disponíveis; não há recuperação por ID nem alterações no upstream.
+
+Configure `IMAGE_STORAGE_ORIGINS` com as origens HTTPS exatas que o operador aprova para arquivos raster, separadas por vírgula, por exemplo `https://storage.example.test,https://images.example.test`. Não inclua curingas, caminhos, queries, tokens ou credenciais. Essa variável não é derivada do modelo nem das URLs recebidas. A origem de `EVOLUTION_BASE_URL` é sempre excluída, mesmo se cadastrada por engano, para impedir acesso direto da UI à API. Sem origens válidas, a ferramenta continua respondendo com resumo/estados indisponíveis, e a CSP bloqueia todas as imagens externas. O recurso declara somente essas origens e nenhuma conexão direta de rede; a CSP adicional do documento restringe seu uso a imagens. Permitir uma origem não garante que os arquivos possam ser carregados ou que seus links ainda sejam válidos.
+
+O build da UI deve preceder testes e empacotamento do Worker: `npm run build:gallery` gera `src/generated/image-gallery.ts`, e o hook de build do Wrangler executa o mesmo comando. O artefato é estático e não contém dados de usuários. `npm run check` verifica tipos, sincronização do artefato e testes de protocolo/segurança/UI. `npx wrangler deploy --dry-run` verifica o bundle sem publicar. Nenhum segredo ou binding adicional é necessário.
+
+Em 19 de outubro de 2026, uma leitura autenticada de mensagens retidas confirmou `https://storage.neurau.com.br` como origem das URLs de mídia, incluindo uma imagem. Essa origem está configurada em `vars.IMAGE_STORAGE_ORIGINS` no `wrangler.jsonc`; a configuração só passa a valer em produção após um deploy autorizado. Caminhos de arquivos, assinaturas e conteúdo das mensagens não foram registrados nesta documentação. Essa observação não garante retenção permanente nem disponibilidade de todos os arquivos.
+
+A instalação e a aceitação em ChatGPT e Codex desktop são independentes; veja [MCP-APPS-VALIDATION.md](MCP-APPS-VALIDATION.md). Depois de um deploy autorizado, atualize o catálogo do cliente e confirme descoberta, leitura do recurso, imagens recebidas e enviadas já retidas, ampliação e retorno de foco. Um teste em host local ou o simples registro HTTP/OAuth do servidor não satisfaz a aceitação nos dois clientes. Esta implementação não implica deploy, publicação em diretório, mudança de retenção ou expansão de acesso.

@@ -377,12 +377,13 @@ export class EvolutionGoClient {
     return { items, nextCursor, hasMore: Boolean(nextCursor) };
   }
 
-  async listMessages(text?: string, limit = 50, conversationId?: string): Promise<Page<Message>> {
+  async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*'): Promise<Page<Message>> {
     const boundedLimit = Math.min(Math.max(limit, 1), 50);
     const query = text?.trim() ?? '';
     const params = new URLSearchParams({ limit: String(boundedLimit) });
     if (query) params.set('q', query);
     if (conversationId !== undefined) params.set('chat', conversationId);
+    if (encodingFormat) params.set('encodingFormat', encodingFormat);
     const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
     return this.page(payload, 'message', normalizeMessage);
   }

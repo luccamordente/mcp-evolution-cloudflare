@@ -11,6 +11,7 @@ As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID i
 | `search_contacts` | Encontrar uma pessoa ou número antes de uma mensagem | Pesquisar mensagens | Contatos paginados filtrados por nome ou telefone. |
 | `list_groups` | Encontrar grupos e seus metadados básicos | Enviar uma mensagem sem confirmar o destino | Grupos paginados, com participantes básicos quando disponíveis. |
 | `list_messages` | Pesquisar mensagens retidas na conexão ou em uma conversa específica | Assumir que todo o histórico está disponível ou obter uma lista completa de conversas | Até 25 mensagens por padrão (máximo 50), com filtros opcionais de conversa e texto; a cobertura depende da retenção no serviço. |
+| `show_image_gallery` | Ver imagens recebidas e enviadas em miniaturas, com ampliação | Recuperar arquivos não retidos, baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
 | `send_text` | Enviar uma nova mensagem de texto | Responder citando uma mensagem existente | Resultado estruturado do envio; é uma ação externa e deve ter destino e texto finais. |
 | `reply_to_message` | Responder citando uma mensagem conhecida | Enviar uma mensagem nova sem referência | Resultado estruturado; requer destino, texto e `messageId` da mensagem citada. |
 | `send_media` | Enviar imagem, documento, áudio ou vídeo em base64 | Enviar apenas texto ou conteúdo ainda indisponível | Resultado estruturado; aceita legenda, nome de arquivo e referência opcional; respeita o limite de mídia configurado. |
@@ -60,3 +61,19 @@ O envelope nunca inclui tokens, chaves, credenciais, payloads ou `details` do Ev
 As respostas MCP são normalizadas pelo Worker, mas a origem Evolution Go é JSON:API 1.1. `list_messages` lê a coleção diretamente de `data`; cada mensagem usa `id`, `attributes.at` em milissegundos, `attributes.encodingFormat`, `attributes.body`, `relationships.author` e `meta.chat`. Recibos são mensagens próprias com `body.state` e `relationships.target`. O cliente não depende de `data.items`, `raw`, `message_id`, `timestamp` ou de um `status` na mensagem.
 
 Administração de conexões, logout, exclusão de mensagens ou grupos e gestão ampla de participantes não fazem parte desta superfície MCP.
+
+## Galeria de imagens MCP Apps
+
+Peça ao agente para abrir `show_image_gallery`. Os parâmetros são `connectionId` opcional, `conversationId` e `text` com os mesmos significados e limites de `list_messages`, e `limit` inteiro de 1 a 20 (padrão 12). Parâmetros desconhecidos, inclusive URLs fornecidas pelo cliente, são rejeitados. Por exemplo:
+
+```json
+{ "conversationId": "120363123456789@g.us", "limit": 12 }
+```
+
+A ferramenta consulta `GET /message/search` com `encodingFormat=image/*`, aplicando o filtro de imagem no provedor antes do limite. Imagens JPEG, PNG, GIF, WebP e AVIF com URL HTTPS de uma origem de storage aprovada podem ser exibidas. Outros formatos, arquivos sem URL e links fora da allowlist aparecem como indisponíveis, sem bloquear as demais imagens. Esse escopo não inclui SVG, HTML, QR codes, avatares, vídeos ou documentos; a ferramenta não envia, edita nem baixa arquivos para o dispositivo.
+
+O recurso `ui://whatsapp/image-gallery.html`, com MIME `text/html;profile=mcp-app`, é anunciado em `_meta.ui.resourceUri`. Miniaturas mantêm a proporção; os botões podem ser acionados pelo teclado e a ampliação usa diálogo com fechamento por Escape e retorno do foco. Legendas e contexto são exibidos como texto; o texto alternativo descreve a função da imagem na mensagem, sem inventar seu conteúdo visual.
+
+O botão **Atualizar** consulta novamente pelo host autorizado e mantém o UUID da conexão resolvida originalmente, mesmo se a conexão padrão mudar. Não há polling nem tentativas automáticas de recarregar imagens quebradas. Uma falha de carregamento pode significar URL expirada, arquivo ausente ou falha de storage; a UI não consegue distinguir essas causas apenas pelo evento do navegador. A atualização pode renovar URLs de arquivos ainda retidos, mas não recuperar arquivos ausentes.
+
+`content` e `structuredContent.data` contêm somente contagens e a orientação de fallback. URLs assinadas, legendas e dados destinados ao componente ficam em `_meta.gallery`; nenhuma credencial de serviço ou mensagem bruta é enviada à UI. `list_messages` mantém seu contrato anterior. Clientes sem MCP Apps recebem o resumo textual, sem acesso aos links privados desta ferramenta. O suporte e a validação separados de ChatGPT e Codex desktop estão registrados em [MCP-APPS-VALIDATION.md](MCP-APPS-VALIDATION.md); a presença do servidor no catálogo MCP não comprova renderização.

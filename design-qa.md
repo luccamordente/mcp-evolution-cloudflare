@@ -1,62 +1,90 @@
-# Design QA — WaPilot connections
+# QA visual — galeria WaPilot v2
 
-source visual truth path: Product Design ImageGen revised option 2 (QR-focused WaPilot onboarding), generated in this conversation.
-implementation screenshot path: in-app browser capture of `http://127.0.0.1:4173/prototype/whatsapp-connections.html#dashboard` (dashboard state), captured during this turn.
-viewport: Codex in-app browser viewport, responsive layout observed at approximately 716px wide; desktop layout implemented for the 1440px target and mobile breakpoint verified through CSS structure.
-source and implementation pixel dimensions: source visual target 1440 × 1024; implementation capture is browser viewport screenshot; no density normalization applied.
-state: initial connected dashboard, one active WhatsApp number, custom context dropdown closed; onboarding verified through confirmation, provisioning, and QR states with no selected number; dashboard variations verified through URL state parameters.
+Data: 19 de outubro de 2026. Escopo: alinhar a linguagem visual da galeria ao
+WaPilot aberto, preservando o fluxo de leitura e a adaptação ao host.
 
-## Full-view comparison evidence
+O relatório anterior do fluxo de conexões foi preservado em
+[`docs/qa/wapilot-connections.md`](docs/qa/wapilot-connections.md).
 
-The revised visual target established the WaPilot header, one focused number, a calm pale-mint connection surface, WhatsApp green accent, restrained activity content, and a single context control. The implementation preserves those decisions while opening on the dashboard requested by the user. The new-connection flow deliberately removes the selected number and moves through confirmation, provisioning, then QR.
+## Evidências
 
-## Focused region comparison evidence
+Pasta local de capturas, fora do Git:
+`/Users/luccamordente/.codex/visualizations/2026/10/19/01a153d0-438b-7501-9318-c33c1f9b09b1/wapilot-style-review/`.
 
-The centered custom context dropdown, connected state hero, and activity list were checked in the browser-rendered state. The onboarding confirmation and provisioning state were exercised before the QR state. The implementation uses the supplied WaPilot logo asset, Phosphor icon font, matching green semantic tokens, and responsive stacking at narrow widths.
+- Fonte visual: dashboard autenticado `https://app.wapilot.com.br/connections`;
+  captura `05-reference-panel.png`.
+- Implementação: prévia local do mesmo componente e CSS de produção;
+  captura `08-gallery-wide-ready.png`.
+- Comparação conjunta: `12-comparison-wide.png`; detalhes de controles e
+  superfícies: `13-comparison-controls.png`.
+- Viewport das duas capturas da comparação completa: 1496 × 1036 CSS px;
+  arquivos de 1496 × 1036 pixels, escala 1:1. A conversão de JPEG para PNG
+  preservou dimensões e conteúdo, sem redimensionar as fontes de evidência.
+- Estados adicionais: painel 530 × 800 (`06-gallery-binary-fonts-light.jpg`),
+  modal (`09-modal-after.png`), escuro 360 × 800 (`10-gallery-dark-mobile.png`)
+  e mídia indisponível/formato não suportado (`11-gallery-dark-states.png`).
 
-Additional dashboard state variations are available without adding production controls: `?state=provisioning`, `?state=qr`, `?state=expired`, `?state=offline`, and `?state=error`.
+O dashboard e a galeria cumprem tarefas diferentes. A comparação avalia tokens,
+tipografia, superfícies e controles; não exige copiar a navegação, o hero ou os
+dados de conexão do dashboard para um componente MCP Apps. Imagens já exibidas
+na galeria aberta foram usadas apenas na prévia privada, com legendas/contexto
+de demonstração. Nenhuma imagem, conversa ou URL assinada entra neste commit.
 
-The latest visual pass removes the dashboard CTA and supporting lede, removes the oversized WhatsApp mark, adds the connection avatar beside the name and phone, adds the same avatar to the centered context control, and explicitly centers activity icons in their green containers.
+## Histórico da comparação e correções
 
-The context dropdown now lists the active connection plus other available numbers and keeps only “Adicionar novo número” as an action. Its eyebrow was removed; the display name sits above the secondary phone number. Selecting another row updates the active dashboard context.
+1. **[P1] Cores e controles destoavam do WaPilot.** O componente usava botão
+   neutro e raios pequenos. Foram aplicados os tokens verificados no dashboard:
+   carvão `#0f1b25`, canvas `#f7faf9`, mint `#e9f8f0`, verde `#25d366`, borda
+   `#dfe9e6` e botões em pill. A comparação conjunta posterior confirma o
+   alinhamento de cor, bordas e sombras.
+2. **[P1] Tipografia diferente e risco de fallback no host.** Foram incluídas
+   DM Sans e Manrope, com licenças. A CSP observada no ChatGPT bloqueava fontes
+   por `data:`; a implementação final registra bytes pelo construtor binário de
+   `FontFace`, sem URLs nem expansão de permissões. A prévia confirmou ambas
+   carregadas sob `font-src 'none'`; o console ficou sem erros.
+3. **[P2] Ritmo e largura das imagens.** Foram alinhados o container de conteúdo
+   de 1180 px, paddings, raios de 14/24 px e espaço entre componentes. A grade
+   usa `auto-fit` para ocupar a área disponível quando há poucas imagens.
+   As novas capturas não mostram overflow nas larguras verificadas.
 
-The final icon pass gives each activity glyph a full flex box inside its green circle so the glyph is centered both horizontally and vertically rather than relying on the font baseline.
+Não restam achados P0/P1/P2 acionáveis nesta comparação de estilos.
 
-The connection status badge now sits on the right edge of the hero panel, while the avatar and display name/phone remain a single horizontal identity row.
+## Superfícies verificadas
 
-The activity feed was revised from one edge-to-edge white block into separated event surfaces with internal padding, light borders, rounded corners, and a small vertical gap between rows.
+- **Fontes/tipografia:** DM Sans no corpo, Manrope 700 nos títulos, tracking
+  negativo e eyebrow verde; título compacto adequado ao widget, em vez do hero
+  de 66 px do dashboard. Fallback continua legível se a API de fontes falhar.
+- **Layout/espaçamento:** bordas, sombras, container, padding e botões coerentes
+  com a referência; painel estreito faz wrap dos controles sem esconder ações.
+- **Cores/tokens:** valores claros conferidos no DOM da referência. O tema
+  escuro é uma adaptação do componente; o dashboard de referência é claro.
+- **Imagens:** `object-fit: contain`, proporção preservada em miniaturas e modal;
+  nenhuma ilustração ou marca foi aproximada com CSS. Estados indisponíveis
+  foram inspecionados separadamente.
+- **Texto:** conteúdo do componente preservado; somente a identificação visual
+  “WaPilot · Galeria” foi acrescentada. Legendas continuam sendo texto.
 
-The hero status badge is vertically centered against the identity row and the avatar/name/phone block remains centered within the hero surface.
+## Interações e limites
 
-The identity row now uses explicit geometric centering inside the hero (`top: 50%` and `translateY(-50%)`) with a mobile flow fallback.
+- Na prévia: Tab até a primeira miniatura, Enter para ampliar, foco em Fechar,
+  Escape e retorno de foco; estados claro/escuro e mídia ausente/não suportada.
+- Na galeria v1 aberta no ChatGPT: imagens visíveis, ampliação, foco, Escape e
+  atualização por ponte do host concluídos. Não é prova de publicação da v2.
+- Console da prévia: nenhum erro ou warning observado.
+- `npm run check`: 134 testes, typechecks e sincronização do bundle passaram.
+  O dry-run do Wrangler passou sem publicar.
+- A prévia usa uma ponte de dados simulada. A nova v2 ainda requer publicação
+  autorizada e atualização do catálogo do host; o Codex desktop não foi validado
+  nesta rodada. O critério geral de dois hosts continua aberto.
 
-The hero was then refactored to use only Grid/Flex alignment: identity and status occupy the same centered grid row, with a single-column grid at the mobile breakpoint.
+Referência técnica da carga binária: [FontFace, CSS Font Loading](https://www.w3.org/TR/css-font-loading-3/#font-face-constructor).
 
-Internal component margins were removed from the identity and activity rows; spacing now comes from Grid/Flex `gap` and container padding.
+## Checklist
 
-At the narrow breakpoint, the authenticated user block is right-aligned while the context control remains full-width below it.
-
-## Findings
-
-No actionable P0, P1, or P2 findings remain.
-
-## Primary interactions tested
-
-- “Adicionar número” switches to the single-number QR onboarding.
-- “Continuar” advances from user confirmation to provisioning; provisioning advances to QR.
-- “Voltar para o dashboard” returns to the initial dashboard.
-- The centered custom dropdown exposes only the current number, “Trocar número”, and “Adicionar novo número”.
-- The QR step restores the three concrete instructions for opening WhatsApp, opening linked devices, and scanning the code.
-- “Ver tudo” provides the specified prototype feedback without opening an unsupported activity view.
-- QR countdown runs and resets after expiration.
-
-## Console errors checked
-
-No browser console errors were reported in the rendered tab.
-
-## Follow-up Polish
-
-- The QR source is intentionally demonstrative and remote for this static prototype; production should supply the provider-generated QR asset.
-- The “Trocar número…” action is intentionally a feedback-only state until a second connection exists.
+- [x] Comparar a referência aberta e a implementação em uma mesma imagem.
+- [x] Conferir controles em detalhe, tipografia e tokens.
+- [x] Exercitar largura reduzida, tema escuro, modal e foco.
+- [x] Manter fontes e imagens dentro da política de rede declarada.
+- [x] Gerar o novo recurso versionado, atualizar documentação e validar build.
 
 final result: passed

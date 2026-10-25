@@ -69,8 +69,27 @@ describe('MCP tool output schema', () => {
     expect(connectionDescription).toContain('default connection');
   });
 
+  it.each(['5511999999999', '5511999999999@s.whatsapp.net', '120363123456789@g.us'])('accepts conversation identifier %s without requiring a connection UUID', (conversationId) => {
+    expect(listMessagesInput.parse({ conversationId: ` ${conversationId} ` })).toEqual({ conversationId, limit: 25 });
+  });
+
+  it.each(['', '   ', null, 5511999999999, true, {}, [], '1'.repeat(201)])('rejects invalid conversation identifier %j', (conversationId) => {
+    expect(listMessagesInput.safeParse({ conversationId }).success).toBe(false);
+  });
+
+  it('applies the conversation length limit after trimming', () => {
+    expect(listMessagesInput.parse({ conversationId: ` ${'1'.repeat(200)} ` }).conversationId).toBe('1'.repeat(200));
+  });
+
+  it('preserves message search defaults and bounds', () => {
+    expect(listMessagesInput.parse({})).toEqual({ limit: 25 });
+    expect(listMessagesInput.parse({ text: 'Olá', limit: 50 })).toEqual({ text: 'Olá', limit: 50 });
+    expect(listMessagesInput.safeParse({ limit: 51 }).success).toBe(false);
+    expect(listMessagesInput.safeParse({ limit: 0 }).success).toBe(false);
+  });
+
   it('documents every registered tool without exposing an implementation provider', () => {
-    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'send_text', 'reply_to_message', 'send_media'] as const;
+    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media'] as const;
     for (const name of expected) {
       expect(TOOL_DESCRIPTIONS[name].length).toBeGreaterThan(40);
       expect(TOOL_DESCRIPTIONS[name]).not.toMatch(/evolution|upstream|downstream/i);

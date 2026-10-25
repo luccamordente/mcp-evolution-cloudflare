@@ -183,4 +183,36 @@ describe('Evolution Go route contracts', () => {
     await expect(client.listMessages('Olá', 10)).resolves.toMatchObject({ items: [{ id: 'message-1', text: 'Olá', type: 'text/plain', conversationId: '5511999999999', sender: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z' }] });
     expect(calls[0]).toEqual({ url: 'https://evolution.invalid/message/search?limit=10&q=Ol%C3%A1', method: 'GET' });
   });
+
+  it('encodes the conversation identifier as one chat parameter alongside text and limit', async () => {
+    let seen: { url: URL; method: string } | undefined;
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'secret', fetcher: async (request, init) => {
+      seen = { url: new URL(String(request)), method: String(init?.method ?? 'GET') };
+      return Response.json({ jsonapi: { version: '1.1' }, data: [] });
+    } });
+
+    await expect(client.listMessages('acordo & reunião', 10, '5511999999999@s.whatsapp.net&limit=1&q=other#?+=/%')).resolves.toEqual({ items: [], hasMore: false });
+    expect(seen?.method).toBe('GET');
+    expect(seen?.url.pathname).toBe('/message/search');
+    expect(Object.fromEntries(seen!.url.searchParams)).toEqual({
+      chat: '5511999999999@s.whatsapp.net&limit=1&q=other#?+=/%',
+      q: 'acordo & reunião',
+      limit: '10',
+    });
+    expect(seen?.url.hash).toBe('');
+  });
+
+  it('preserves the client default and maximum limit without a conversation filter', async () => {
+    const urls: string[] = [];
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'secret', fetcher: async (request) => {
+      urls.push(String(request));
+      return Response.json({ jsonapi: { version: '1.1' }, data: [] });
+    } });
+    await client.listMessages();
+    await client.listMessages(undefined, 100);
+    expect(urls).toEqual([
+      'https://evolution.invalid/message/search?limit=50',
+      'https://evolution.invalid/message/search?limit=50',
+    ]);
+  });
 });

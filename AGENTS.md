@@ -38,8 +38,6 @@ Concentre mudanças de contrato em `src/lib/evolution.ts` e acrescente testes mo
 
 Use os e-mails autorizados configurados no projeto (`luccamordente@gmail.com` e `heitorsalazar@gmail.com`) somente através da autenticação existente. Segredos pertencem a Workers Secrets (`TOKEN_ENCRYPTION_KEY`, `CONSENT_SECRET`, `ACCESS_JWKS_URL`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE` e, quando exigido pelo deployment, `EVOLUTION_GLOBAL_API_KEY`). A URL do Evolution está em `EVOLUTION_BASE_URL`; não copie seus valores para commits, logs, URLs, HTML, respostas MCP ou documentação.
 
-Não trate uma mensagem enviada, um QR gerado, um deploy ou uma resposta HTTP isolada como prova de autenticação, conexão, histórico ou envio WhatsApp. Para falar com o Heitor, use exclusivamente a skill `whatsapp-via-wacli`, resolva o JID sem ambiguidade e leia a resposta antes de registrar qualquer teste como concluído.
-
 Ao enviar mensagens WhatsApp a terceiros ou parceiros em nome do Heitor, sempre incluir no rodapé a identificação de que a mensagem foi enviada pelo agente IA do Heitor (ex: `—\n_Enviado pelo Agente IA do Heitor_`). Manter o texto direto, sem saudações desnecessárias e sem links redundantes.
 
 ## Desenvolvimento e validação

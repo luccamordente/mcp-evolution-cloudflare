@@ -218,7 +218,7 @@ function consentHtml(clientName: string, redirectHost: string, scopes: string[],
         <div class="request-panel">
           <div class="request-mark" aria-hidden="true">↗</div>
           <h2>${esc(clientName)} quer se conectar</h2>
-          <p class="request-copy">O aplicativo está solicitando acesso ao <strong>Evolution Go WhatsApp MCP</strong> para trabalhar com o número conectado ao seu workspace.</p>
+          <p class="request-copy">O aplicativo está solicitando acesso ao <strong>WaPilot</strong> para trabalhar com o número conectado ao seu workspace.</p>
           <div class="destination"><span class="destination-label">Resposta enviada para</span><code>${esc(redirectHost)}</code></div>
         </div>
         <div class="permissions-panel">

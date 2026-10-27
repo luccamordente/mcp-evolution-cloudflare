@@ -71,6 +71,8 @@ describe('initial OAuth consent', () => {
 
   it('shows and grants all permissions even when the client initially requests only read', async () => {
     const { fetch, client, verifier, html, decide } = await setup();
+    expect(html).toContain('acesso ao <strong>WaPilot</strong>');
+    expect(html).not.toMatch(/evolution/i);
     expect(html).toContain('Consultar seus dados do WhatsApp');
     expect(html).toContain('Enviar mensagens e executar ações autorizadas');
     expect(html).toContain('Continuar conectado quando você não estiver usando o app');

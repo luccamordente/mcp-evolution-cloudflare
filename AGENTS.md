@@ -29,6 +29,7 @@ Concentre mudanças de contrato em `src/lib/evolution.ts` e acrescente testes mo
 
 ## UI, Access e provisionamento
 
+- Em toda comunicação voltada ao usuário final (UI, consentimento, mensagens, erros e respostas MCP), use a marca WaPilot e linguagem de produto. Nunca mencione Evolution/Evolution Go nem qualquer outra tecnologia interna do WaPilot.
 - A UI do navegador fica em `/connections`. O carregamento usa `/connections/data` sob a mesma aplicação Access; não troque por um `fetch` que redirecione para outra audiência Access, pois o HTML de login vira um erro CORS.
 - A UI/API pode aceitar bearer OAuth como compatibilidade de cliente, mas `/mcp` continua exclusivamente OAuth. Qualquer nova rota de navegador deve validar Access e manter o escopo do usuário.
 - O provisionamento administrativo (`/connections?provision=1`, `/connections/provision` e a página `/admin/evolution`) é separado da superfície MCP e protegido. Ele pode criar/conferir instâncias, cadastrar a conexão no D1, configurar o webhook e devolver QR redigido; nunca devolve credenciais.

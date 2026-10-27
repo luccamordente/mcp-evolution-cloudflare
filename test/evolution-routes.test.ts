@@ -180,7 +180,7 @@ describe('Evolution Go route contracts', () => {
       return Response.json({ jsonapi: { version: '1.1' }, data: [{ type: 'message', id: 'message-1', attributes: { at: 1792058400000, encodingFormat: 'text/plain', body: { text: 'Olá' } }, meta: { chat: '5511999999999', fromMe: false }, relationships: { author: { data: { type: 'chat', id: '5511999999999' } } } }] });
     } });
 
-    await expect(client.listMessages('Olá', 10)).resolves.toMatchObject({ items: [{ id: 'message-1', text: 'Olá', type: 'text/plain', conversationId: '5511999999999', sender: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z' }] });
+    await expect(client.listMessages('Olá', 10)).resolves.toMatchObject({ items: [{ id: 'message-1', text: 'Olá', type: 'text/plain', conversationId: '5511999999999', source: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z' }] });
     expect(calls[0]).toEqual({ url: 'https://evolution.invalid/message/search?limit=11&q=Ol%C3%A1', method: 'GET' });
   });
 
@@ -214,5 +214,31 @@ describe('Evolution Go route contracts', () => {
       'https://evolution.invalid/message/search?limit=50',
       'https://evolution.invalid/message/search?limit=50',
     ]);
+  });
+
+  it('lists groups with custom 5-minute timeout', async () => {
+    let calledUrl: string | undefined;
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'secret', fetcher: async (request) => {
+      calledUrl = String(request);
+      return Response.json({
+        jsonapi: { version: '1.1' },
+        data: [{
+          type: 'chat',
+          id: '120363000000000000@g.us',
+          attributes: { subject: 'Test Group' },
+          meta: { kind: 'group' },
+        }],
+      });
+    } });
+    const page = await client.listGroups();
+    expect(calledUrl).toBe('https://evolution.invalid/group/list');
+    expect(page.items).toEqual([{
+      id: '120363000000000000@g.us',
+      jid: '120363000000000000@g.us',
+      name: 'Test Group',
+      description: undefined,
+      owner: undefined,
+      participants: [],
+    }]);
   });
 });

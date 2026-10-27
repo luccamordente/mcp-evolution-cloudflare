@@ -3,6 +3,7 @@ import type { Contact, Group, Message, Page, SendMessageResult } from '../types'
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 const AVATAR_REQUEST_TIMEOUT_MS = 3_000;
+const GROUP_REQUEST_TIMEOUT_MS = 300_000;
 
 type EvolutionRequestInit = RequestInit & { timeoutMs?: number };
 
@@ -297,7 +298,7 @@ function normalizeMessage(value: unknown): Message {
     id: stringValue(item?.id),
     conversationId: chat,
     jid: chat,
-    sender: author,
+    source: author,
     direction: typeof meta.fromMe === 'boolean' ? (meta.fromMe ? 'outbound' : 'inbound') : undefined,
     timestamp: at === undefined ? undefined : new Date(at).toISOString(),
     type: stringValue(attributes.encodingFormat),
@@ -387,7 +388,7 @@ export class EvolutionGoClient {
   }
 
   async listGroups(cursor?: string, limit = 50): Promise<Page<Group>> {
-    const payload = await this.request<unknown>('/group/list');
+    const payload = await this.request<unknown>('/group/list', { timeoutMs: GROUP_REQUEST_TIMEOUT_MS });
     const groups = this.page(payload, 'chat', normalizeGroup).items;
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
     const items = groups.slice(offset, offset + limit);

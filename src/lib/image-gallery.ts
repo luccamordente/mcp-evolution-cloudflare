@@ -21,7 +21,7 @@ export function galleryImage(message: Message, approvedOrigins: string[]) {
   const mimeType = (message.media?.mimeType ?? message.type ?? '').toLowerCase().trim();
   const context = {
     id: message.id?.slice(0, 200), conversationId: message.conversationId?.slice(0, 200),
-    sender: message.sender?.slice(0, 200), timestamp: message.timestamp, direction: message.direction,
+    source: message.source?.slice(0, 200), timestamp: message.timestamp, direction: message.direction,
     caption: message.text?.slice(0, 2000), mimeType,
   };
   if (!RASTER_MIME_TYPES.has(mimeType)) return { ...context, state: 'unsupported' as const };

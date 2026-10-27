@@ -86,7 +86,8 @@ export interface Message {
   id?: string;
   conversationId?: string;
   jid?: string;
-  sender?: string;
+  /** Who wrote the message (the JSON:API author). Our own number when the message was sent by this connection (fromMe). */
+  source?: string;
   recipient?: string;
   direction?: 'inbound' | 'outbound' | 'unknown';
   timestamp?: string;

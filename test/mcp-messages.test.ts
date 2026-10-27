@@ -86,7 +86,7 @@ describe('list_messages retained conversation search', () => {
   it('combines a contact number, text and limit in the selected connection request', async () => {
     const { call, fetcher } = await messageTool();
     const response = await call({ conversationId: '5511999999999', text: 'Reunião', limit: 10 });
-    expect(response.result).toMatchObject({ structuredContent: { data: { items: [{ id: 'message-1', text: 'Reunião amanhã', conversationId: '5511999999999', sender: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z', type: 'text/plain' }], hasMore: false } } });
+    expect(response.result).toMatchObject({ structuredContent: { data: { items: [{ id: 'message-1', text: 'Reunião amanhã', conversationId: '5511999999999', source: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z', type: 'text/plain' }], hasMore: false } } });
     const request = new URL(String(fetcher.mock.calls[0][0]));
     expect(request.pathname).toBe('/message/search');
     expect(Object.fromEntries(request.searchParams)).toEqual({ chat: '5511999999999', q: 'Reunião', limit: '11' });

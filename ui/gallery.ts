@@ -166,7 +166,7 @@ export function mountGallery(root: HTMLElement, bridge: GalleryBridge) {
         figure.appendChild(el('p', 'media-placeholder', unavailable));
       }
       figure.appendChild(el('figcaption', 'caption', text(item.caption)));
-      const context = [item.direction === 'outbound' ? 'Enviada' : item.direction === 'inbound' ? 'Recebida' : '', text(item.sender), text(item.timestamp), text(item.conversationId)].filter(Boolean).join(' · ');
+      const context = [item.direction === 'outbound' ? 'Enviada' : item.direction === 'inbound' ? 'Recebida' : '', text(item.source), text(item.timestamp), text(item.conversationId)].filter(Boolean).join(' · ');
       if (context) figure.appendChild(el('p', 'message-context', context));
       li.appendChild(figure);
       grid.appendChild(li);

@@ -222,12 +222,12 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     return { client: new EvolutionGoClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY, instanceId: connection.instanceId, instanceToken: token }), connection };
   }
 
-  const read = async <T>(operation: string, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string) => Promise<T>) => {
+  const read = async <T>(operation: string, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string, ownNumber: string | undefined) => Promise<T>) => {
     let resolvedConnectionId: string | undefined;
     try {
       const { client, connection } = await clientFor(connectionId);
       resolvedConnectionId = connection.id;
-      const data = await fn(client, connection.id);
+      const data = await fn(client, connection.id, connection.phoneNumber ?? undefined);
       await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
       return ok(data);
     } catch (error) {
@@ -249,7 +249,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   server.registerTool('connection_status', { title: 'Connection status', description: TOOL_DESCRIPTIONS.connection_status, inputSchema: z.object(connectionInput), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId }) => read('connection_status', connectionId, (c) => c.status()));
   server.registerTool('search_contacts', { title: 'Search contacts', description: TOOL_DESCRIPTIONS.search_contacts, inputSchema: z.object({ ...connectionInput, query: z.string().min(1).max(200).describe('Name or phone fragment to search for.'), ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, query, cursor, limit }) => read('search_contacts', connectionId, (c) => c.searchContacts(query, cursor, limit)));
   server.registerTool('list_groups', { title: 'List groups', description: TOOL_DESCRIPTIONS.list_groups, inputSchema: z.object({ ...connectionInput, ...pageInput }), annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, cursor, limit }) => read('list_groups', connectionId, (c) => c.listGroups(cursor, limit)));
-  server.registerTool('list_messages', { title: 'Search messages', description: TOOL_DESCRIPTIONS.list_messages, inputSchema: listMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, conversationId, text, limit, cursor }) => read('list_messages', connectionId, (c, id) => listMessagesWithSends(env.DB, c, id, text, limit, conversationId, cursor || undefined)));
+  server.registerTool('list_messages', { title: 'Search messages', description: TOOL_DESCRIPTIONS.list_messages, inputSchema: listMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ connectionId, conversationId, text, limit, cursor }) => read('list_messages', connectionId, (c, id, own) => listMessagesWithSends(env.DB, c, id, text, limit, conversationId, cursor || undefined, own)));
   const galleryUri = 'ui://whatsapp/image-gallery-v2.html';
   const galleryOrigins = approvedImageOrigins(env.IMAGE_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL);
   const galleryCsp = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'none'; img-src ${galleryOrigins.join(' ') || "'none'"}; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
@@ -269,7 +269,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
       resolvedConnectionId = connection.id;
       const page = await client.listMessages(text, limit, conversationId, 'image/*');
       const approvedOrigins = approvedImageOrigins(env.IMAGE_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL);
-      const items = page.items.slice(0, limit).map(message => galleryImage(message, approvedOrigins));
+      const items = page.items.slice(0, limit).map(message => galleryImage(withSource(message, connection.phoneNumber ?? undefined), approvedOrigins));
       const available = items.filter(item => item.state === 'ready').length;
       await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation: 'show_image_gallery', outcome: 'success' });
       const summary = { count: items.length, available, unavailable: items.length - available,
@@ -364,13 +364,29 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
 }
 
 const chatKey = (value?: string) => (value ?? '').split('@')[0].split(':')[0];
+
+/** Keeps `source` consistent with fromMe (direction). A sent message's source is
+ * our own number, never the recipient: Evolution Go falls back to the chat id as
+ * author when it has no sender for a sent row. Without a known own number, a
+ * source that just repeats the 1:1 chat of a sent message is dropped. */
+export function withSource(message: Message, ownNumber?: string): Message {
+  if (message.direction !== 'outbound') return message;
+  const own = ownNumber?.replace(/\D/g, '');
+  if (own) return { ...message, source: own };
+  if (message.source && chatKey(message.source) === chatKey(message.conversationId) && !(message.conversationId ?? '').endsWith('@g.us')) {
+    const { source: _drop, ...rest } = message;
+    return rest;
+  }
+  return message;
+}
 const messageTime = (m: Message) => (m.timestamp ? Date.parse(m.timestamp) : NaN);
 
 /** Evolution Go history merged with the sends wapilot saved itself (Evolution Go does not
  * store API sends). Keeps the cursor contract: a page covers rows with time < cursor, and the
  * next page starts below nextCursor, so saved sends are taken from the same time window. */
-async function listMessagesWithSends(db: D1Database, client: EvolutionGoClient, connectionId: string, text: string | undefined, limit: number, conversationId: string | undefined, cursor: string | undefined) {
-  const page = await client.listMessages(text, limit, conversationId, undefined, cursor);
+async function listMessagesWithSends(db: D1Database, client: EvolutionGoClient, connectionId: string, text: string | undefined, limit: number, conversationId: string | undefined, cursor: string | undefined, ownNumber?: string) {
+  const raw = await client.listMessages(text, limit, conversationId, undefined, cursor);
+  const page = { ...raw, items: raw.items.map((m) => withSource(m, ownNumber)) };
   const before = cursor ? Number(cursor) : undefined;
   const after = page.hasMore && page.nextCursor ? Number(page.nextCursor) : undefined;
   const query = text?.trim().toLowerCase() ?? '';
@@ -380,6 +396,7 @@ async function listMessagesWithSends(db: D1Database, client: EvolutionGoClient, 
     && (conversationId === undefined || chatKey(m.conversationId) === chatKey(conversationId))
     && (!query || (m.text ?? '').toLowerCase().includes(query)));
   if (!sends.length) return page;
+  sends.forEach((m, i) => { sends[i] = withSource(m, ownNumber); });
   const merged = [...page.items, ...sends].sort((a, b) => (messageTime(b) || 0) - (messageTime(a) || 0));
   if (merged.length <= limit) return { ...page, items: merged };
   let items = merged.slice(0, limit);

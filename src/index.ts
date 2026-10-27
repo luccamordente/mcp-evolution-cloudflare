@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
-import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
+import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, repointConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
 import { avatarLookupJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
@@ -90,6 +90,7 @@ app.get('/connections', async (c) => {
     }
     return c.html(adminProvisionPage());
   }
+  c.header('Cache-Control', 'no-store');
   return c.html(connectionsPage(auth));
 });
 
@@ -187,6 +188,28 @@ app.post('/api/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.para
 // The dashboard is protected by the /connections Access application. Keep
 // its authorization requests under that same path so browser fetches do not
 // cross into the separately protected /api Access application.
+
+/** Full recent activity for the dashboard's "Ver tudo" (up to 10 audit rows). */
+app.get('/connections/activity/:id', async (c) => {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  const connection = await getConnection(c.env.DB, user.id, c.req.param('id'));
+  if (!connection) return c.json({ error: 'Connection not found' }, 404);
+  return c.json({ activity: await activityFor(c.env.DB, user.id, connection.id, 10) });
+});
+
+/** Same-Access-app alias for every dashboard /api/* call. The browser UI
+ * calls /connections/api/* so its fetches stay under the /connections Access
+ * application instead of being redirected by a separate /api application
+ * (which surfaces as an opaque CORS "Failed to fetch"). Auth is unchanged:
+ * the /api handlers verify Cf-Access-Jwt-Assertion against ACCESS_AUDIENCE. */
+app.all('/connections/api/*', (c) => {
+  const url = new URL(c.req.url);
+  url.pathname = url.pathname.replace(/^\/connections\/api\//, '/api/');
+  let executionCtx: typeof c.executionCtx | undefined;
+  try { executionCtx = c.executionCtx; } catch (_) { executionCtx = undefined; }
+  return app.fetch(new Request(url, c.req.raw), c.env, executionCtx);
+});
 app.get('/connections/authorizations', (c) => authorizationApi(c));
 app.delete('/connections/authorizations/:id', (c) => authorizationApi(c, c.req.param('id')));
 app.post('/connections/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.param('id')));
@@ -267,13 +290,87 @@ app.patch('/api/connections/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+app.post('/api/connections/:id/repoint', async (c) => {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const body = await c.req.json<RepointRequest>().catch((): RepointRequest => ({}));
+  const user = await ensureUser(c.env.DB, auth);
+  return c.json(...(await repointUserConnection(c.env, user.id, c.req.param('id'), body)));
+});
+
+type RepointRequest = { instanceId?: string; instanceName?: string; instanceToken?: string };
+
+/** Owner-scoped repoint of a connection to another Evolution instance. The
+ * token is validated against Evolution (GET /instance/status) before anything
+ * is saved, then encrypted with TOKEN_ENCRYPTION_KEY exactly like creation.
+ * The connection id, default flag, webhook secret and MCP grants are kept.
+ * The webhook secret is stored only as a hash, so the webhook URL cannot be
+ * re-registered here; it stays the same URL (/webhooks/evolution/<secret>). */
+export async function repointUserConnection(env: Env, userId: string, connectionId: string, body: RepointRequest, admin?: Pick<EvolutionGoAdminClient, 'status'>): Promise<[Record<string, unknown>, 200 | 400 | 404 | 409 | 422 | 502]> {
+  const requested = (body.instanceId ?? body.instanceName ?? '').trim();
+  const explicitId = Boolean(body.instanceId?.trim());
+  const token = (body.instanceToken ?? '').trim();
+  if (!requested || !token) return [{ error: 'instanceId (or instanceName) and instanceToken are required' }, 400];
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(requested)) return [{ error: 'Invalid instanceId' }, 400];
+  const connection = await getConnection(env.DB, userId, connectionId);
+  if (!connection) return [{ error: 'Connection not found' }, 404];
+  const previousInstanceId = connection.instanceId;
+  let state: string | undefined;
+  let instanceId = requested;
+  try {
+    const status = await (admin ?? new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' })).status(token);
+    const reportedId = connectionIdFromResponse(status);
+    if (reportedId && explicitId && reportedId !== requested) {
+      await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'failure', metadata: { previousInstanceId, instanceId: requested, reason: 'instance_mismatch' } });
+      return [{ error: 'Token belongs to a different instance' }, 422];
+    }
+    if (reportedId) instanceId = reportedId;
+    state = evolutionState(status);
+  } catch (error) {
+    const upstream = error instanceof EvolutionApiError ? error.status : 500;
+    await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'failure', metadata: { previousInstanceId, instanceId, status: upstream, message: safeErrorMessage(error, 'unknown') } });
+    if (upstream === 401 || upstream === 403 || upstream === 404) return [{ error: 'Evolution rejected the instance token' }, 422];
+    return [{ error: safeErrorMessage(error, 'Could not reach Evolution') }, 502];
+  }
+  const clash = await findConnectionByInstanceId(env.DB, userId, instanceId);
+  if (clash && clash.id !== connection.id) return [{ error: 'Another connection already uses this instance' }, 409];
+  const updated = await repointConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, userId, connection.id, { instanceId, token });
+  if (!updated) return [{ error: 'Connection not found' }, 404];
+  await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'success', metadata: { previousInstanceId, instanceId, state } });
+  return [{ ok: true, id: connection.id, instanceId, previousInstanceId, state }, 200];
+}
+
+async function safeAudit(env: Env, input: Parameters<typeof audit>[1]): Promise<void> {
+  try { await audit(env.DB, input); } catch (_) { /* auditing must not change the outcome */ }
+}
+
 app.delete('/api/connections/:id', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
   const user = await ensureUser(c.env.DB, auth);
-  const removed = await removeConnection(c.env.DB, user.id, c.req.param('id'));
-  await audit(c.env.DB, { userId: user.id, connectionId: c.req.param('id'), operation: 'connection_remove', outcome: removed ? 'success' : 'failure' });
-  return removed ? c.body(null, 204) : c.json({ error: 'Connection not found' }, 404);
+  return c.json(...(await removeUserConnection(c.env, user.id, c.req.param('id'))));
 });
+
+/** Owner-scoped removal used by the dashboard. Another user's id resolves to
+ * 404; the default number is refused with 409 (pick another default first).
+ * The Evolution instance is deleted best-effort before the D1 row. */
+export async function removeUserConnection(env: Env, userId: string, connectionId: string, admin?: Pick<EvolutionGoAdminClient, 'deleteInstance'>): Promise<[Record<string, unknown>, 200 | 404 | 409]> {
+  const connection = await getConnection(env.DB, userId, connectionId);
+  if (!connection) return [{ error: 'Connection not found' }, 404];
+  const isDefault = (await listConnections(env.DB, userId)).some((item) => item.id === connection.id && Boolean(item.isDefault));
+  if (isDefault) return [{ error: 'Este é o número padrão. Defina outro número como padrão antes de removê-lo.' }, 409];
+  let instanceDeleted = false;
+  try {
+    await (admin ?? new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY ?? '' })).deleteInstance(connection.instanceId);
+    instanceDeleted = true;
+  } catch (_) { /* best-effort: a stale instance must not block removing the row */ }
+  const removed = await removeConnection(env.DB, userId, connection.id);
+  if (!removed) return [{ error: 'Connection not found' }, 404];
+  // audit_log.connection_id references whatsapp_connections(id); the row is
+  // gone, so record the id in metadata instead (a dangling FK made this 500).
+  try {
+    await audit(env.DB, { userId, operation: 'connection_remove', outcome: 'success', metadata: { removedConnectionId: connection.id, instanceDeleted } });
+  } catch (_) { /* auditing must not turn a completed removal into an error */ }
+  return [{ removed: true, id: connection.id, instanceDeleted }, 200];
+}
 
 /** Owner-only bootstrap for the two human WhatsApp connections. This route
  * creates the Evolution Go instance, stores its token encrypted in D1, starts
@@ -367,9 +464,9 @@ async function connectionViews(env: Env, userId: string, _refresh: boolean): Pro
   }));
 }
 
-async function activityFor(db: D1Database, userId: string, connectionId: string): Promise<Array<{ icon: string; title: string; detail: string; time: string }>> {
+async function activityFor(db: D1Database, userId: string, connectionId: string, limit = 3): Promise<Array<{ icon: string; title: string; detail: string; time: string }>> {
   try {
-    const rows = await listRecentAudit(db, userId, connectionId, 3);
+    const rows = await listRecentAudit(db, userId, connectionId, limit);
     if (rows.length) return rows.map((row) => ({
       icon: row.outcome === 'success' ? '✓' : '!',
       title: auditTitle(row.operation),
@@ -383,7 +480,7 @@ async function activityFor(db: D1Database, userId: string, connectionId: string)
 }
 
 function auditTitle(operation: string): string {
-  return ({ connection_create: 'Conexão cadastrada', connection_provision: 'Instância criada', connection_qr_refresh: 'QR Code renovado', connection_status: 'Conexão verificada', connection_default: 'Conexão padrão atualizada', connection_update: 'Conexão atualizada' } as Record<string, string>)[operation] ?? 'Atividade da conexão';
+  return ({ connection_create: 'Conexão cadastrada', connection_provision: 'Instância criada', connection_qr_refresh: 'QR Code renovado', connection_status: 'Conexão verificada', connection_default: 'Conexão padrão atualizada', connection_update: 'Conexão atualizada', connection_repoint: 'Instância trocada' } as Record<string, string>)[operation] ?? 'Atividade da conexão';
 }
 
 function formatRelativeTime(value: string): string {
@@ -397,34 +494,54 @@ function formatRelativeTime(value: string): string {
   return `há ${Math.floor(hours / 24)} d`;
 }
 
-async function provisionUserConnection(env: Env, user: { id: string; email: string; claims: Record<string, unknown> }, input: { friendlyName?: string; phoneNumber?: string }): Promise<Record<string, unknown>> {
+export async function provisionUserConnection(env: Env, user: { id: string; email: string; claims: Record<string, unknown> }, input: { friendlyName?: string; phoneNumber?: string }): Promise<Record<string, unknown>> {
   if (!env.EVOLUTION_GLOBAL_API_KEY) throw new Error('O provisionamento ainda não está configurado neste ambiente.');
   const name = input.friendlyName?.trim().slice(0, 64) || 'Novo WhatsApp';
   const token = randomInstanceToken();
   const admin = new EvolutionGoAdminClient({ baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY });
   const owner = await ensureUser(env.DB, user);
-  const created = await admin.createInstance({ name, token });
+  // The friendly name stays user-facing; the Evolution instance name must be unique per server.
+  const instanceName = uniqueInstanceName(name);
+  const created = await admin.createInstance({ name: instanceName, token });
   const instanceId = connectionIdFromResponse(created);
   if (!instanceId) throw new EvolutionApiError(502, 'Evolution Go returned no connection id');
-  const connection = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: name, instanceId, phoneNumber: input.phoneNumber?.trim() || undefined, token });
+  let connection: ConnectionSummary;
+  try {
+    connection = await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, { userId: owner.id, friendlyName: name, instanceId, phoneNumber: input.phoneNumber?.trim() || undefined, token });
+  } catch (error) {
+    await admin.deleteInstance(instanceId).catch(() => undefined);
+    throw error;
+  }
   try {
     const base = env.MCP_PUBLIC_URL ?? 'https://app.wapilot.com.br';
     await admin.connectInstance(token, { instanceId: connection.instanceId, webhookUrl: connection.webhookSecret ? `${base}/webhooks/evolution/${connection.webhookSecret}` : undefined, subscribe: ['MESSAGE', 'SEND_MESSAGE', 'HISTORY_SYNC', 'GROUP', 'CONNECTION'] });
     let qr: unknown;
+    let qrPending = false;
     try { qr = await admin.qr(token); } catch (error) {
-      if (error instanceof EvolutionApiError && error.status === 500) qr = undefined;
+      // The QR is often not ready right after connect; keep the instance and tell the UI to poll /qr.
+      if (error instanceof EvolutionApiError && error.status === 500) { qr = undefined; qrPending = true; }
       else throw error;
     }
-    await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'success' });
-    return { connection, state: 'qr', qr: qrDataUrl(qr), expiresIn: extractQrExpiry(qr) ?? 30 };
+    await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'success', ...(qrPending ? { metadata: { qrPending: true } } : {}) });
+    const qrUrl = qrDataUrl(qr);
+    return { connection, state: 'qr', qr: qrUrl, ...(qrUrl ? {} : { qrPending: true, message: 'QR Code ainda não disponível; tente renovar em instantes.' }), expiresIn: extractQrExpiry(qr) ?? 30 };
   } catch (error) {
     try {
       await audit(env.DB, { userId: owner.id, connectionId: connection.id, operation: 'connection_provision', outcome: 'failure', metadata: { status: error instanceof EvolutionApiError ? error.status : 500, message: safeErrorMessage(error, 'Provisioning failed') } });
     } catch {
       // Preserve the original provisioning failure when audit persistence is unavailable.
     }
+    // Do not leave an orphaned Evolution instance and D1 row after a failed connect.
+    await admin.deleteInstance(instanceId).catch(() => undefined);
+    await removeConnection(env.DB, owner.id, connection.id).catch(() => false);
     throw error;
   }
+}
+
+export function uniqueInstanceName(friendlyName: string): string {
+  const slug = friendlyName.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'whatsapp';
+  const suffix = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${slug}-${suffix}`;
 }
 
 function extractQrExpiry(payload: unknown): number | undefined {

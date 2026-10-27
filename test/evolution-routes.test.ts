@@ -181,7 +181,7 @@ describe('Evolution Go route contracts', () => {
     } });
 
     await expect(client.listMessages('Olá', 10)).resolves.toMatchObject({ items: [{ id: 'message-1', text: 'Olá', type: 'text/plain', conversationId: '5511999999999', sender: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z' }] });
-    expect(calls[0]).toEqual({ url: 'https://evolution.invalid/message/search?limit=10&q=Ol%C3%A1', method: 'GET' });
+    expect(calls[0]).toEqual({ url: 'https://evolution.invalid/message/search?limit=11&q=Ol%C3%A1', method: 'GET' });
   });
 
   it('encodes the conversation identifier as one chat parameter alongside text and limit', async () => {
@@ -197,7 +197,7 @@ describe('Evolution Go route contracts', () => {
     expect(Object.fromEntries(seen!.url.searchParams)).toEqual({
       chat: '5511999999999@s.whatsapp.net&limit=1&q=other#?+=/%',
       q: 'acordo & reunião',
-      limit: '10',
+      limit: '11',
     });
     expect(seen?.url.hash).toBe('');
   });

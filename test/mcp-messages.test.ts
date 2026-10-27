@@ -89,7 +89,7 @@ describe('list_messages retained conversation search', () => {
     expect(response.result).toMatchObject({ structuredContent: { data: { items: [{ id: 'message-1', text: 'Reunião amanhã', conversationId: '5511999999999', sender: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z', type: 'text/plain' }], hasMore: false } } });
     const request = new URL(String(fetcher.mock.calls[0][0]));
     expect(request.pathname).toBe('/message/search');
-    expect(Object.fromEntries(request.searchParams)).toEqual({ chat: '5511999999999', q: 'Reunião', limit: '10' });
+    expect(Object.fromEntries(request.searchParams)).toEqual({ chat: '5511999999999', q: 'Reunião', limit: '11' });
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('instance-secret');
     expect(JSON.parse(response.result.content[0].text)).toEqual(response.result.structuredContent.data);
   });
@@ -97,7 +97,7 @@ describe('list_messages retained conversation search', () => {
   it('trims a copied individual JID and searches without text using the default limit', async () => {
     const { call, fetcher } = await messageTool();
     await call({ conversationId: '  5511999999999@s.whatsapp.net  ' });
-    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ chat: '5511999999999@s.whatsapp.net', limit: '25' });
+    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ chat: '5511999999999@s.whatsapp.net', limit: '26' });
   });
 
   it('selects an explicit owned connection before searching a group with the maximum limit', async () => {
@@ -117,8 +117,8 @@ describe('list_messages retained conversation search', () => {
   });
 
   it.each([
-    [{}, { limit: '25' }],
-    [{ text: ' Reunião ' }, { q: 'Reunião', limit: '25' }],
+    [{}, { limit: '26' }],
+    [{ text: ' Reunião ' }, { q: 'Reunião', limit: '26' }],
   ])('preserves unfiltered searches for existing arguments %j', async (args, expectedQuery) => {
     const { call, fetcher } = await messageTool();
     const response = await call(args);

@@ -93,6 +93,8 @@ export interface Message {
   type?: string;
   text?: string;
   media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string };
+  /** True when Evolution Go kept only the id and time (no text or file). */
+  contentUnavailable?: boolean;
 }
 
 export interface SendMessageResult {

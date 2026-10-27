@@ -1,4 +1,4 @@
-import type { AuthenticatedUser, ConnectionRecord, ConnectionSummary } from '../types';
+import type { AuthenticatedUser, ConnectionRecord, ConnectionSummary, Message } from '../types';
 import { decryptToken, encryptToken } from './crypto';
 
 export async function ensureUser(db: D1Database, user: AuthenticatedUser): Promise<{ id: string; email: string }> {
@@ -207,4 +207,66 @@ function randomSecret(): string {
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Repoint an existing connection to another Evolution instance in place.
+ * Only instance_id and encrypted_token change; id, is_default and
+ * webhook_secret_hash (and therefore MCP grants and the webhook URL) are kept. */
+export async function repointConnection(db: D1Database, encryptionKey: string, userId: string, connectionId: string, input: { instanceId: string; token: string }): Promise<boolean> {
+  const encryptedToken = await encryptToken(input.token, encryptionKey);
+  const result = await db.prepare("UPDATE whatsapp_connections SET instance_id = ?1, encrypted_token = ?2, updated_at = datetime('now') WHERE id = ?3 AND user_id = ?4").bind(input.instanceId, encryptedToken, connectionId, userId).run();
+  const changes = (result as { meta?: { changes?: number } })?.meta?.changes;
+  return changes === undefined ? true : changes > 0;
+}
+
+export interface OutboundMessageInput {
+  messageId: string;
+  conversationId?: string;
+  encodingFormat: string;
+  text?: string;
+  media?: { mimeType?: string; fileName?: string; size?: number; url?: string };
+  sentAt?: string;
+}
+
+/** Record a message wapilot just sent so forward_message can find it even
+ * when Evolution Go did not store it and the webhook points elsewhere. */
+export async function recordOutboundMessage(db: D1Database, connectionId: string, input: OutboundMessageInput): Promise<void> {
+  await db.prepare('INSERT OR REPLACE INTO outbound_messages (connection_id, message_id, conversation_id, encoding_format, text, media_json, sent_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
+    .bind(connectionId, input.messageId, input.conversationId ?? null, input.encodingFormat, input.text ?? null, input.media ? JSON.stringify(input.media) : null, input.sentAt ?? new Date().toISOString())
+    .run();
+}
+
+export async function findOutboundMessage(db: D1Database, connectionId: string, messageId: string): Promise<Message | undefined> {
+  const row = await db.prepare('SELECT message_id as messageId, conversation_id as conversationId, encoding_format as encodingFormat, text, media_json as mediaJson, sent_at as sentAt FROM outbound_messages WHERE connection_id = ?1 AND message_id = ?2')
+    .bind(connectionId, messageId)
+    .first<{ messageId: string; conversationId: string | null; encodingFormat: string; text: string | null; mediaJson: string | null; sentAt: string }>();
+  return row ? outboundRowToMessage(row) : undefined;
+}
+
+type OutboundRow = { messageId: string; conversationId: string | null; encodingFormat: string; text: string | null; mediaJson: string | null; sentAt: string };
+
+function outboundRowToMessage(row: OutboundRow): Message {
+  const message: Message = {
+    id: row.messageId,
+    conversationId: row.conversationId ?? undefined,
+    jid: row.conversationId ?? undefined,
+    direction: 'outbound',
+    timestamp: row.sentAt,
+    type: row.encodingFormat,
+  };
+  if (row.text) message.text = row.text;
+  if (row.mediaJson) {
+    try { message.media = JSON.parse(row.mediaJson); } catch { /* ignore malformed metadata */ }
+  }
+  return message;
+}
+
+/** Saved sends with sent_at in [after, before) (Unix ms bounds, either optional), newest first. */
+export async function listOutboundMessages(db: D1Database, connectionId: string, window: { before?: number; after?: number; max?: number }): Promise<Message[]> {
+  const before = window.before !== undefined ? new Date(window.before).toISOString() : '9999-12-31T23:59:59.999Z';
+  const after = window.after !== undefined ? new Date(window.after).toISOString() : '0000-01-01T00:00:00.000Z';
+  const result = await db.prepare('SELECT message_id as messageId, conversation_id as conversationId, encoding_format as encodingFormat, text, media_json as mediaJson, sent_at as sentAt FROM outbound_messages WHERE connection_id = ?1 AND sent_at < ?2 AND sent_at >= ?3 ORDER BY sent_at DESC LIMIT ?4')
+    .bind(connectionId, before, after, window.max ?? 500)
+    .all<OutboundRow>();
+  return (result.results ?? []).map(outboundRowToMessage);
 }

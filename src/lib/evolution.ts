@@ -179,6 +179,10 @@ export class EvolutionGoAdminClient {
     return requestJson(this.fetcher, this.baseUrl, path, apiKey, { ...init, timeoutMs: init.timeoutMs ?? this.timeoutMs });
   }
 
+  async deleteInstance(instanceId: string): Promise<unknown> {
+    return this.request(`/instance/delete/${encodeURIComponent(instanceId)}`, this.globalApiKey, { method: 'DELETE' });
+  }
+
   async createInstance(input: EvolutionInstanceCreateInput): Promise<unknown> {
     return this.request('/instance/create', this.globalApiKey, {
       method: 'POST',
@@ -301,7 +305,19 @@ function normalizeMessage(value: unknown): Message {
   if (typeof body.text === 'string') message.text = body.text;
   const media = asRecord(body.media);
   if (media && typeof media.url === 'string') {
-    message.media = { mimeType: stringValue(attributes.encodingFormat), url: media.url };
+    message.media = { mimeType: stringValue(media.encodingFormat) ?? stringValue(attributes.encodingFormat), url: media.url };
+  }
+  // Evolution Go reports application/octet-stream when a stored row has
+  // neither a body nor a file. That happens for text messages on instances with
+  // saveMessageBodies off (only id and time are kept), so octet-stream does not
+  // mean "binary media". Report text rows as text and flag empty rows instead
+  // of passing a misleading file MIME type through.
+  const isGenericFormat = !message.type || message.type === 'application/octet-stream';
+  if (isGenericFormat && message.text !== undefined && !message.media) {
+    message.type = 'text/plain';
+  } else if (isGenericFormat && message.text === undefined && !message.media) {
+    message.type = undefined;
+    message.contentUnavailable = true;
   }
   return message;
 }
@@ -319,6 +335,8 @@ function normalizeSendResult(payload: unknown, recipientId?: string): SendMessag
     jid: stringValue(meta.chat) ?? stringValue(recipient),
   };
 }
+
+const MESSAGE_SEARCH_MAX_LIMIT = 50;
 
 /** Narrow HTTP client for the Evolution Go JSON:API 1.1 contract. */
 export class EvolutionGoClient {
@@ -377,15 +395,63 @@ export class EvolutionGoClient {
     return { items, nextCursor, hasMore: Boolean(nextCursor) };
   }
 
-  async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*'): Promise<Page<Message>> {
+  async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*', cursor?: string): Promise<Page<Message>> {
     const boundedLimit = Math.min(Math.max(limit, 1), 50);
     const query = text?.trim() ?? '';
-    const params = new URLSearchParams({ limit: String(boundedLimit) });
-    if (query) params.set('q', query);
-    if (conversationId !== undefined) params.set('chat', conversationId);
-    if (encodingFormat) params.set('encodingFormat', encodingFormat);
-    const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
-    return this.page(payload, 'message', normalizeMessage);
+    // Evolution Go caps limit at 50 (anything above falls back to 25), so look one row
+    // ahead when we can, and otherwise probe once for an older row.
+    const fetchLimit = Math.min(boundedLimit + 1, MESSAGE_SEARCH_MAX_LIMIT);
+    const search = async (rowLimit: number, before?: string) => {
+      const params = new URLSearchParams({ limit: String(rowLimit) });
+      if (query) params.set('q', query);
+      if (conversationId !== undefined) params.set('chat', conversationId);
+      if (encodingFormat) params.set('encodingFormat', encodingFormat);
+      // Cursor = Unix ms; Evolution Go returns rows with at < before.
+      if (before && /^\d{1,15}$/.test(before)) params.set('before', before);
+      const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
+      return this.page(payload, 'message', normalizeMessage).items;
+    };
+    const time = (m: Message) => (m.timestamp ? Date.parse(m.timestamp) : NaN);
+    const rows = await search(fetchLimit, cursor);
+    let items = rows.slice(0, boundedLimit);
+    const lookahead = rows.slice(boundedLimit);
+    const times = items.map(time).filter(Number.isFinite);
+    if (items.length < boundedLimit || !times.length) return { items, hasMore: false };
+    let oldest = Math.min(...times);
+    let nextCursor = oldest;
+    let hasMore: boolean;
+    if (lookahead.length) {
+      hasMore = true;
+      // A row past the page shares the oldest timestamp: `before` is exclusive, so move the
+      // tied rows to the next page and point the cursor just after that timestamp.
+      if (time(lookahead[0]) === oldest) {
+        const untied = items.filter((m) => time(m) !== oldest);
+        if (untied.length) { items = untied; nextCursor = oldest + 1; }
+      }
+    } else if (fetchLimit > boundedLimit) {
+      hasMore = false;
+    } else {
+      hasMore = (await search(1, String(oldest))).length > 0;
+    }
+    return hasMore ? { items, nextCursor: String(nextCursor), hasMore: true } : { items, hasMore: false };
+  }
+
+  /** Fetch one stored message by id (Evolution Go POST /message/status).
+   * Returns undefined when Evolution Go did not store it. */
+  async getMessage(messageId: string): Promise<Message | undefined> {
+    try {
+      const payload = await this.request<unknown>('/message/status', {
+        method: 'POST',
+        body: jsonApiBody({ type: 'message', id: messageId }),
+      });
+      const item = documentData(payload);
+      if (resource(item)?.type !== 'message') return undefined;
+      const message = normalizeMessage(item);
+      return message.id ? message : { ...message, id: messageId };
+    } catch (error) {
+      if (error instanceof EvolutionApiError && (error.status === 404 || error.status === 400)) return undefined;
+      throw error;
+    }
   }
 
   async sendText(to: string, text: string, replyTo?: string, participant?: string): Promise<SendMessageResult> {
@@ -401,6 +467,31 @@ export class EvolutionGoClient {
     return normalizeSendResult(payload, to);
   }
 
+  /** Re-send a retained message to another chat, flagged as forwarded (WhatsApp "Encaminhada"). */
+  async forwardMessage(to: string, source: Message): Promise<SendMessageResult> {
+    const relationships: Record<string, unknown> = { recipient: { data: { type: 'chat', id: to } } };
+    const body: Record<string, unknown> = {};
+    if (source.text) body.text = source.text;
+    let path = '/send/text';
+    let encodingFormat = 'text/plain';
+    if (source.media && !source.media.url) {
+      // Never silently drop the file and forward only the caption.
+      throw new EvolutionApiError(422, 'The file of this message is not retained, so it cannot be forwarded; send it again with send_media');
+    }
+    if (source.media?.url) {
+      path = '/send/media';
+      body.media = { url: source.media.url };
+      encodingFormat = (source.media.mimeType ?? source.type ?? 'application/octet-stream').toLowerCase();
+    } else if (!source.text) {
+      throw new EvolutionApiError(422, 'Message has no forwardable text or retained media');
+    }
+    const payload = await this.request<unknown>(path, {
+      method: 'POST',
+      body: jsonApiBody({ type: 'message', attributes: { encodingFormat, body, forwardingScore: 1 }, relationships }),
+    });
+    return normalizeSendResult(payload, to);
+  }
+
   async sendMedia(to: string, media: { mimeType: string; fileName?: string; data: ArrayBuffer; caption?: string }, replyTo?: string): Promise<SendMessageResult> {
     const bytes = new Uint8Array(media.data);
     let binary = '';
@@ -411,7 +502,7 @@ export class EvolutionGoClient {
     if (replyTo) relationships.quoted = { data: { type: 'message', id: replyTo } };
     const payload = await this.request<unknown>('/send/media', {
       method: 'POST',
-      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: media.mimeType.toLowerCase(), body }, relationships }),
+      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: media.mimeType.toLowerCase(), body, ...(media.fileName ? { filename: media.fileName } : {}) }, relationships }),
     });
     return normalizeSendResult(payload, to);
   }

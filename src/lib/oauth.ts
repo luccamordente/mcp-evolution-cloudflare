@@ -2,12 +2,14 @@ import {
   AuthorizationError,
   OAuthProvider,
   getOAuthApi,
+  insufficientScope,
+  type OAuthResourceAuth,
   type AuthRequest,
   type OAuthProviderOptions,
 } from '@cloudflare/workers-oauth-provider';
 import type { Env, AuthenticatedUser } from '../types';
 import { authenticateAccessRequest, AuthError } from './auth';
-import { createMcpServer } from './mcp';
+import { callsWriteTool, createMcpServer, mcpBodyLimit, WRITE_SCOPE } from './mcp';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { logOAuthError } from './oauth-diagnostics';
 import { WAPILOT_LOGO_SVG } from '../ui/wapilot-logo';
@@ -29,11 +31,16 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
         const user = props?.user;
         if (!user) return Response.json({ error: 'OAuth user context missing' }, { status: 500 });
         const auth = (ctx as ExecutionContext & { auth?: { token: string; clientId?: string; scope: string[]; expiresAt?: number } }).auth;
+        // Step-up: a send tool called with a read-only token gets a standard 403
+        // insufficient_scope challenge naming mcp:write, so clients can re-authorize.
+        if (auth && !auth.scope.includes(WRITE_SCOPE) && request.method === 'POST' && await callsWriteTool(request)) {
+          return insufficientScope(auth as unknown as OAuthResourceAuth, ['mcp:read', WRITE_SCOPE], 'Sending WhatsApp messages requires the mcp:write scope.');
+        }
         const server = await createMcpServer(env, user);
         const handler = createMcpHandler(() => server, {
           legacy: 'stateless',
           responseMode: 'json',
-          maxRequestBodySize: Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024),
+          maxRequestBodySize: mcpBodyLimit(env),
         });
         return handler.fetch(request, auth ? {
           authInfo: {

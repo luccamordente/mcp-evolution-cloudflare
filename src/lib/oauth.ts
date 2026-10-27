@@ -63,7 +63,7 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
     clientRegistrationEndpoint: '/oauth/register',
     onError: logOAuthError,
     scopesSupported,
-    requiredScopes: ['mcp:read'],
+    requiredScopes: ['mcp:read', WRITE_SCOPE],
     resourceMetadata: {
       resource,
       authorization_servers: [resourceBaseUrl.replace(/\/$/, '')],
@@ -101,7 +101,7 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       const authRequest = await oauth.parseAuthRequest(request);
       const transaction = await oauth.beginConsent(authRequest);
       const description = await oauth.describeConsent(authRequest);
-      const html = consentHtml(description.clientName, description.redirectHost, description.scope, transaction.handle);
+      const html = consentHtml(description.clientName, description.redirectHost, scopesSupported, transaction.handle);
       return new Response(html, { headers: { ...Object.fromEntries(transaction.headers), 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
     if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, POST' } });
@@ -113,6 +113,7 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       return new Response(null, { status: 302, headers: { ...Object.fromEntries(denied.headers), Location: denied.redirectTo, 'Cache-Control': 'no-store' } });
     }
     const approved = await oauth.approveConsent(request, handle, {
+      scope: scopesSupported,
       remember: { secret: env.CONSENT_SECRET ?? env.TOKEN_ENCRYPTION_KEY, subject: encodeURIComponent(user.email) },
     });
     const completed = await oauth.completeAuthorization({

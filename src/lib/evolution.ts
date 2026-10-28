@@ -381,26 +381,14 @@ export class EvolutionGoClient {
       const digits = needle.replace(/\D/g, '');
       return haystack.includes(needle) || Boolean(digits && (contact.jid ?? '').replace(/\D/g, '').includes(digits));
     });
-    // Deduplicate contacts by name, prioritizing real phone numbers over internal LIDs
-    const deduplicatedMap = new Map<string, Contact>();
-    for (const c of contacts) {
-      const nameKey = (c.name || c.pushName || '').trim().toLowerCase();
-      const isLID = (c.jid || '').length >= 14 && !/^(55|1|44)/.test(c.jid || '');
-      if (nameKey && deduplicatedMap.has(nameKey)) {
-        const existing = deduplicatedMap.get(nameKey)!;
-        const existingIsLID = (existing.jid || '').length >= 14 && !/^(55|1|44)/.test(existing.jid || '');
-        if (existingIsLID && !isLID) {
-          deduplicatedMap.set(nameKey, c);
-        }
-        continue;
-      }
-      if (nameKey) {
-        deduplicatedMap.set(nameKey, c);
-      } else {
-        deduplicatedMap.set(c.id ?? c.jid ?? String(deduplicatedMap.size), c);
-      }
-    }
-    const deduplicated = Array.from(deduplicatedMap.values());
+    // Deduplicate contacts strictly by unique ID / JID
+    const seenIds = new Set<string>();
+    const deduplicated = contacts.filter((c) => {
+      const key = (c.id || c.jid || '').trim();
+      if (!key || seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
     const items = deduplicated.slice(offset, offset + limit);
     const nextCursor = offset + limit < deduplicated.length ? String(offset + limit) : undefined;

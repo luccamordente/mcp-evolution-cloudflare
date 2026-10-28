@@ -4,6 +4,7 @@ const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 const AVATAR_REQUEST_TIMEOUT_MS = 3_000;
 const GROUP_REQUEST_TIMEOUT_MS = 300_000;
+const MEDIA_REQUEST_TIMEOUT_MS = 60_000;
 
 type EvolutionRequestInit = RequestInit & { timeoutMs?: number };
 
@@ -306,7 +307,12 @@ function normalizeMessage(value: unknown): Message {
   if (typeof body.text === 'string') message.text = body.text;
   const media = asRecord(body.media);
   if (media && typeof media.url === 'string') {
-    message.media = { mimeType: stringValue(media.encodingFormat) ?? stringValue(attributes.encodingFormat), url: media.url };
+    const fileName = stringValue(media.fileName) ?? stringValue(attributes.filename) ?? stringValue(body.filename);
+    message.media = {
+      mimeType: stringValue(media.encodingFormat) ?? stringValue(attributes.encodingFormat),
+      url: media.url,
+      ...(fileName ? { fileName } : {}),
+    };
   }
   // Evolution Go reports application/octet-stream when a stored row has
   // neither a body nor a file. That happens for text messages on instances with
@@ -483,6 +489,7 @@ export class EvolutionGoClient {
     if (source.text) body.text = source.text;
     let path = '/send/text';
     let encodingFormat = 'text/plain';
+    let timeoutMs: number | undefined;
     if (source.media && !source.media.url) {
       // Never silently drop the file and forward only the caption.
       throw new EvolutionApiError(422, 'The file of this message is not retained, so it cannot be forwarded; send it again with send_media');
@@ -491,12 +498,20 @@ export class EvolutionGoClient {
       path = '/send/media';
       body.media = { url: source.media.url };
       encodingFormat = (source.media.mimeType ?? source.type ?? 'application/octet-stream').toLowerCase();
+      timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
     } else if (!source.text) {
       throw new EvolutionApiError(422, 'Message has no forwardable text or retained media');
     }
+    const attributes: Record<string, unknown> = {
+      encodingFormat,
+      body,
+      forwardingScore: 1,
+      ...(source.media?.fileName ? { filename: source.media.fileName } : {}),
+    };
     const payload = await this.request<unknown>(path, {
       method: 'POST',
-      body: jsonApiBody({ type: 'message', attributes: { encodingFormat, body, forwardingScore: 1 }, relationships }),
+      body: jsonApiBody({ type: 'message', attributes, relationships }),
+      ...(timeoutMs ? { timeoutMs } : {}),
     });
     return normalizeSendResult(payload, to);
   }
@@ -512,6 +527,7 @@ export class EvolutionGoClient {
     const payload = await this.request<unknown>('/send/media', {
       method: 'POST',
       body: jsonApiBody({ type: 'message', attributes: { encodingFormat: media.mimeType.toLowerCase(), body, ...(media.fileName ? { filename: media.fileName } : {}) }, relationships }),
+      timeoutMs: MEDIA_REQUEST_TIMEOUT_MS,
     });
     return normalizeSendResult(payload, to);
   }

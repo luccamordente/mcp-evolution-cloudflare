@@ -22,6 +22,13 @@ describe('forwardMessage', () => {
     expect(requests[0].body.data.attributes).toEqual({ encodingFormat: 'image/jpeg', body: { text: 'cap', media: { url: 'https://s.invalid/a.jpg' } }, forwardingScore: 1 });
   });
 
+  it('forwards retained document with filename preserved via /send/media', async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    await make(requests).forwardMessage('to@s.whatsapp.net', { id: 'SRC', media: { mimeType: 'application/pdf', fileName: 'relatorio.pdf', url: 'https://s.invalid/doc.pdf' } });
+    expect(requests[0].url).toBe('https://evolution.invalid/send/media');
+    expect(requests[0].body.data.attributes).toEqual({ encodingFormat: 'application/pdf', filename: 'relatorio.pdf', body: { media: { url: 'https://s.invalid/doc.pdf' } }, forwardingScore: 1 });
+  });
+
   it('rejects messages with nothing to forward', async () => {
     await expect(make([]).forwardMessage('to', { id: 'SRC' })).rejects.toThrow(/no forwardable/);
   });

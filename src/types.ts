@@ -82,6 +82,27 @@ export interface Group {
   description?: string;
 }
 
+export interface MessageMediaItem {
+  encodingFormat?: string;
+  url?: string;
+  content?: unknown;
+  fileName?: string;
+  fileSize?: number;
+  duration?: number;
+  pageCount?: number;
+  width?: number;
+  height?: number;
+  waveform?: string;
+  displayName?: string;
+  latitude?: number;
+  longitude?: number;
+  accuracyMeters?: number;
+  speed?: number;
+  degrees?: number;
+  name?: string;
+  address?: string;
+}
+
 export interface Message {
   id?: string;
   conversationId?: string;
@@ -94,6 +115,10 @@ export interface Message {
   type?: string;
   text?: string;
   media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string };
+  medias?: MessageMediaItem[];
+  flags?: number;
+  quotedId?: string;
+  mentions?: string[];
   /** True when Evolution Go kept only the id and time (no text or file). */
   contentUnavailable?: boolean;
 }

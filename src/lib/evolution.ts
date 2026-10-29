@@ -300,7 +300,9 @@ function normalizeMessage(value: unknown): Message {
     conversationId: chat,
     jid: chat,
     source: author,
-    direction: typeof meta.fromMe === 'boolean' ? (meta.fromMe ? 'outbound' : 'inbound') : undefined,
+    direction: typeof meta.fromMe === 'boolean'
+      ? (meta.fromMe ? 'outbound' : 'inbound')
+      : (typeof meta.flags === 'number' && (meta.flags & 1) !== 0 ? 'outbound' : undefined),
     timestamp: at === undefined ? undefined : new Date(at).toISOString(),
     type: stringValue(attributes.encodingFormat),
   };
@@ -313,6 +315,46 @@ function normalizeMessage(value: unknown): Message {
       url: media.url,
       ...(fileName ? { fileName } : {}),
     };
+  }
+  const mediasArray = Array.isArray(body.medias) ? body.medias : undefined;
+  if (mediasArray && mediasArray.length > 0) {
+    message.medias = mediasArray.map((m) => {
+      const rec = asRecord(m) ?? {};
+      return {
+        encodingFormat: stringValue(rec.encodingFormat),
+        url: stringValue(rec.url),
+        content: rec.content,
+        fileName: stringValue(rec.fileName),
+        fileSize: typeof rec.fileSize === 'number' ? rec.fileSize : undefined,
+        duration: typeof rec.duration === 'number' ? rec.duration : undefined,
+        pageCount: typeof rec.pageCount === 'number' ? rec.pageCount : undefined,
+        width: typeof rec.width === 'number' ? rec.width : undefined,
+        height: typeof rec.height === 'number' ? rec.height : undefined,
+        displayName: stringValue(rec.displayName),
+        name: stringValue(rec.name),
+        address: stringValue(rec.address),
+        latitude: typeof rec.latitude === 'number' ? rec.latitude : undefined,
+        longitude: typeof rec.longitude === 'number' ? rec.longitude : undefined,
+      };
+    });
+    if (!message.media && message.medias[0]?.url) {
+      const first = message.medias[0];
+      message.media = {
+        mimeType: first.encodingFormat ?? stringValue(attributes.encodingFormat),
+        url: first.url,
+        ...(first.fileName ? { fileName: first.fileName } : {}),
+      };
+    }
+  }
+  if (typeof meta.flags === 'number') {
+    message.flags = meta.flags;
+  }
+  const quoted = stringValue(meta.quotedId) ?? stringValue(meta.quoted);
+  if (quoted) {
+    message.quotedId = quoted;
+  }
+  if (Array.isArray(meta.mentions)) {
+    message.mentions = meta.mentions.filter((m): m is string => typeof m === 'string');
   }
   // Evolution Go reports application/octet-stream when a stored row has
   // neither a body nor a file. That happens for text messages on instances with

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:local": "node scripts/dev-local.mjs",
+    "dev:stdio": "node scripts/dev-stdio.mjs",
     "prototype:connections": "python3 -m http.server 4173 --directory prototype",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit && tsc --noEmit -p ui/tsconfig.json",
@@ -38,7 +39,7 @@
     "wrangler": "4.150.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "private": false
 }

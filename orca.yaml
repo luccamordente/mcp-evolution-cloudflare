@@ -1,0 +1,2 @@
+scripts:
+  setup: node "$ORCA_WORKTREE_PATH/scripts/worktree-setup.mjs"

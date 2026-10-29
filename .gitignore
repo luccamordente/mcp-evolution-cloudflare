@@ -20,6 +20,7 @@ coverage/
 output/
 tmp/
 temp/
+.tokensave/
 .scratch/evolution-go/
 .scratch/validation/
 

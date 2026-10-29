@@ -2,6 +2,18 @@
 
 Instale Node 20+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
 
+## TokenSave por worktree
+
+Com o CLI `tokensave` instalado e a integração MCP configurada no agente, rode:
+
+```sh
+node scripts/worktree-setup.mjs
+```
+
+O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, seguindo o padrão da Lovell. Ele cria ou atualiza o índice local em `.tokensave/` (ignorado pelo Git), inclui `wrangler.jsonc`, HTML, CSS e `.github/` nas buscas e preserva configurações existentes. A ferramenta é opcional: sua ausência ou falha não interrompe o setup.
+
+Cada worktree precisa do próprio índice. Depois de criá-lo, reinicie a conexão MCP do agente se ela ainda estiver usando o índice da worktree principal. Para atualizar um índice existente após mudanças no código, use `tokensave sync`.
+
 ## Desenvolvimento local
 
 Para abrir o Worker e a UI no navegador, rode:

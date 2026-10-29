@@ -16,12 +16,22 @@ it('serves the shared tools and resources with a persistent default connection o
   const requests: string[] = [];
   let reportedInstance = 'local-instance';
   let acceptedToken = 'fixture-instance-credential';
-  const upstream = createServer((request, response) => {
+  let receivedMediaBytes = 0;
+  let sends = 0;
+  const upstream = createServer(async (request, response) => {
     requests.push(`${request.method} ${request.url}`);
     response.setHeader('content-type', 'application/vnd.api+json');
     if (request.headers.apikey !== acceptedToken) {
       response.writeHead(401);
       response.end(JSON.stringify({ jsonapi: { version: '1.1' }, errors: [{ status: '401', title: 'Unauthorized' }] }));
+      return;
+    }
+    if (request.url === '/send/text' || request.url === '/send/media') {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      if (request.url === '/send/media') receivedMediaBytes = Buffer.from(body.data.attributes.body.media.url, 'base64').byteLength;
+      response.end(JSON.stringify({ jsonapi: { version: '1.1' }, data: { type: 'message', id: `local-send-${++sends}`, meta: { chat: '5511999999999' } } }));
       return;
     }
     const data = request.url === '/instance/status' ? { type: 'connection', id: reportedInstance, attributes: { connected: true } }
@@ -70,7 +80,15 @@ it('serves the shared tools and resources with a persistent default connection o
     expect(result.isError).not.toBe(true);
     expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(1);
   }
-  expect((await first.client.callTool({ name: 'send_text', arguments: { to: '5511999999999', text: 'Not sent' } })).isError).toBe(true);
+  const sent = await first.client.callTool({ name: 'send_text', arguments: { to: '5511999999999', text: 'Local fixture send' } });
+  expect(sent.isError).not.toBe(true);
+  expect(sent.structuredContent).toMatchObject({ data: { messageId: 'local-send-1' } });
+  const mediaArgs = { to: '5511999999999', mimeType: 'application/pdf', dataBase64: Buffer.alloc(8 * 1024 * 1024).toString('base64') };
+  const media = await first.client.callTool({ name: 'send_media', arguments: mediaArgs });
+  expect(media.isError).not.toBe(true);
+  expect(receivedMediaBytes).toBe(8 * 1024 * 1024);
+  const oversized = await first.client.callTool({ name: 'send_media', arguments: { ...mediaArgs, dataBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') } });
+  expect(oversized.structuredContent).toMatchObject({ data: { error: { code: 'media_too_large' } } });
   expect(first.stderr().includes('fixture-instance-credential')).toBe(false);
   await first.close();
   const keyBefore = await readFile(resolve(state, 'encryption.key'), 'utf8');
@@ -79,6 +97,12 @@ it('serves the shared tools and resources with a persistent default connection o
   const reopened = await second.client.callTool({ name: 'list_connections', arguments: {} });
   expect((reopened.structuredContent as { data: Array<{ id: string }> }).data.map((item) => item.id)).toEqual([connections[0].id]);
   expect((await second.client.callTool({ name: 'connection_status', arguments: { connectionId: connections[0].id } })).isError).not.toBe(true);
+  const history = await second.client.callTool({ name: 'list_messages', arguments: {} });
+  expect((history.structuredContent as { data: { items: Array<{ id: string; text?: string }> } }).data.items).toContainEqual(expect.objectContaining({ id: 'local-send-1', text: 'Local fixture send' }));
+  for (const tool of [
+    { name: 'reply_to_message', arguments: { to: '5511999999999', text: 'Fixture reply', messageId: 'local-send-1' } },
+    { name: 'forward_message', arguments: { to: '5511999999999', conversationId: '5511999999999', messageId: 'local-send-1' } },
+  ]) expect((await second.client.callTool(tool)).isError).not.toBe(true);
   await second.close();
   expect(await readFile(resolve(state, 'encryption.key'), 'utf8') === keyBefore).toBe(true);
   const { getPlatformProxy } = await import('wrangler');
@@ -86,6 +110,8 @@ it('serves the shared tools and resources with a persistent default connection o
   try {
     const row = await proxy.env.DB.prepare('SELECT encrypted_token as token FROM whatsapp_connections').first<{ token: string }>();
     expect(Boolean(row?.token && !row.token.includes('fixture-instance-credential') && row.token.includes('.'))).toBe(true);
+    const audit = await proxy.env.DB.prepare("SELECT COUNT(*) as count FROM audit_log WHERE operation = 'send_text' AND outcome = 'success'").first<{ count: number }>();
+    expect(audit?.count).toBe(1);
   } finally { await proxy.dispose(); }
   const restartEnv = { PATH: process.env.PATH!, WAPILOT_STDIO_STATE_DIR: state, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`, LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential' };
   acceptedToken = 'different-fixture-secret';
@@ -108,7 +134,7 @@ it('serves the shared tools and resources with a persistent default connection o
   const changedInstance = await failedSetup({ ...restartEnv, LOCAL_INSTANCE_ID: 'another-instance' });
   expect(changedInstance.code).toBe(1);
   expect(changedInstance.stderr).toContain('configuração diverge');
-  expect(requests.every((request) => request.startsWith('GET '))).toBe(true);
+  expect(requests.filter((request) => !request.startsWith('GET '))).toEqual(['POST /send/text', 'POST /send/media', 'POST /send/text', 'POST /send/text']);
 }, 60_000);
 
 async function failedSetup(env: Record<string, string>, endInput = false) {

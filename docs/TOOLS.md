@@ -4,6 +4,8 @@ Este documento explica a intenção de uso das ferramentas. O catálogo enviado 
 
 As ferramentas que operam uma conexão aceitam `connectionId` opcional, o UUID interno cadastrado para o usuário. O caminho padrão é omitir o campo e deixar o Worker usar a conexão padrão. Chame `list_connections` somente para inspecionar ou escolher entre conexões, ou depois de um erro que indique conexão padrão ausente ou ambígua. Nunca use token, nome interno ou credencial como identificador.
 
+O entrypoint de desenvolvimento `dev:stdio` reutiliza este mesmo catálogo, incluindo envios, com permissões locais fornecidas pelo processo confiável. HTTP continua exigindo OAuth e `mcp:write` para escritas; dados do cliente não alteram permissões. D1 local isola cadastro, auditoria e registros de envios, mas as chamadas ao provedor executam ações reais. Consulte [DEVELOPMENT.md](../DEVELOPMENT.md#mcp-local-por-stdio-node-22) antes de usar uma instância de produção.
+
 | Ferramenta | Use quando | Não use para | Resultado e limites |
 | --- | --- | --- | --- |
 | `list_connections` | Descobrir conexões ou resolver uma escolha ambígua | Enviar mensagens ou consultar histórico | Registro de configuração; use `connection_status` para disponibilidade live. Credenciais e dados de pareamento são omitidos. |

@@ -61,6 +61,8 @@ describe('worker scaffold', () => {
     const response = await app.request('/mcp', {}, env);
     expect(response.status).toBe(401);
     expect((await app.request('/sse', {}, env)).status).toBe(404);
+    const local = await app.request('/mcp', { headers: { 'Cf-Access-Jwt-Assertion': 'fake-access-assertion' } }, { ...env, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'dev@example.test', LOCAL_INSTANCE_TOKEN: 'fixture-secret' });
+    expect(local.status).toBe(401);
   });
 
   it('protects authorization management on the UI and API surfaces', async () => {

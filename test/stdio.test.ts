@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createServer } from 'node:http';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, rm, readFile, symlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -10,9 +10,19 @@ import { resolve } from 'node:path';
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 
+async function fixtureWorkspace() {
+  const workspace = await mkdtemp(resolve(tmpdir(), 'wapilot-stdio-'));
+  cleanup.push(() => rm(workspace, { recursive: true, force: true }));
+  for (const path of ['src', 'scripts', 'migrations', 'public', 'package.json', 'tsconfig.json', 'wrangler.jsonc']) {
+    await cp(resolve(path), resolve(workspace, path), { recursive: true });
+  }
+  await symlink(resolve('node_modules'), resolve(workspace, 'node_modules'), 'dir');
+  return workspace;
+}
+
 it('serves the shared tools and resources with a persistent default connection over stdio', async () => {
-  const state = await mkdtemp(resolve(tmpdir(), 'wapilot-stdio-'));
-  cleanup.push(() => rm(state, { recursive: true, force: true }));
+  const workspace = await fixtureWorkspace();
+  const state = resolve(workspace, '.wrangler/stdio');
   const requests: string[] = [];
   let reportedInstance = 'local-instance';
   let acceptedToken = 'fixture-instance-credential';
@@ -44,8 +54,8 @@ it('serves the shared tools and resources with a persistent default connection o
   cleanup.push(() => new Promise<void>((done) => upstream.close(() => done())));
   const address = upstream.address() as { port: number };
   async function open() {
-    const transport = new StdioClientTransport({ command: process.execPath, args: ['scripts/dev-stdio.mjs'], cwd: resolve('.'), stderr: 'pipe', env: {
-      PATH: process.env.PATH!, WAPILOT_STDIO_STATE_DIR: state, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`,
+    const transport = new StdioClientTransport({ command: process.execPath, args: ['scripts/dev-stdio.mjs'], cwd: workspace, stderr: 'pipe', env: {
+      PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`,
       LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential',
     } });
     let stderr = '';
@@ -106,39 +116,40 @@ it('serves the shared tools and resources with a persistent default connection o
   await second.close();
   expect(await readFile(resolve(state, 'encryption.key'), 'utf8') === keyBefore).toBe(true);
   const { getPlatformProxy } = await import('wrangler');
-  const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: resolve('wrangler.jsonc'), environment: 'stdio', remoteBindings: false, envFiles: [], persist: { path: resolve(state, 'bindings/v3') } });
+  const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: resolve(workspace, 'wrangler.jsonc'), environment: 'stdio', remoteBindings: false, envFiles: [], persist: { path: resolve(state, 'bindings/v3') } });
   try {
     const row = await proxy.env.DB.prepare('SELECT encrypted_token as token FROM whatsapp_connections').first<{ token: string }>();
     expect(Boolean(row?.token && !row.token.includes('fixture-instance-credential') && row.token.includes('.'))).toBe(true);
     const audit = await proxy.env.DB.prepare("SELECT COUNT(*) as count FROM audit_log WHERE operation = 'send_text' AND outcome = 'success'").first<{ count: number }>();
     expect(audit?.count).toBe(1);
   } finally { await proxy.dispose(); }
-  const restartEnv = { PATH: process.env.PATH!, WAPILOT_STDIO_STATE_DIR: state, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`, LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential' };
+  const restartEnv = { PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`, LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential' };
   acceptedToken = 'different-fixture-secret';
-  const changed = await failedSetup({ ...restartEnv, LOCAL_INSTANCE_TOKEN: 'different-fixture-secret' });
+  const changed = await failedSetup({ ...restartEnv, LOCAL_INSTANCE_TOKEN: 'different-fixture-secret' }, false, workspace);
   expect(changed.code).toBe(1);
   expect(changed.stderr).toContain('credencial diverge');
   expect(changed.stderr.includes('different-fixture-secret')).toBe(false);
   acceptedToken = 'fixture-instance-credential';
   await rm(resolve(state, 'encryption.key'));
-  const missing = await failedSetup(restartEnv);
+  const missing = await failedSetup(restartEnv, false, workspace);
   expect(missing.code).toBe(1);
   expect(missing.stderr).toContain('chave local está ausente');
   await expect(readFile(resolve(state, 'encryption.key'))).rejects.toMatchObject({ code: 'ENOENT' });
   await writeFile(resolve(state, 'encryption.key'), Buffer.alloc(32, 7).toString('base64url'));
-  const wrong = await failedSetup(restartEnv);
+  const wrong = await failedSetup(restartEnv, false, workspace);
   expect(wrong.code).toBe(1);
   expect(wrong.stderr).toContain('Restaure a chave original');
   await writeFile(resolve(state, 'encryption.key'), keyBefore);
   reportedInstance = 'another-instance';
-  const changedInstance = await failedSetup({ ...restartEnv, LOCAL_INSTANCE_ID: 'another-instance' });
+  const changedInstance = await failedSetup({ ...restartEnv, LOCAL_INSTANCE_ID: 'another-instance' }, false, workspace);
   expect(changedInstance.code).toBe(1);
   expect(changedInstance.stderr).toContain('configuração diverge');
   expect(requests.filter((request) => !request.startsWith('GET '))).toEqual(['POST /send/text', 'POST /send/media', 'POST /send/text', 'POST /send/text']);
 }, 60_000);
 
-async function failedSetup(env: Record<string, string>, endInput = false) {
-  const child = spawn(process.execPath, ['scripts/dev-stdio.mjs'], { cwd: resolve('.'), env: { PATH: process.env.PATH!, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+async function failedSetup(env: Record<string, string>, endInput = false, workspace?: string) {
+  workspace ??= await fixtureWorkspace();
+  const child = spawn(process.execPath, ['scripts/dev-stdio.mjs'], { cwd: workspace, env: { PATH: process.env.PATH!, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', (data) => { stdout += data.toString(); });
   child.stderr.on('data', (data) => { stderr += data.toString(); });
@@ -159,8 +170,8 @@ it('rejects missing credentials without printing configuration or MCP noise', as
 });
 
 it.each(['unauthorized', 'mismatch', 'unavailable', 'network'] as const)('rejects %s setup without registering or reconfiguring an instance', async (failure) => {
-  const state = await mkdtemp(resolve(tmpdir(), 'wapilot-stdio-invalid-'));
-  cleanup.push(() => rm(state, { recursive: true, force: true }));
+  const workspace = await fixtureWorkspace();
+  const state = resolve(workspace, '.wrangler/stdio');
   const requests: string[] = [];
   const upstream = createServer((request, response) => {
     requests.push(`${request.method} ${request.url}`);
@@ -173,7 +184,7 @@ it.each(['unauthorized', 'mismatch', 'unavailable', 'network'] as const)('reject
   });
   await new Promise<void>((done) => upstream.listen(0, '127.0.0.1', done));
   cleanup.push(() => new Promise<void>((done) => upstream.close(() => done())));
-  const result = await failedSetup({ WAPILOT_STDIO_STATE_DIR: state, EVOLUTION_BASE_URL: `http://127.0.0.1:${(upstream.address() as { port: number }).port}`, LOCAL_INSTANCE_ID: 'fixture-instance', LOCAL_INSTANCE_TOKEN: 'fixture-secret' });
+  const result = await failedSetup({ EVOLUTION_BASE_URL: `http://127.0.0.1:${(upstream.address() as { port: number }).port}`, LOCAL_INSTANCE_ID: 'fixture-instance', LOCAL_INSTANCE_TOKEN: 'fixture-secret' }, false, workspace);
   expect(result.code).toBe(1);
   expect(result.stdout).toBe('');
   expect(result.stderr).toContain('WaPilot:');

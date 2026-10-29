@@ -54,7 +54,7 @@ try {
   const resource = status.data as { type?: string; id?: string } | undefined;
   if (resource?.type !== 'connection' || resource.id !== instanceId) throw new SetupError('O estado live não corresponde à instância configurada.');
 
-  const state = resolve(config.WAPILOT_STDIO_STATE_DIR ?? resolve(root, '.wrangler/stdio'));
+  const state = resolve(root, '.wrangler/stdio');
   const persistence = resolve(state, 'bindings');
   await mkdir(state, { recursive: true, mode: 0o700 });
   const migration = spawnSync(process.execPath, [resolve(root, 'node_modules/wrangler/bin/wrangler.js'), 'd1', 'migrations', 'apply', 'DB', '--env', 'stdio', '--local', '--persist-to', persistence], {

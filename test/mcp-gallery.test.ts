@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
 import { encryptToken } from '../src/lib/crypto';
+import { EvolutionApiError, EvolutionGoClient } from '../src/lib/evolution';
 import type { ConnectionRecord, Env } from '../src/types';
 
 const connectionId = 'c770126e-773a-408f-9405-89561d05447c';
@@ -185,6 +186,16 @@ describe('image gallery MCP boundary', () => {
     fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [] }));
     setDefaultCount(2);
     expect((await call({ connectionId: failed.result._meta.gallery.connectionId })).result.isError).not.toBe(true);
+  });
+
+  it.each(['wapilot', 'upstream'] as const)('preserves the %s timeout classification without forwarding private details', async (timeoutSource) => {
+    const { call, auditBindings } = await galleryTool();
+    vi.spyOn(EvolutionGoClient.prototype, 'listMessages').mockRejectedValue(new EvolutionApiError(504, 'WaPilot timeout test', { private: 'private-payload' }, timeoutSource));
+    const { result } = await call({});
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: `${timeoutSource}_timeout`, status: 504, message: 'WaPilot timeout test' } } } });
+    expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent.data);
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private-payload|instance-secret|global-secret/);
+    expect(auditBindings.some(values => values.some(value => typeof value === 'string' && value.includes(`${timeoutSource}_timeout`)))).toBe(true);
   });
 
   it('never authorizes direct image requests to the Evolution API origin', async () => {

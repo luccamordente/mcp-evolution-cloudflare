@@ -49,7 +49,7 @@ O cliente consulta diretamente `GET /message/search`, enviando a conversa como `
 
 Todas as respostas bem-sucedidas usam `structuredContent.data` e podem conter objetos, listas, strings, números, booleanos ou `null`. Erros de execução usam `isError: true`, repetem um envelope sanitizado em `content[0].text` e em `structuredContent.data.error`, com os campos:
 
-- `code`: classificação estável (`connection_not_found`, `no_default_connection`, `multiple_default_connections`, `evolution_unreachable`, `evolution_http_error`, `media_too_large`, `invalid_base64`, `token_decryption_failed` ou `unexpected_error`);
+- `code`: classificação estável (`connection_not_found`, `no_default_connection`, `multiple_default_connections`, `wapilot_timeout`, `upstream_timeout`, `evolution_unreachable`, `evolution_http_error`, `media_too_large`, `invalid_base64`, `token_decryption_failed` ou `unexpected_error`);
 - `status`: status HTTP sem payload upstream;
 - `retryable`: indica se uma nova tentativa é plausível; operações de escrita não devem ser repetidas automaticamente;
 - `operation`: nome da ferramenta que falhou;
@@ -61,6 +61,19 @@ O envelope nunca inclui tokens, chaves, credenciais, payloads ou `details` do Ev
 As respostas MCP são normalizadas pelo Worker, mas a origem Evolution Go é JSON:API 1.1. `list_messages` lê a coleção diretamente de `data`; cada mensagem usa `id`, `attributes.at` em milissegundos, `attributes.encodingFormat`, `attributes.body`, `relationships.author` e `meta.chat`. Recibos são mensagens próprias com `body.state` e `relationships.target`. O cliente não depende de `data.items`, `raw`, `message_id`, `timestamp` ou de um `status` na mensagem.
 
 Administração de conexões, logout, exclusão de mensagens ou grupos e gestão ampla de participantes não fazem parte desta superfície MCP.
+
+### Origem dos timeouts
+
+| Código | Evidência | Mensagem |
+| --- | --- | --- |
+| `wapilot_timeout` | O temporizador local do WaPilot cancelou a espera, inclusive durante a leitura do corpo da resposta. O status 504 é gerado localmente. | `WaPilot stopped waiting for the WhatsApp service after <prazo> ms (WaPilot timeout). The service outcome is unknown.` |
+| `upstream_timeout` | A chamada recebeu HTTP 408 ou 504 do serviço externo. O status é preservado. | `The WhatsApp service returned a timeout response (HTTP <status>) to WaPilot.` |
+
+Um timeout local não comprova que o Evolution Go sofreu timeout. Um timeout recebido comprova uma resposta externa de timeout, mas não identifica sua causa dentro do provedor ou de seu gateway. A classificação usa a origem registrada na fronteira HTTP, sem inferi-la pelo texto do erro. A galeria preserva esses códigos e mensagens sem repassar detalhes privados.
+
+`retryable: true` permite considerar uma nova tentativa de leitura; não autoriza repetir envios automaticamente. A entrega pode ter ocorrido mesmo sem confirmação: confira o histórico antes de decidir reenviar, lembrando que a ausência de uma mensagem no histórico retido é inconclusiva.
+
+O cliente/host MCP também pode atingir seu próprio prazo antes de receber a resposta. Esse erro é produzido pelo cliente e pode não chegar ao Worker; não deve ser atribuído ao provedor nem confundido com o temporizador local do WaPilot.
 
 ## Galeria de imagens MCP Apps
 

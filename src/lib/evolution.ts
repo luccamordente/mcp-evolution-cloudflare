@@ -36,7 +36,7 @@ export interface EvolutionQrRenewOptions extends EvolutionConnectInput {
 }
 
 export class EvolutionApiError extends Error {
-  constructor(public readonly status: number, message: string, public readonly details?: unknown) {
+  constructor(public readonly status: number, message: string, public readonly details?: unknown, public readonly timeoutSource?: 'wapilot' | 'upstream') {
     super(message);
     this.name = 'EvolutionApiError';
   }
@@ -139,7 +139,7 @@ async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: stri
     } catch (error) {
       clearTimeout(timeout);
       if (controller.signal.aborted) {
-        throw new EvolutionApiError(504, 'Evolution Go request timed out', { path, timeoutMs });
+        throw new EvolutionApiError(504, `WaPilot stopped waiting for the WhatsApp service after ${timeoutMs} ms (WaPilot timeout). The service outcome is unknown.`, { path, timeoutMs }, 'wapilot');
       }
       if (attempt + 1 < attempts) {
         await retryDelay(attempt);
@@ -160,7 +160,11 @@ async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: stri
     await retryDelay(attempt);
   }
   const status = lastStatus ?? 502;
-  throw new EvolutionApiError(status, sanitizeErrorMessage(errorMessage(lastPayload, status)), lastPayload);
+  const timeoutSource = status === 408 || status === 504 ? 'upstream' : undefined;
+  const message = timeoutSource
+    ? `The WhatsApp service returned a timeout response (HTTP ${status}) to WaPilot.`
+    : sanitizeErrorMessage(errorMessage(lastPayload, status));
+  throw new EvolutionApiError(status, message, lastPayload, timeoutSource);
 }
 
 /** Administrative client used only by the owner-protected provisioning route. */

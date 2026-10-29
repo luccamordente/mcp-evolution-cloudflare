@@ -64,7 +64,7 @@ describe('Evolution Go route contracts', () => {
     ]);
   });
 
-  it('bounds avatar requests and returns a timeout error when Evolution Go stalls', async () => {
+  it('attributes the avatar request deadline to WaPilot', async () => {
     const client = new EvolutionGoAdminClient({
       baseUrl: 'https://evolution.invalid',
       globalApiKey: 'global-secret',
@@ -76,7 +76,8 @@ describe('Evolution Go route contracts', () => {
 
     await expect(client.avatar('instance-secret', '5511999999999@s.whatsapp.net')).rejects.toMatchObject({
       status: 504,
-      message: 'Evolution Go request timed out',
+      timeoutSource: 'wapilot',
+      message: 'WaPilot stopped waiting for the WhatsApp service after 10 ms (WaPilot timeout). The service outcome is unknown.',
     });
   });
 

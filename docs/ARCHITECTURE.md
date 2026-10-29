@@ -30,6 +30,14 @@ O provisionamento envia somente `name` e `token` ao criar uma conexão e grava o
 
 Antes de qualquer resposta estruturada de ferramenta MCP, o Worker percorre recursivamente os valores JSON e remove campos `undefined` para produzir JSON válido. URLs de mídia são preservadas como o Evolution Go as devolve; o Worker não as reescreve, hospeda, redireciona ou intermedeia.
 
+## Timeouts
+
+Os prazos de espera em `src/lib/evolution.ts` são definidos pelo WaPilot: 8 segundos por padrão, até 3 segundos para avatar, 300 segundos para grupos e 60 segundos para envio de mídia. Eles cobrem o fetch e a leitura da resposta; não são prazos informados pelo Evolution Go nem um limite global do transporte MCP. Quando o temporizador cancela a chamada, `EvolutionApiError.timeoutSource` vale `wapilot`, a mensagem informa o prazo local e o resultado remoto desconhecido, e o MCP retorna `wapilot_timeout` com status 504.
+
+Se a resposta externa final tiver HTTP 408 ou 504, `timeoutSource` vale `upstream` e o MCP retorna `upstream_timeout`, preservando o status e informando que recebeu uma resposta de timeout. Isso não identifica a causa dentro do provedor ou do gateway. Outros erros HTTP e falhas de rede mantêm suas classificações anteriores. GET continua tentando até três vezes para 5xx/falhas de rede; um timeout local encerra a chamada sem repetir. Escritas nunca são repetidas automaticamente, pois o envio pode ter ocorrido sem confirmação. A auditoria preserva a mensagem segura que distingue a origem; a galeria preserva código/status sem detalhes upstream.
+
+Um prazo imposto pelo cliente/host MCP pode expirar antes da resposta e não ser observado pelo Worker. Nesse caso, a mensagem é produzida pelo cliente e não constitui evidência de timeout no Evolution Go. O contrato dos erros emitidos pelo WaPilot está em [TOOLS.md](TOOLS.md#origem-dos-timeouts).
+
 ## Apresentação de imagens
 
 `show_image_gallery` adiciona uma ferramenta de leitura e um recurso estático MCP Apps sem alterar o transporte ou a autorização. O servidor usa `@modelcontextprotocol/ext-apps` 2.0.3, compatível com os pacotes MCP v2 fixados. Cada chamada, inclusive atualização iniciada pela UI, resolve o usuário e `(user_id, connection_id)` antes de descriptografar a credencial e consultar o cliente Evolution Go. A resposta privada inclui o UUID resolvido para fixar a conexão nas atualizações seguintes.

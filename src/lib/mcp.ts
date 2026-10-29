@@ -140,6 +140,8 @@ export type McpErrorCode =
   | 'insufficient_scope'
   | 'no_default_connection'
   | 'multiple_default_connections'
+  | 'wapilot_timeout'
+  | 'upstream_timeout'
   | 'evolution_unreachable'
   | 'evolution_http_error'
   | 'media_too_large'
@@ -182,6 +184,9 @@ export function classifyMcpError(error: unknown, operation: string): McpToolErro
     return { code: 'media_too_large', status: 413, retryable: false, operation, message, hint: 'Reduce the attachment below the configured byte limit and retry.' };
   }
   if (error instanceof EvolutionApiError) {
+    if (error.timeoutSource) {
+      return { code: error.timeoutSource === 'wapilot' ? 'wapilot_timeout' : 'upstream_timeout', status: error.status, retryable: true, operation, message, hint: 'Retry a read after a short delay; writes must not be replayed automatically because delivery may have completed. Check message history before deciding to resend.' };
+    }
     if (message === 'Evolution Go is unreachable') {
       return { code: 'evolution_unreachable', status: 503, retryable: true, operation, message, hint: 'Retry the operation for a read, or verify Evolution Go availability before retrying a write.' };
     }
@@ -276,11 +281,11 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
         note: 'Partial retained image history. Missing or expired files may be unavailable. Open the gallery in a compatible MCP Apps host; Refresh renews available links.' };
       return { ...ok(summary), _meta: { gallery: toJsonValue({ connectionId: connection.id, conversationId, text, limit, approvedOrigins, items }) } };
     } catch (error) {
-      // Never forward upstream details, URLs, captions or service credentials to
-      // the model or audit log. Keep only the useful HTTP status for this tool.
+      // Keep only status and locally generated timeout messages; upstream details
+      // may contain private URLs, captions or service credentials.
       const initial = classifyMcpError(error, 'show_image_gallery');
       const safeError = error instanceof EvolutionApiError
-        ? new EvolutionApiError(error.status, 'Image history is unavailable; retry a read or verify storage availability.')
+        ? new EvolutionApiError(error.status, error.timeoutSource ? initial.message : 'Image history is unavailable; retry a read or verify storage availability.', undefined, error.timeoutSource)
         : ['connection_not_found', 'no_default_connection', 'multiple_default_connections', 'token_decryption_failed'].includes(initial.code) ? error : new Error('Image gallery is unavailable.');
       const classified = classifyMcpError(safeError, 'show_image_gallery');
       try { await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation: 'show_image_gallery', outcome: 'failure', metadata: { code: classified.code, status: classified.status } }); } catch { /* Preserve the original safe operation result. */ }

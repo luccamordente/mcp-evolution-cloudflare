@@ -7,6 +7,9 @@ const workspace = process.env.ORCA_WORKTREE_PATH
   || resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = resolve(workspace, '.tokensave/config.json');
 
+const envCopy = spawnSync(process.execPath, [resolve(dirname(fileURLToPath(import.meta.url)), 'copy-stdio-env.mjs'), workspace], { stdio: 'inherit' });
+if (envCopy.error || envCopy.status !== 0) throw new Error('Não foi possível copiar a configuração stdio para a worktree.');
+
 function run(...args) {
   const result = spawnSync('tokensave', args, {
     cwd: workspace,

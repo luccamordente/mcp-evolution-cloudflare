@@ -13,7 +13,8 @@ O entrypoint de desenvolvimento `dev:stdio` reutiliza este mesmo catálogo, incl
 | `search_contacts` | Encontrar uma pessoa ou número antes de uma mensagem | Pesquisar mensagens | Contatos paginados filtrados por nome ou telefone. |
 | `list_groups` | Encontrar grupos e seus metadados básicos | Enviar uma mensagem sem confirmar o destino | Grupos paginados, com participantes básicos quando disponíveis. |
 | `list_messages` | Pesquisar mensagens retidas na conexão ou em uma conversa específica | Exibir uma galeria de imagens (use `show_image_gallery`), assumir que todo o histórico está disponível ou obter uma lista completa de conversas | Até 25 mensagens por padrão (máximo 50), com filtros opcionais de conversa e texto; a cobertura depende da retenção no serviço. |
-| `show_image_gallery` | Atender pedidos para ver, mostrar ou abrir fotos/imagens recebidas e enviadas, inclusive de uma conversa específica | Analisar conteúdo visual pelo resumo, recuperar arquivos não retidos, enviar anexos (use `send_media`), baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
+| `get_message_image` | Ler texto ou analisar o conteúdo visual de uma imagem de mensagem conhecida | Exibir uma galeria ou recuperar arquivos não retidos | Um bloco MCP nativo de imagem; recebe `messageId` e `connectionId` opcional; JPEG, PNG ou WebP, até o limite de mídia configurado. |
+| `show_image_gallery` | Atender pedidos para ver, mostrar ou abrir fotos/imagens recebidas e enviadas, inclusive de uma conversa específica | Analisar conteúdo visual (use `get_message_image`), recuperar arquivos não retidos, enviar anexos (use `send_media`), baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
 | `send_text` | Enviar uma nova mensagem de texto | Responder citando uma mensagem existente | Resultado estruturado do envio; é uma ação externa e deve ter destino e texto finais. |
 | `reply_to_message` | Responder citando uma mensagem conhecida | Enviar uma mensagem nova sem referência | Resultado estruturado; requer destino, texto e `messageId` da mensagem citada. |
 | `send_media` | Enviar imagem, documento, áudio ou vídeo em base64 | Enviar apenas texto ou conteúdo ainda indisponível | Resultado estruturado; aceita legenda, nome de arquivo e referência opcional; respeita o limite de mídia configurado. |
@@ -45,13 +46,13 @@ O cliente consulta diretamente `GET /message/search`, enviando a conversa como `
 - `to`: destino individual ou grupo no formato aceito pelo serviço.
 - `cursor`: cursor opaco retornado pela página anterior; omita na primeira página.
 - `limit`: quantidade máxima de itens da página.
-- `messageId`: identificador da mensagem a ser citada.
+- `messageId`: identificador da mensagem a ser citada, encaminhada ou lida visualmente.
 - `dataBase64`: conteúdo do anexo codificado em Base64, sem prefixo de URL de dados.
 - `replyTo`: identificador opcional da mensagem que será citada junto com o anexo.
 
 Todas as respostas bem-sucedidas usam `structuredContent.data` e podem conter objetos, listas, strings, números, booleanos ou `null`. Erros de execução usam `isError: true`, repetem um envelope sanitizado em `content[0].text` e em `structuredContent.data.error`, com os campos:
 
-- `code`: classificação estável (`connection_not_found`, `no_default_connection`, `multiple_default_connections`, `wapilot_timeout`, `upstream_timeout`, `evolution_unreachable`, `evolution_http_error`, `media_too_large`, `invalid_base64`, `token_decryption_failed` ou `unexpected_error`);
+- `code`: classificação estável (`connection_not_found`, `no_default_connection`, `multiple_default_connections`, `wapilot_timeout`, `upstream_timeout`, `evolution_unreachable`, `evolution_http_error`, `media_too_large`, `image_unavailable`, `invalid_base64`, `token_decryption_failed` ou `unexpected_error`);
 - `status`: status HTTP sem payload upstream;
 - `retryable`: indica se uma nova tentativa é plausível; operações de escrita não devem ser repetidas automaticamente;
 - `operation`: nome da ferramenta que falhou;
@@ -76,6 +77,22 @@ Um timeout local não comprova que o Evolution Go sofreu timeout. Um timeout rec
 `retryable: true` permite considerar uma nova tentativa de leitura; não autoriza repetir envios automaticamente. A entrega pode ter ocorrido mesmo sem confirmação: confira o histórico antes de decidir reenviar, lembrando que a ausência de uma mensagem no histórico retido é inconclusiva.
 
 O cliente/host MCP também pode atingir seu próprio prazo antes de receber a resposta. Esse erro é produzido pelo cliente e pode não chegar ao Worker; não deve ser atribuído ao provedor nem confundido com o temporizador local do WaPilot.
+
+## Leitura visual de imagens
+
+Use `get_message_image` quando precisar interpretar uma imagem, ler seu texto ou responder sobre o que ela mostra. Primeiro obtenha seu `messageId` em `list_messages`; preserve o mesmo `connectionId` se a consulta tiver escolhido uma conexão explícita. Por exemplo:
+
+```json
+{ "messageId": "id-retornado-por-list_messages" }
+```
+
+A ferramenta é somente leitura. Ela resolve `(user_id, connection_id)`, usa o token da instância para consultar `POST /message/status` com `{ "data": { "type": "message", "id": "..." } }` e aproveita a URL assinada atual retornada pelo provedor. Essa consulta é restrita à instância. Ela não usa `/message/downloadmedia`, que exige o envelope WhatsApp completo. Uma mensagem ou arquivo não retido continua indisponível; isso não comprova exclusão nem ausência no histórico completo.
+
+O Worker baixa somente de origens HTTPS exatas de `IMAGE_STORAGE_ORIGINS`, excluindo a origem da API. URLs fornecidas nos argumentos, credenciais na URL, formatos ativos e redirects são rejeitados. O download não recebe o token da instância, bearer OAuth ou chave administrativa. A leitura aplica `MAX_MEDIA_BYTES` (8 MiB por padrão), inclusive durante o streaming e sem depender de `Content-Length`, e um prazo local de 8 segundos que cobre também o corpo. JPEG, PNG e WebP são conferidos pela assinatura dos bytes; GIF e AVIF podem aparecer na galeria, mas não são aceitos por esta ferramenta. Mensagens com múltiplas mídias usam a primeira mídia normalizada.
+
+A resposta usa `content` com um bloco `type: "image"`, Base64 sem prefixo de URL de dados e MIME correspondente. `structuredContent.data` inclui apenas `connectionId`, `messageId` e `mimeType`; não duplica o Base64 como texto. Links assinados, legendas e credenciais não são retornados nem auditados. O modelo precisa receber o bloco visual por um cliente compatível; não deve deduzir o conteúdo pela legenda ou pelo resumo da galeria.
+
+Erros próprios de imagem usam `image_unavailable` com status e mensagem de produto, sem corpo ou link privado do storage; excesso de tamanho usa `media_too_large`. Um prazo local vencido usa `wapilot_timeout`; HTTP 408/504 do storage usa `upstream_timeout` e identifica o storage na mensagem. O download não tem retry automático; uma nova chamada refaz a consulta da mensagem para obter um link atual.
 
 ## Galeria de imagens MCP Apps
 

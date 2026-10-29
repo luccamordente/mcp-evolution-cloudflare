@@ -1,4 +1,6 @@
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
+import { Buffer } from 'node:buffer';
+import { galleryImage } from './image-gallery';
 
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
@@ -40,6 +42,10 @@ export class EvolutionApiError extends Error {
     super(message);
     this.name = 'EvolutionApiError';
   }
+}
+
+export class MessageImageError extends Error {
+  constructor(public readonly status: number, message: string) { super(message); }
 }
 
 type JsonApiResource = {
@@ -512,6 +518,60 @@ export class EvolutionGoClient {
     } catch (error) {
       if (error instanceof EvolutionApiError && (error.status === 404 || error.status === 400)) return undefined;
       throw error;
+    }
+  }
+
+  /** Read a retained image without exposing its signed URL or forwarding API credentials. */
+  async getMessageImage(messageId: string, approvedOrigins: string[], maxBytes: number): Promise<{ data: string; mimeType: string }> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new MessageImageError(500, 'WaPilot image size limit is invalid.');
+    let message: Message | undefined;
+    try { message = await this.getMessage(messageId); }
+    catch (error) {
+      if (error instanceof EvolutionApiError) {
+        if (error.timeoutSource) throw error;
+        throw new EvolutionApiError(error.status, `WaPilot could not retrieve the requested message (HTTP ${error.status}).`);
+      }
+      throw new MessageImageError(502, 'WaPilot could not retrieve the requested message.');
+    }
+    if (!message || message.id !== messageId) throw new MessageImageError(404, 'WaPilot could not find this message in retained history.');
+    // shortcut: read the first normalized media item; add selection when album items need separate analysis.
+    const image = galleryImage(message, approvedOrigins);
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(image.mimeType)) throw new MessageImageError(415, 'WaPilot visual analysis supports JPEG, PNG and WebP images.');
+    if (image.state !== 'ready') throw new MessageImageError(404, 'WaPilot cannot access a retained image for this message. Missing or unavailable files do not prove deletion.');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      const response = await this.fetcher(image.url, { redirect: 'error', credentials: 'omit', signal: controller.signal });
+      if (response.status === 408 || response.status === 504) throw new EvolutionApiError(response.status, `Image storage returned a timeout response (HTTP ${response.status}) to WaPilot.`, undefined, 'upstream');
+      if (!response.ok) throw new MessageImageError(response.status >= 400 ? response.status : 502, `WaPilot could not load the image from storage (HTTP ${response.status}).`);
+      if (Number(response.headers.get('content-length')) > maxBytes) throw new MessageImageError(413, `Media exceeds configured limit of ${maxBytes} bytes`);
+      reader = response.body?.getReader();
+      if (!reader) throw new MessageImageError(502, 'WaPilot received an empty image response.');
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) throw new MessageImageError(413, `Media exceeds configured limit of ${maxBytes} bytes`);
+        chunks.push(value);
+      }
+      const bytes = Buffer.concat(chunks, size);
+      const valid = image.mimeType === 'image/png' ? bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
+        : image.mimeType === 'image/jpeg' ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+        : bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+      if (!valid) throw new MessageImageError(415, 'WaPilot received content that does not match the expected image format.');
+      return { data: bytes.toString('base64'), mimeType: image.mimeType };
+    } catch (error) {
+      if (controller.signal.aborted) throw new EvolutionApiError(504, `WaPilot stopped waiting for image storage after ${DEFAULT_REQUEST_TIMEOUT_MS} ms (WaPilot timeout).`, undefined, 'wapilot');
+      if (error instanceof MessageImageError || error instanceof EvolutionApiError) throw error;
+      throw new MessageImageError(502, 'WaPilot could not load the image from storage.');
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      reader?.releaseLock();
     }
   }
 

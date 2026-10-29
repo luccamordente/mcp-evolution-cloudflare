@@ -72,3 +72,9 @@ O cadastro, a auditoria e a chave ficam em `.wrangler/stdio`, isolados por workt
 As ferramentas de leitura consultam o provedor real. `send_text`, `reply_to_message`, `forward_message` e `send_media` também estão disponíveis, usando a conexão padrão ou um identificador de conexão explícito. O entrypoint local fornece escopos de leitura e escrita à factory compartilhada como configuração confiável do processo; argumentos e metadados do cliente não concedem permissões. O HTTP mantém OAuth e exige `mcp:write` para envios, recusando contexto de autorização ausente.
 
 Auditoria e registros de envios começam vazios e persistem no D1 local. Mensagens retidas dependem da disponibilidade e retenção do provedor, sem importar o histórico D1 de produção. Mídia conserva o limite de 8 MiB; o buffer stdio comporta seu envelope base64. Escritas nunca são repetidas automaticamente. **Uma instância de produção executa ações reais**: D1 local não simula envios. Só teste um envio real com destinatário e conteúdo definidos. Os testes automatizados usam exclusivamente um provedor HTTP simulado.
+
+### Leitura visual de mensagens
+
+`get_message_image` usa o catálogo compartilhado de produção e stdio. Consulte `list_messages` para obter o `messageId` de uma imagem retida e chame a ferramenta na mesma conexão; omita `connectionId` para usar a conexão padrão. Ela devolve os pixels como bloco MCP `type: "image"`, não como URL dentro de JSON. O cliente precisa encaminhar o bloco a um modelo com visão.
+
+O storage precisa constar em `IMAGE_STORAGE_ORIGINS`, inclusive no arquivo local `.env.stdio`. A ferramenta aceita JPEG, PNG e WebP, usa o limite de `MAX_MEDIA_BYTES` (8 MiB por padrão) e não segue redirects. A galeria continua voltada à exibição ao usuário; sua resposta resumida não serve como evidência visual para o modelo. Consulte [TOOLS.md](docs/TOOLS.md#leitura-visual-de-imagens) para o contrato.

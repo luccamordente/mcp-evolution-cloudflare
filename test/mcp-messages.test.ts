@@ -15,7 +15,8 @@ const retainedMessage = {
   relationships: { author: { data: { type: 'chat', id: '5511999999999' } } },
 };
 
-async function messageTool() {
+async function messageTool(defaultCount = 1) {
+  const auditBindings: unknown[][] = [];
   const connection: ConnectionRecord = {
     id: connectionId, userId: 'db-user-a', friendlyName: 'Personal', instanceId: 'instance-a',
     encryptedToken: await encryptToken('instance-secret', encryptionKey),
@@ -39,21 +40,21 @@ async function messageTool() {
               return null;
             },
             async all() {
-              return { results: sql.includes('FROM whatsapp_connections WHERE user_id = ?1 AND is_default = 1') && values[0] === connection.userId ? [connection] : [] };
+              return { results: sql.includes('FROM whatsapp_connections WHERE user_id = ?1 AND is_default = 1') && values[0] === connection.userId ? Array.from({ length: defaultCount }, () => connection) : [] };
             },
-            async run() { return { meta: { changes: 1 } }; },
+            async run() { if (sql.includes('audit_log')) auditBindings.push(values); return { meta: { changes: 1 } }; },
           };
         },
       };
     },
   };
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: [retainedMessage] }));
-  const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret' } as Env;
+  const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }), { legacy: 'reject', responseMode: 'json' });
   async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown } }>(method: string, params: Record<string, unknown> = {}) {
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(method === 'tools/call' ? { 'Mcp-Name': 'list_messages' } : {}) },
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(method === 'tools/call' ? { 'Mcp-Name': String(params.name) } : {}) },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: {
         [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
         [CLIENT_INFO_META_KEY]: { name: 'message-tests', version: '1.0.0' },
@@ -62,10 +63,51 @@ async function messageTool() {
     }));
     return response.json() as Promise<{ result: T }>;
   }
-  return { fetcher, rpc, call: (args: Record<string, unknown>) => rpc('tools/call', { name: 'list_messages', arguments: args }) };
+  return { fetcher, rpc, auditBindings, image: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message_image', arguments: args }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: 'list_messages', arguments: args }) };
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('get_message_image native MCP output', () => {
+  it('advertises an image-reading tool and returns actual pixels without private URLs, captions or credentials', async () => {
+    const { rpc, image, fetcher, auditBindings } = await messageTool();
+    const listed = await rpc<{ tools: Array<{ name: string; annotations: { readOnlyHint: boolean }; inputSchema: { required: string[]; additionalProperties: boolean } }> }>('tools/list');
+    expect(listed.result.tools.find(tool => tool.name === 'get_message_image')).toMatchObject({ annotations: { readOnlyHint: true }, inputSchema: { required: ['messageId'], additionalProperties: false } });
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ZkAAAAASUVORK5CYII=', 'base64');
+    fetcher.mockImplementation(async (url) => String(url).startsWith('https://storage.example.test/') ? new Response(png)
+      : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'image/png', body: { text: 'private-caption', media: { url: 'https://storage.example.test/image.png?signature=private-link' } } } } }));
+    const { result } = await image({ connectionId: workConnectionId, messageId: 'message-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toContainEqual({ type: 'image', mimeType: 'image/png', data: png.toString('base64') });
+    expect(result.structuredContent).toEqual({ data: { connectionId: workConnectionId, messageId: 'message-1', mimeType: 'image/png' } });
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('work-instance-secret');
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private-link|signature|private-caption|instance-secret|global-secret/);
+    fetcher.mockClear();
+    expect((await image({ connectionId: foreignConnectionId, messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([[0, 'no_default_connection'], [2, 'multiple_default_connections']])('rejects default count %s before retrieving any image', async (count, code) => {
+    const { image, fetcher } = await messageTool(Number(count));
+    expect((await image({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { messageId: ' ' }, { messageId: null }, { messageId: 'x'.repeat(201) }, { messageId: 'message-1', url: 'https://attacker.example/image.png' }])('rejects invalid image inputs before HTTP requests: %j', async (args) => {
+    const { image, fetcher } = await messageTool();
+    expect((await image(args)).result.isError).toBe(true);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('keeps lookup errors and auditing free of private provider details', async () => {
+    const { image, fetcher, auditBindings } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, errors: [{ detail: 'https://storage.example.test/image.png?signature=private-link token=private-token' }] }, { status: 503 }));
+    const { result } = await image({ messageId: 'message-1' });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { operation: 'get_message_image', status: 503 } } } });
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/signature|private-link|private-token|instance-secret|global-secret/);
+    expect(auditBindings).toHaveLength(1);
+  });
+});
 
 describe('list_messages retained conversation search', () => {
   it('advertises an optional conversation filter distinct from the connection selector', async () => {

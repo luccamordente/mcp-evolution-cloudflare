@@ -465,7 +465,7 @@ export class EvolutionGoClient {
     const search = async (rowLimit: number, before?: string) => {
       const params = new URLSearchParams({ limit: String(rowLimit) });
       if (query) params.set('q', query);
-      if (conversationId !== undefined) params.set('chat', conversationId);
+      if (conversationId !== undefined) params.set('identifier', conversationId);
       if (encodingFormat) params.set('encodingFormat', encodingFormat);
       // Cursor = Unix ms; Evolution Go returns rows with at < before.
       if (before && /^\d{1,15}$/.test(before)) params.set('before', before);

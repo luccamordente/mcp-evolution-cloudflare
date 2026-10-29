@@ -196,7 +196,7 @@ describe('Evolution Go route contracts', () => {
     expect(seen?.method).toBe('GET');
     expect(seen?.url.pathname).toBe('/message/search');
     expect(Object.fromEntries(seen!.url.searchParams)).toEqual({
-      chat: '5511999999999@s.whatsapp.net&limit=1&q=other#?+=/%',
+      identifier: '5511999999999@s.whatsapp.net&limit=1&q=other#?+=/%',
       q: 'acordo & reunião',
       limit: '11',
     });

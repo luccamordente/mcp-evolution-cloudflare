@@ -89,7 +89,7 @@ describe('list_messages retained conversation search', () => {
     expect(response.result).toMatchObject({ structuredContent: { data: { items: [{ id: 'message-1', text: 'Reunião amanhã', conversationId: '5511999999999', source: '5511999999999', timestamp: '2026-10-15T10:00:00.000Z', type: 'text/plain' }], hasMore: false } } });
     const request = new URL(String(fetcher.mock.calls[0][0]));
     expect(request.pathname).toBe('/message/search');
-    expect(Object.fromEntries(request.searchParams)).toEqual({ chat: '5511999999999', q: 'Reunião', limit: '11' });
+    expect(Object.fromEntries(request.searchParams)).toEqual({ identifier: '5511999999999', q: 'Reunião', limit: '11' });
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('instance-secret');
     expect(JSON.parse(response.result.content[0].text)).toEqual(response.result.structuredContent.data);
   });
@@ -97,7 +97,7 @@ describe('list_messages retained conversation search', () => {
   it('trims a copied individual JID and searches without text using the default limit', async () => {
     const { call, fetcher } = await messageTool();
     await call({ conversationId: '  5511999999999@s.whatsapp.net  ' });
-    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ chat: '5511999999999@s.whatsapp.net', limit: '26' });
+    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ identifier: '5511999999999@s.whatsapp.net', limit: '26' });
   });
 
   it('selects an explicit owned connection before searching a group with the maximum limit', async () => {
@@ -105,7 +105,7 @@ describe('list_messages retained conversation search', () => {
     fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{ ...retainedMessage, meta: { chat: '120363123456789@g.us', fromMe: false } }] }));
     const response = await call({ connectionId: workConnectionId, conversationId: '120363123456789@g.us', limit: 50 });
     expect(response.result.structuredContent.data).toMatchObject({ items: [{ conversationId: '120363123456789@g.us' }] });
-    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ chat: '120363123456789@g.us', limit: '50' });
+    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ identifier: '120363123456789@g.us', limit: '50' });
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('work-instance-secret');
   });
 

@@ -96,7 +96,7 @@ describe('image gallery MCP boundary', () => {
     fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [image('in', false), image('out', true)] }));
     const response = await call({ conversationId: ' 5511999999999 ', text: 'férias', limit: 7 });
     expect(response.result.isError).not.toBe(true);
-    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ encodingFormat: 'image/*', chat: '5511999999999', q: 'férias', limit: '8' });
+    expect(Object.fromEntries(new URL(String(fetcher.mock.calls[0][0])).searchParams)).toEqual({ encodingFormat: 'image/*', identifier: '5511999999999', q: 'férias', limit: '8' });
     expect(response.result._meta.gallery).toMatchObject({ connectionId, limit: 7, items: [{ id: 'in', direction: 'inbound', state: 'ready', caption: '<img src=x onerror=alert(1)>', url: 'https://storage.example.test/in.jpg?signature=private-signed-value' }, { id: 'out', direction: 'outbound', state: 'ready' }] });
     expect(JSON.stringify({ content: response.result.content, structuredContent: response.result.structuredContent, auditBindings })).not.toMatch(/signature|private-signed-value|instance-secret|global-secret|onerror/);
     expect(response.result.structuredContent.data).toMatchObject({ count: 2, available: 2, unavailable: 0 });

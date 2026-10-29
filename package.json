@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-mcp",
-  "version": "1.0.0",
+  "version": "0.7.3",
   "description": "Stateless MCP 2026 server for Evolution Go on Cloudflare Workers",
   "main": "index.js",
   "scripts": {

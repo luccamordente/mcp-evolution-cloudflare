@@ -1,6 +1,6 @@
 # Desenvolvimento
 
-Instale Node 20+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
+Instale Node 22+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
 
 ## TokenSave por worktree
 
@@ -32,7 +32,7 @@ O MCP continua protegido pelo OAuth Provider. Para validar somente a superfície
 A UI de conexões também gerencia autorizações OAuth em `GET /api/authorizations`, `DELETE /api/authorizations/:id` e no alias `POST /api/authorizations/:id/revoke`. Essas rotas são same-origin e usam a mesma autenticação Cloudflare Access da página; a assertion Access não é aceita em `/mcp`. A listagem é paginada, filtra grants expirados pelo timestamp Unix em segundos e redige metadados do cliente. A política permite múltiplos grants (`revokeExistingGrants: false`); revogar um grant exige seu identificador e o usuário autenticado, e a UI confirma a remoção com uma nova leitura do Provider.
 
 
-A revisão MCP publicada é `2026-07-28`. O `createMcpHandler` é criado por request com `legacy: 'stateless'`, `responseMode: 'json'` e limite de corpo configurável. Clientes sem os headers `Mcp-Method` / `_meta` da revisão 2026 são atendidos no modo stateless. Não adicione `sessionIdGenerator`, `StreamableHTTPServerTransport` stateful, SSE, WebSocket, stdio ou `createLegacyMcpHandler`.
+A revisão MCP publicada é `2026-07-28`. O `createMcpHandler` é criado por request com `legacy: 'stateless'`, `responseMode: 'json'` e limite de corpo configurável. Clientes sem os headers `Mcp-Method` / `_meta` da revisão 2026 são atendidos no modo stateless. Não adicione `sessionIdGenerator`, `StreamableHTTPServerTransport` stateful, SSE, WebSocket ou `createLegacyMcpHandler` no Worker publicado. O stdio existe somente no entrypoint Node de desenvolvimento descrito abaixo.
 
 O OAuth Provider exige o binding `OAUTH_KV`, um recurso canônico HTTPS em `MCP_PUBLIC_URL` e um `CONSENT_SECRET`. As aplicações de navegador `/authorize`, `/connections` e `/api` usam audiences Access distintas; `/admin` reutiliza a mesma aplicação e audiência de `/connections`. `ACCESS_AUDIENCE` aceita esses valores separados por vírgula. Essas rotas recebem a assertion JWT do Cloudflare Access, protegido por One-time PIN e pela allowlist dos dois e-mails. O token emitido pelo OAuth Provider é o único bearer aceito em `/mcp`.
 
@@ -41,3 +41,32 @@ A identidade do bearer chega ao servidor como `ctx.props.user`. As ferramentas q
 `list_messages` busca diretamente as mensagens persistidas no Evolution Go em `GET /message/search`, e não os eventos de webhook materializados no D1. O filtro opcional `conversationId` aceita número de contato ou JID individual/de grupo dentro da conta escolhida por `connectionId` ou pela conexão padrão. O schema remove espaços nas extremidades e rejeita strings vazias, valores de outros tipos e strings com mais de 200 caracteres após a remoção. O cliente envia o valor como `chat`, combinado com `q` para `text` e `limit` (padrão MCP 25, máximo 50), com codificação segura de query. O provedor restringe a consulta por instância e conversa antes do limite; não filtre localmente uma página geral. Omitir a conversa preserva o uso anterior, a ordenação e a resposta normalizada.
 
 A busca depende da retenção de mensagens no Evolution Go, incluindo `DATABASE_SAVE_MESSAGES=true`; não garante todo o histórico do WhatsApp, e um resultado vazio é inconclusivo. O fork não oferece listagem de chats. Ajustes de contrato devem ficar concentrados em `src/lib/evolution.ts`, com testes mockados das rotas reais. Para o filtro de conversa, `test/mcp-messages.test.ts` exercita o caminho MCP até o cliente Evolution real com D1 e HTTP simulados; testes de schema e rotas complementam validação e serialização. Esses testes verificam o contrato emitido, sem comprovar a versão ou a retenção da instância de produção.
+
+## MCP local por stdio (Node 22+)
+
+`dev:stdio` é um entrypoint Node exclusivo de desenvolvimento. Ele reutiliza as ferramentas e recursos MCP publicados, sem OAuth, Access, túnel ou login Cloudflare. O Worker publicado continua HTTP com OAuth.
+
+Copie `.env.stdio.example` para `.env.stdio` (ignorado pelo Git) e informe `EVOLUTION_BASE_URL`, `LOCAL_INSTANCE_ID` e `LOCAL_INSTANCE_TOKEN` de uma instância existente. O ID deve ser o ID canônico retornado pelo estado live. A chave administrativa e a chave de criptografia de produção não são necessárias. A configuração também pode vir do ambiente do processo, que tem precedência sobre o arquivo. `IMAGE_STORAGE_ORIGINS` é opcional e aceita as mesmas origens HTTPS exatas da galeria publicada.
+
+Configure o cliente para iniciar o processo filho com o diretório absoluto desta worktree:
+
+```json
+{
+  "mcpServers": {
+    "wapilot-local": {
+      "command": "npm",
+      "args": ["--prefix", "/caminho/absoluto/da/worktree", "run", "--silent", "dev:stdio"]
+    }
+  }
+}
+```
+
+`--silent` mantém banners npm fora de stdout, reservado exclusivamente ao protocolo; diagnósticos e migrations usam stderr. Também é possível executar `node /caminho/absoluto/da/worktree/scripts/dev-stdio.mjs`. Após editar código, reinicie o servidor pelo cliente: não há recarga automática.
+
+No primeiro uso, o setup valida as credenciais e a correspondência da instância com uma consulta live, aplica as migrations existentes somente ao D1 local, gera uma chave AES de 256 bits e cadastra uma conexão padrão para `dev@example.test`. `list_connections` retorna o **identificador de conexão**, um UUID local diferente do ID da instância; as ferramentas usam esse UUID ou a conexão padrão ao omiti-lo. O setup não provisiona, pareia, reconecta nem configura webhooks remotos.
+
+O cadastro, a auditoria e a chave ficam em `.wrangler/stdio`, isolados por worktree. `WAPILOT_STDIO_STATE_DIR` permite selecionar outra pasta local, inclusive uma temporária nos testes. Migrations usam `bindings` como `--persist-to`; o proxy Node usa `bindings/v3`, que corresponde aos mesmos arquivos. Bindings remotos são explicitamente desativados. Reinícios preservam a chave e o UUID; URL, instância, token ou chave incompatíveis com o cadastro interrompem o setup. Preserve a pasta inteira em conjunto: remover a chave torna os tokens do banco ilegíveis. Para começar do zero, pare o processo e escolha outra pasta de persistência.
+
+As ferramentas de leitura consultam o provedor real. `send_text`, `reply_to_message`, `forward_message` e `send_media` também estão disponíveis, usando a conexão padrão ou um identificador de conexão explícito. O entrypoint local fornece escopos de leitura e escrita à factory compartilhada como configuração confiável do processo; argumentos e metadados do cliente não concedem permissões. O HTTP mantém OAuth e exige `mcp:write` para envios, recusando contexto de autorização ausente.
+
+Auditoria e registros de envios começam vazios e persistem no D1 local. Mensagens retidas dependem da disponibilidade e retenção do provedor, sem importar o histórico D1 de produção. Mídia conserva o limite de 8 MiB; o buffer stdio comporta seu envelope base64. Escritas nunca são repetidas automaticamente. **Uma instância de produção executa ações reais**: D1 local não simula envios. Só teste um envio real com destinatário e conteúdo definidos. Os testes automatizados usam exclusivamente um provedor HTTP simulado.

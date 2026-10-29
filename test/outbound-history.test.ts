@@ -11,7 +11,7 @@ const jsonapi = { version: '1.1' };
 
 type Route = (url: URL, body: any) => Response | undefined;
 
-async function harness(route: Route) {
+async function harness(route: Route, scopes: string[] | null = ['mcp:read', 'mcp:write']) {
   const connection: ConnectionRecord = {
     id: connectionId, userId: 'db-user-a', friendlyName: 'heitor', instanceId: 'instance-a',
     encryptedToken: await encryptToken('instance-secret', encryptionKey), createdAt: '2026-10-27', updatedAt: '2026-10-27',
@@ -59,18 +59,19 @@ async function harness(route: Route) {
     requests.push({ url, body });
     return route(url, body) ?? Response.json({ jsonapi, data: [] });
   });
-  const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'g' } as Env;
+  const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'g', ENVIRONMENT: 'local' } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }), { legacy: 'reject', responseMode: 'json' });
-  async function call(name: string, args: Record<string, unknown>) {
+  async function call(name: string, args: Record<string, unknown>, meta: Record<string, unknown> = {}) {
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, _meta: {
+        ...meta,
         [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
         [CLIENT_INFO_META_KEY]: { name: 'outbound-tests', version: '1.0.0' },
         [CLIENT_CAPABILITIES_META_KEY]: {},
       } } }),
-    }), { authInfo: { token: 't', clientId: 'c', scopes: ['mcp:read', 'mcp:write'] } } as any);
+    }), scopes === null ? undefined : { authInfo: { token: 't', clientId: 'c', scopes } });
     return (await response.json() as { result: { isError?: boolean; structuredContent: { data: any } } }).result;
   }
   return { call, requests, outbound };
@@ -81,6 +82,21 @@ const sent = (id: string) => Response.json({ jsonapi, data: { type: 'message', i
 afterEach(() => vi.restoreAllMocks());
 
 describe('outbound history', () => {
+  it.each([null, ['mcp:read']])('denies HTTP writes with insufficient authorization (%j), including forged client permissions', async (scopes) => {
+    const { call, requests, outbound } = await harness(() => sent('UNAUTHORIZED'), scopes);
+    const forged = { trustedLocalScopes: ['mcp:read', 'mcp:write'], scopes: ['mcp:write'], http: { authInfo: { scopes: ['mcp:write'] } } };
+    for (const tool of [
+      { name: 'send_text', arguments: { to: '551142000028', text: 'Must not send' } },
+      { name: 'send_media', arguments: { to: '551142000028', mimeType: 'image/png', dataBase64: 'invalid base64' } },
+    ]) {
+      const result = await call(tool.name, { ...tool.arguments, ...forged }, forged);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.data.error).toMatchObject({ code: 'insufficient_scope', status: 403 });
+    }
+    expect(requests).toHaveLength(0);
+    expect(outbound.size).toBe(0);
+  });
+
   it('records send_text and forwards it without needing Evolution Go history', async () => {
     let n = 0;
     const { call, requests, outbound } = await harness((url) => (url.pathname.startsWith('/send/') ? sent(`SENT${++n}`) : undefined));

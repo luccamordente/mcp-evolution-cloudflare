@@ -214,8 +214,10 @@ function auditFailure(error: unknown): { error: string; status?: number } {
   return { error: error instanceof Error ? error.message : 'Unexpected error' };
 }
 
-export async function createMcpServer(env: Env, user: AuthenticatedUser): Promise<McpServer> {
+/** Local scopes are trusted process configuration; HTTP callers must omit them. */
+export async function createMcpServer(env: Env, user: AuthenticatedUser, trustedLocalScopes?: readonly string[]): Promise<McpServer> {
   const ensured = await ensureUser(env.DB, user);
+  const canWrite = (ctx: unknown) => trustedLocalScopes === undefined ? hasWriteScope(ctx) : trustedLocalScopes.includes(WRITE_SCOPE);
   const server = new McpServer(
     { name: MCP_SERVER_NAME, version: '0.1.0' },
     { instructions: MCP_SERVER_INSTRUCTIONS }
@@ -307,7 +309,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
   const send = async (operation: string, ctx: unknown, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string) => Promise<unknown>) => {
     let resolvedConnectionId: string | undefined;
     try {
-      if (!hasWriteScope(ctx)) throw new InsufficientScopeError();
+      if (!canWrite(ctx)) throw new InsufficientScopeError();
       const { client, connection } = await clientFor(connectionId);
       resolvedConnectionId = connection.id;
       const result = await fn(client, connection.id);
@@ -352,7 +354,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser): Promis
     return result;
   }));
   server.registerTool('send_media', { title: 'Send media', description: TOOL_DESCRIPTIONS.send_media, inputSchema: sendMediaInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, mimeType, fileName, dataBase64, caption, replyTo }, ctx) => {
-    if (!hasWriteScope(ctx)) return fail('send_media', new InsufficientScopeError());
+    if (!canWrite(ctx)) return fail('send_media', new InsufficientScopeError());
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
     if (dataBase64.length > max * 1.4) return fail('send_media', new Error(`Media exceeds configured limit of ${max} bytes`));
     let data: ArrayBuffer;

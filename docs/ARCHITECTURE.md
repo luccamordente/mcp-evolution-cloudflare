@@ -28,7 +28,7 @@ O cliente em `src/lib/evolution.ts` fala exclusivamente o documento JSON:API 1.1
 
 O provisionamento envia somente `name` e `token` ao criar uma conexão e grava o `data.id` retornado pelo Evolution Go como `instanceId` canônico. Em execuções administrativas posteriores, a conexão cadastrada também é reencontrada pelo nome amigável para evitar duplicação quando o UUID remoto tiver sido gerado pelo provedor.
 
-Antes de qualquer resposta estruturada de ferramenta MCP, o Worker percorre recursivamente os valores JSON e remove campos `undefined` para produzir JSON válido. URLs de mídia são preservadas como o Evolution Go as devolve; o Worker não as reescreve, hospeda, redireciona ou intermedeia.
+Antes de qualquer resposta estruturada de ferramenta MCP, o Worker percorre recursivamente os valores JSON e remove campos `undefined` para produzir JSON válido. URLs de mídia em `list_messages` são preservadas como o Evolution Go as devolve. A leitura explícita por `get_message_image` baixa o arquivo autorizado e retorna pixels conforme o contrato abaixo, sem hospedar ou publicar uma URL de mídia.
 
 ## Timeouts
 
@@ -39,6 +39,8 @@ Se a resposta externa final tiver HTTP 408 ou 504, `timeoutSource` vale `upstrea
 Um prazo imposto pelo cliente/host MCP pode expirar antes da resposta e não ser observado pelo Worker. Nesse caso, a mensagem é produzida pelo cliente e não constitui evidência de timeout no Evolution Go. O contrato dos erros emitidos pelo WaPilot está em [TOOLS.md](TOOLS.md#origem-dos-timeouts).
 
 ## Apresentação de imagens
+
+`get_message_image` acrescenta análise visual ao catálogo compartilhado HTTP/stdio. Após resolver o usuário e a conexão, `getMessageImage` em `src/lib/evolution.ts` consulta a mensagem por `POST /message/status`, restrito à instância, e lê a URL assinada atual somente de uma origem de storage já aprovada. Nenhuma credencial da API é encaminhada ao storage. O download rejeita redirects, respeita o limite de mídia e o timeout durante o corpo e confere a assinatura JPEG/PNG/WebP. A resposta inclui um bloco MCP nativo `image` e metadados mínimos, sem URL privada, legenda ou Base64 textual em `structuredContent`. A auditoria guarda apenas operação, resultado e erro seguro. A galeria abaixo mantém seu contrato de apresentação; somente a nova ferramenta entrega pixels ao modelo.
 
 `show_image_gallery` adiciona uma ferramenta de leitura e um recurso estático MCP Apps sem alterar o transporte ou a autorização. O servidor usa `@modelcontextprotocol/ext-apps` 2.0.3, compatível com os pacotes MCP v2 fixados. Cada chamada, inclusive atualização iniciada pela UI, resolve o usuário e `(user_id, connection_id)` antes de descriptografar a credencial e consultar o cliente Evolution Go. A resposta privada inclui o UUID resolvido para fixar a conexão nas atualizações seguintes.
 

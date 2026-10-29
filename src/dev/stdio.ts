@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { getPlatformProxy, type PlatformProxy } from 'wrangler';
 import { serveStdio, StdioServerTransport, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
-import { createMcpServer } from '../lib/mcp';
+import { createMcpServer, mcpBodyLimit } from '../lib/mcp';
 import { EvolutionGoClient } from '../lib/evolution';
 import { createConnection, ensureUser, getConnection, listConnections, revealConnectionToken } from '../lib/db';
 import type { Env } from '../types';
@@ -93,8 +93,8 @@ try {
     await createConnection(db, key, { userId: user.id, friendlyName: 'Desenvolvimento WaPilot', instanceId, token });
   }
   const env: Env = { DB: db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: baseUrl, MAX_MEDIA_BYTES: '8388608', IMAGE_STORAGE_ORIGINS: config.IMAGE_STORAGE_ORIGINS };
-  const transport = new StdioServerTransport(input);
-  server = serveStdio(() => createMcpServer(env, identity), { transport, onerror: () => console.error('WaPilot: erro no protocolo MCP local.') });
+  const transport = new StdioServerTransport(input, process.stdout, { maxBufferSize: mcpBodyLimit(env) });
+  server = serveStdio(() => createMcpServer(env, identity, ['mcp:read', 'mcp:write']), { transport, onerror: () => console.error('WaPilot: erro no protocolo MCP local.') });
   const transportClosed = transport.onclose;
   transport.onclose = () => { transportClosed?.(); stop(); };
 } catch (error) {

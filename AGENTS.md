@@ -14,7 +14,8 @@ Esses documentos são a referência técnica; o histórico das conversas registr
 ## Invariantes de arquitetura
 
 - O entrypoint publicado é `src/worker.ts`; `src/index.ts` contém o app Hono para UI, webhook e fallback de testes.
-- O endpoint MCP é `POST /mcp`, com MCP `2026-07-28`, Streamable HTTP stateless, `legacy: 'reject'` e `responseMode: 'json'`. Cada request cria o servidor. Preserve a ausência de sessões de transporte, `Mcp-Session-Id`, SSE, WebSocket, stdio, `/sse` e `createLegacyMcpHandler`.
+- O endpoint MCP é `POST /mcp`, com MCP `2026-07-28`, Streamable HTTP stateless, `legacy: 'reject'` e `responseMode: 'json'`. Cada request cria o servidor. Preserve a ausência de sessões de transporte, `Mcp-Session-Id`, SSE, WebSocket, `/sse` e `createLegacyMcpHandler`.
+- A spec #17 autoriza stdio exclusivamente no entrypoint Node de desenvolvimento `src/dev/stdio.ts`; consulte `DEVELOPMENT.md`. Preserve D1 e chave locais por worktree, stdout exclusivo para MCP e bindings remotos desativados. O bundle publicado permanece independente desse entrypoint.
 - OAuth do MCP e Cloudflare Access têm papéis separados. `/mcp` aceita somente o bearer OAuth emitido pelo OAuth Provider; a assertion `Cf-Access-Jwt-Assertion` autentica `/authorize` e a UI de conexões. Nunca aceite a assertion do Access como token MCP.
 - D1 guarda usuários, conexões, auditoria e eventos de webhook; KV guarda o estado do OAuth Provider. O token de instância é cifrado com `TOKEN_ENCRYPTION_KEY`. Ferramentas recebem apenas o UUID interno da conexão e sempre resolvem `(user_id, connection_id)` antes de descriptografar.
 - O webhook usa segredo opaco por conexão, confere a instância, remove credenciais do payload e deduplica em D1. Histórico, conversas e mensagens significam eventos capturados depois do webhook; Evolution Go não oferece busca retroativa equivalente à API v2.
@@ -43,7 +44,7 @@ Ao enviar mensagens WhatsApp a terceiros ou parceiros em nome do Heitor, sempre 
 
 ## Desenvolvimento e validação
 
-Use Node 20+:
+Use Node 22+:
 
 ```sh
 npm install

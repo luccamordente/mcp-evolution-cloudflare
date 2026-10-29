@@ -34,6 +34,18 @@
     "ENVIRONMENT": "production"
   },
   "env": {
+    "stdio": {
+      "name": "wapilot-stdio-local",
+      "d1_databases": [{
+        "binding": "DB",
+        "database_name": "wapilot-stdio-local",
+        "database_id": "00000000-0000-0000-0000-000000000017",
+        "migrations_dir": "migrations",
+        "remote": false
+      }],
+      "kv_namespaces": [],
+      "vars": { "ENVIRONMENT": "local" }
+    },
     "local": {
       "name": "mcp-evolution-cloudflare-local",
       "vars": {

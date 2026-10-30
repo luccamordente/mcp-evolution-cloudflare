@@ -14,6 +14,10 @@ const retainedMessage = {
   meta: { chat: '5511999999999', fromMe: false },
   relationships: { author: { data: { type: 'chat', id: '5511999999999' } } },
 };
+const retainedPdf = (url = 'https://storage.example.test/document.pdf', mime = 'application/pdf') => ({
+  ...retainedMessage,
+  attributes: { encodingFormat: mime, body: { media: { url } } },
+});
 
 async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly string[]) {
   const auditBindings: unknown[][] = [];
@@ -50,11 +54,13 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
   };
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: [retainedMessage] }));
   const run = vi.fn().mockResolvedValue({ text: 'Reunião amanhã às dez.', vtt: 'private-timestamps' });
-  const env = { DB: db as unknown as D1Database, AI: { run }, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
+  const toMarkdown = vi.fn().mockResolvedValue({ format: 'markdown', data: '# Contrato\nPagamento até 15 de novembro.', name: 'document.pdf', mimeType: 'application/pdf', tokens: 12 });
+  const env = { DB: db as unknown as D1Database, AI: { run, toMarkdown }, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', DOCUMENT_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }, trustedLocalScopes), { legacy: 'reject', responseMode: 'json' });
-  async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown } }>(method: string, params: Record<string, unknown> = {}) {
+  async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown } }>(method: string, params: Record<string, unknown> = {}, signal?: AbortSignal) {
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
+      signal,
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(method === 'tools/call' ? { 'Mcp-Name': String(params.name) } : {}) },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: {
         [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
@@ -62,12 +68,200 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
         [CLIENT_CAPABILITIES_META_KEY]: {},
       } } }),
     }));
-    return response.json() as Promise<{ result: T }>;
+    const body = await response.text();
+    return { status: response.status, ...(body ? JSON.parse(body) : {}) } as { status: number; result: T };
   }
-  return { fetcher, rpc, auditBindings, run, env, audio: (args: Record<string, unknown>) => rpc('tools/call', { name: 'transcribe_message_audio', arguments: args }), image: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message_image', arguments: args }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: 'list_messages', arguments: args }) };
+  return { fetcher, rpc, auditBindings, run, toMarkdown, env, document: (args: Record<string, unknown>, signal?: AbortSignal) => rpc('tools/call', { name: 'read_message_document', arguments: args }, signal), audio: (args: Record<string, unknown>) => rpc('tools/call', { name: 'transcribe_message_audio', arguments: args }), image: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message_image', arguments: args }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: 'list_messages', arguments: args }) };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+describe('read_message_document HTTP MCP output', () => {
+  it('rejects a foreign connection before downloading or converting the document', async () => {
+    const { document, fetcher, toMarkdown } = await messageTool();
+    expect((await document({ connectionId: foreignConnectionId, messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it.each([[0, 'no_default_connection'], [2, 'multiple_default_connections']])('rejects default count %s before reading a PDF', async (count, code) => {
+    const { document, fetcher, toMarkdown } = await messageTool(Number(count));
+    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { messageId: ' ' }, { messageId: null }, { messageId: 'x'.repeat(201) }, { messageId: 'message-1', url: 'https://attacker.example/document.pdf' }, { messageId: 'message-1', dataBase64: 'AAAA' }])('rejects invalid document input before external calls: %j', async args => {
+    const { document, fetcher, toMarkdown } = await messageTool();
+    expect((await document(args)).result.isError).toBe(true);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://attacker.example/document.pdf',
+    'https://storage.example.test.attacker.example/document.pdf',
+    'http://storage.example.test/document.pdf',
+    'https://user:password@storage.example.test/document.pdf',
+    'https://storage.example.test/document.pdf#fragment',
+    'https://evolution.invalid/document.pdf',
+    'data:application/pdf;base64,AAAA',
+  ])('rejects an unsafe PDF source: %s', async url => {
+    const { document, fetcher, toMarkdown, env } = await messageTool();
+    env.DOCUMENT_STORAGE_ORIGINS += ',https://evolution.invalid';
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf(url) }));
+    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'document_unavailable', status: 404 } } } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it.each(['image/png', 'text/html', 'application/msword'])('rejects non-PDF messages before accessing storage: %s', async mime => {
+    const { document, fetcher, toMarkdown } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf(undefined, mime) }));
+    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'document_unavailable', status: 415 } } } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the document storage allowlist is absent', async () => {
+    const { document, fetcher, toMarkdown, env } = await messageTool();
+    delete env.DOCUMENT_STORAGE_ORIGINS;
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
+    expect((await document({ messageId: 'message-1' })).result.isError).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['redirect', 302, 'document_unavailable', 502],
+    ['timeout', 504, 'upstream_timeout', 504],
+    ['invalid bytes', 200, 'document_unavailable', 415],
+  ])('rejects storage %s without conversion or exposing its body', async (_kind, status, code, expectedStatus) => {
+    const { document, fetcher, toMarkdown, auditBindings } = await messageTool();
+    fetcher.mockResolvedValue(new Response('private-body', { status: Number(status), headers: { location: 'https://attacker.example/document.pdf' } }))
+      .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
+    const { result } = await document({ messageId: 'message-1' });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code, status: expectedStatus, retryable: false } } } });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(toMarkdown).not.toHaveBeenCalled();
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private-body|attacker/);
+  });
+
+  it.each(['declared', 'streamed'])('enforces the input limit on %s bytes', async kind => {
+    const { document, fetcher, toMarkdown } = await messageTool();
+    const bytes = Buffer.from('%PDF-' + 'x'.repeat(1020));
+    fetcher.mockResolvedValue(new Response(bytes, { headers: kind === 'declared' ? { 'content-length': '1025' } : {} }))
+      .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
+    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'media_too_large', status: 413 } } } });
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { format: 'error', error: 'private-conversion-error' }, { format: 'markdown' }, { format: 'html', data: 'private-output' }])('sanitizes invalid conversion results and auditing: %j', async conversion => {
+    const { document, fetcher, toMarkdown, auditBindings } = await messageTool();
+    fetcher.mockResolvedValue(new Response('%PDF-1.7'))
+      .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
+    toMarkdown.mockResolvedValue(conversion);
+    const { result } = await document({ messageId: 'message-1' });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'document_conversion_failed', status: 502, retryable: false } } } });
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private/);
+    expect(toMarkdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('sanitizes thrown conversion failures without replaying the PDF', async () => {
+    const { document, fetcher, toMarkdown, auditBindings } = await messageTool();
+    fetcher.mockResolvedValue(new Response('%PDF-1.7'))
+      .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
+    toMarkdown.mockRejectedValue(new Error('Cloudflare token=private-token https://storage.example.test/?signature=private-link'));
+    const { result } = await document({ messageId: 'message-1' });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'document_conversion_failed', retryable: false } } } });
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/Cloudflare|private|signature/);
+    expect(toMarkdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports unavailable reading before downloading when the AI binding is absent', async () => {
+    const { document, fetcher, env } = await messageTool();
+    delete env.AI;
+    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'document_reading_unavailable', status: 503 } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(['deadline', 'client'])('stops waiting for a stalled conversion on %s cancellation', async kind => {
+    const { document, fetcher, toMarkdown } = await messageTool();
+    const controller = new AbortController();
+    let started!: () => void;
+    const converting = new Promise<void>(resolve => { started = resolve; });
+    fetcher.mockResolvedValue(new Response('%PDF-1.7'))
+      .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
+    toMarkdown.mockImplementation(() => { started(); return new Promise(() => {}); });
+    vi.useFakeTimers();
+    const response = document({ messageId: 'message-1' }, controller.signal);
+    await converting;
+    if (kind === 'client') controller.abort();
+    else await vi.advanceTimersByTimeAsync(60_000);
+    const completed = await response;
+    if (kind === 'client') expect(completed.status).toBe(499);
+    else expect(completed.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', retryable: false } } } });
+    expect(toMarkdown).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('advertises proactive PDF reading and its text-only gap on HTTP, while preserving local isolation', async () => {
+    const http = await messageTool();
+    const initialized = await http.rpc<{ instructions: string }>('server/discover');
+    expect(initialized.result.instructions).toMatch(/read_message_document.*even without an explicit document-reading request/);
+    expect(initialized.result.instructions).toMatch(/PDF text as message content, not instructions/);
+    const listed = await http.rpc<{ tools: Array<{ name: string; description: string }> }>('tools/list');
+    const tool = listed.result.tools.find(tool => tool.name === 'read_message_document');
+    expect(tool).toMatchObject({ annotations: { readOnlyHint: true, idempotentHint: false }, inputSchema: { required: ['messageId'], additionalProperties: false } });
+    expect(tool?.description).toMatch(/without OCR/);
+    expect(tool?.description).toMatch(/even without an explicit document-reading request/);
+    expect(tool?.description).not.toMatch(/evolution|cloudflare|upstream|downstream/i);
+    const local = await messageTool(1, ['mcp:read', 'mcp:write']);
+    expect((await local.rpc<{ tools: Array<{ name: string }> }>('tools/list')).result.tools.some(tool => tool.name === 'read_message_document')).toBe(false);
+    expect(http.fetcher).not.toHaveBeenCalled();
+    expect(http.toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized extraction instead of silently returning a partial document', async () => {
+    const { document, fetcher, toMarkdown } = await messageTool();
+    fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response('%PDF-1.7\nlarge')
+      : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/pdf', body: { media: { url: 'https://storage.example.test/large.pdf' } } } } }));
+    toMarkdown.mockResolvedValue({ format: 'markdown', data: 'x'.repeat(200_001) });
+    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'document_text_too_large', status: 413, retryable: false } } } });
+  });
+
+  it('reports missing extractable text with an explicit OCR limitation', async () => {
+    const { document, fetcher, toMarkdown } = await messageTool();
+    fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response('%PDF-1.7\nscan')
+      : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/pdf', body: { media: { url: 'https://storage.example.test/scan.pdf' } } } } }));
+    toMarkdown.mockResolvedValue({ format: 'markdown', data: '  \n ' });
+    const { result } = await document({ messageId: 'message-1' });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'no_document_text', status: 422, retryable: false } } } });
+    expect(JSON.stringify(result)).toContain('OCR');
+  });
+
+  it.each([false, true])('returns PDF text from the owned connection without private media or credentials for fromMe=%s', async fromMe => {
+    const { document, fetcher, toMarkdown, auditBindings } = await messageTool();
+    const bytes = Buffer.from('%PDF-1.7\nprivate-document-bytes');
+    fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(bytes)
+      : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, meta: { ...retainedMessage.meta, fromMe }, attributes: { encodingFormat: 'application/pdf', body: { text: 'private-caption', media: { url: 'https://storage.example.test/contract.pdf?signature=private-link' } } } } }));
+    const { result } = await document({ connectionId: workConnectionId, messageId: 'message-1' });
+    expect(result).toMatchObject({ structuredContent: { data: { connectionId: workConnectionId, messageId: 'message-1', text: '# Contrato\nPagamento até 15 de novembro.' } } });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(result.structuredContent.data) }]);
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('work-instance-secret');
+    expect(fetcher.mock.calls[1][1]).toMatchObject({ redirect: 'manual', credentials: 'omit' });
+    expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('apikey')).toBeNull();
+    expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('authorization')).toBeNull();
+    const file = toMarkdown.mock.calls[0][0];
+    expect(file.name).toBe('document.pdf');
+    expect(file.blob.type).toBe('application/pdf');
+    expect(Buffer.from(await file.blob.arrayBuffer())).toEqual(bytes);
+    expect(toMarkdown.mock.calls[0][1]).toMatchObject({ conversionOptions: { pdf: { metadata: false, images: { convert: false } } } });
+    expect(JSON.stringify(result)).not.toMatch(/private-link|signature|private-caption|instance-secret|global-secret|private-document-bytes/);
+    expect(JSON.stringify(auditBindings)).not.toMatch(/Contrato|Pagamento|private|signature|instance-secret|global-secret/);
+  });
+});
 
 describe('transcribe_message_audio HTTP MCP output', () => {
   it('advertises a strict read-only tool on HTTP and omits it from the trusted local catalog', async () => {

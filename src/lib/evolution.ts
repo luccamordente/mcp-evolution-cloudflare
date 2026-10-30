@@ -2,6 +2,7 @@ import type { Contact, Group, Message, Page, SendMessageResult } from '../types'
 import { Buffer } from 'node:buffer';
 import { galleryImage } from './image-gallery';
 import { AudioTranscriptionError } from './audio-transcription';
+import { DocumentReadingError } from './document-reading';
 
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
@@ -575,6 +576,61 @@ export class EvolutionGoClient {
       signal.throwIfAborted();
       if (error instanceof AudioTranscriptionError) throw error;
       throw new AudioTranscriptionError('audio_unavailable', 502, 'WaPilot could not load audio from storage.');
+    } finally {
+      controller.abort();
+      reader?.releaseLock();
+    }
+  }
+
+  /** Read a retained PDF in this instance without forwarding API credentials to storage. */
+  async getMessageDocument(messageId: string, approvedOrigins: string[], maxBytes: number, signal: AbortSignal): Promise<Blob> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new DocumentReadingError('document_unavailable', 500, 'WaPilot document size limit is invalid.');
+    let message: Message | undefined;
+    try { message = await this.getMessage(messageId, signal); }
+    catch (error) {
+      signal.throwIfAborted();
+      const status = error instanceof EvolutionApiError ? error.status : 502;
+      const code = error instanceof EvolutionApiError && error.timeoutSource ? (error.timeoutSource === 'wapilot' ? 'wapilot_timeout' : 'upstream_timeout') : 'document_unavailable';
+      throw new DocumentReadingError(code, status, 'WaPilot could not retrieve the requested document message.');
+    }
+    if (!message || message.id !== messageId) throw new DocumentReadingError('document_unavailable', 404, 'WaPilot could not find this message in retained history.');
+    const mimeType = (message.media?.mimeType ?? message.type ?? '').split(';')[0].trim().toLowerCase();
+    if (mimeType !== 'application/pdf') throw new DocumentReadingError('document_unavailable', 415, 'WaPilot document reading supports PDF files only.');
+    let url: URL;
+    try {
+      const source = message.media?.url ?? '';
+      url = new URL(source);
+      if (source.length > 8192 || url.protocol !== 'https:' || url.username || url.password || url.hash || !approvedOrigins.includes(url.origin)) throw new Error();
+    } catch {
+      throw new DocumentReadingError('document_unavailable', 404, 'WaPilot cannot access a retained PDF for this message. Unavailable files do not prove deletion.');
+    }
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      signal.throwIfAborted();
+      const response = await this.fetcher(url.href, { redirect: 'manual', credentials: 'omit', signal: AbortSignal.any([signal, controller.signal]) });
+      if (response.status === 408 || response.status === 504) throw new DocumentReadingError('upstream_timeout', response.status, `Document storage returned a timeout response (HTTP ${response.status}) to WaPilot.`);
+      if (!response.ok) throw new DocumentReadingError('document_unavailable', response.status >= 400 ? response.status : 502, `WaPilot could not load the document from storage (HTTP ${response.status}).`);
+      if (Number(response.headers.get('content-length')) > maxBytes) throw new DocumentReadingError('media_too_large', 413, `Media exceeds configured limit of ${maxBytes} bytes`);
+      reader = response.body?.getReader();
+      if (!reader) throw new DocumentReadingError('document_unavailable', 502, 'WaPilot received an empty document response.');
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        signal.throwIfAborted();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) throw new DocumentReadingError('media_too_large', 413, `Media exceeds configured limit of ${maxBytes} bytes`);
+        chunks.push(value);
+      }
+      const bytes = Buffer.concat(chunks, size);
+      if (!bytes.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new DocumentReadingError('document_unavailable', 415, 'WaPilot received content that does not match the expected PDF format.');
+      return new Blob([bytes], { type: 'application/pdf' });
+    } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof DocumentReadingError) throw error;
+      throw new DocumentReadingError('document_unavailable', 502, 'WaPilot could not load the document from storage.');
     } finally {
       controller.abort();
       reader?.releaseLock();

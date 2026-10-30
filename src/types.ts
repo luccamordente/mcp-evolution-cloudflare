@@ -1,7 +1,7 @@
 export interface Env {
   DB: D1Database;
   OAUTH_KV?: KVNamespace;
-  AI?: Pick<Ai, 'run'>;
+  AI?: Pick<Ai, 'run' | 'toMarkdown'>;
   EVOLUTION_BASE_URL: string;
   EVOLUTION_GLOBAL_API_KEY?: string;
   TOKEN_ENCRYPTION_KEY: string;
@@ -19,6 +19,8 @@ export interface Env {
   IMAGE_STORAGE_ORIGINS?: string;
   /** Comma-separated, exact HTTPS storage origins approved for audio transcription. */
   AUDIO_STORAGE_ORIGINS?: string;
+  /** Comma-separated, exact HTTPS storage origins approved for PDF reading. */
+  DOCUMENT_STORAGE_ORIGINS?: string;
   MCP_PUBLIC_URL?: string;
 }
 

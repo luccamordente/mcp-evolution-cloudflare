@@ -89,7 +89,7 @@ describe('MCP tool output schema', () => {
   });
 
   it('documents every registered tool without exposing an implementation provider', () => {
-    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message_image', 'transcribe_message_audio', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media', 'forward_message'] as const;
+    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message_image', 'transcribe_message_audio', 'read_message_document', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media', 'forward_message'] as const;
     for (const name of expected) {
       expect(TOOL_DESCRIPTIONS[name].length).toBeGreaterThan(40);
       expect(TOOL_DESCRIPTIONS[name]).not.toMatch(/evolution|upstream|downstream/i);

@@ -86,3 +86,12 @@ O storage precisa constar em `IMAGE_STORAGE_ORIGINS`, inclusive no arquivo local
 Os testes de `test/message-audio.test.ts` simulam o provedor e o binding de inferência, incluindo download, validação de origem/tamanho, sanitização, cancelamento e prazos com relógio simulado; `test/mcp-messages.test.ts` valida o contrato MCP, a seleção de conexão e a auditoria. Eles não chamam Workers AI nem validam qualidade ou codecs reais. Consulte [TOOLS.md](docs/TOOLS.md#transcrição-de-áudio) e [DEPLOY.md](docs/DEPLOY.md#configuração-da-transcrição-de-áudio) antes de validar uma inferência remota.
 
 `npx vitest run test/media-worker.test.ts` verifica o download de áudio e imagem no runtime workerd, reutilizando Miniflare do Wrangler e esbuild já instalados. Provedor, storage e inferência são simulados; o teste não acessa bindings remotos nem usa credenciais reais. Ele reproduz o erro `audio_unavailable`/502 causado por `redirect: 'error'`, opção aceita pelo Node mas não pelo Workers, e verifica o sucesso com `manual` e a rejeição de redirects sem seguir a URL de destino.
+
+
+### Leitura de PDFs no MCP HTTP
+
+`read_message_document` segue o padrão HTTP da transcrição de áudio e usa o binding existente `AI.toMarkdown`. Configure `DOCUMENT_STORAGE_ORIGINS` com origens HTTPS exatas do storage aprovado. A ferramenta aceita um `messageId` retido e `connectionId` opcional, devolvendo texto/Markdown, sem arquivo, URL privada, OCR ou interpretação visual das páginas. As instruções MCP orientam seu uso proativo quando o conteúdo do PDF for necessário ao pedido, inclusive em referências a anexos.
+
+Entrada: até 8 MiB ou `MAX_MEDIA_BYTES` menor. Saída: até 200.000 caracteres, com falha explícita acima disso. Prazo: 60 segundos no WaPilot e pelo menos 90 segundos no cliente. O binding não oferece cancelamento remoto; o prazo limita a espera local. A ferramenta não integra o stdio e não habilita bindings remotos locais. Consulte [TOOLS.md](docs/TOOLS.md#leitura-de-pdfs) para os limites de cobertura de PDFs escaneados e mistos, e [DEPLOY.md](docs/DEPLOY.md#configuração-da-leitura-de-pdfs) antes de validar conversão remota.
+
+`test/mcp-messages.test.ts` verifica download/conversão via MCP, escopo de conexão, validação de entrada, limites, erros seguros, cancelamento e instruções proativas. `test/media-worker.test.ts` também executa o fluxo PDF no workerd, com conversão simulada, para validar `Blob`, download sem credenciais e bloqueio de redirects. Esses testes não fazem inferência nem comprovam extração ou fidelidade reais.

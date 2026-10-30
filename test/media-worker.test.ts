@@ -4,6 +4,7 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 const audio = Buffer.from('OggS-test-audio');
 const image = Buffer.from('89504e470d0a1a0a', 'hex');
+const document = Buffer.from('%PDF-1.7\nTest document.');
 let runtime: Miniflare;
 let requests: { url: string; apiKey: string | null; authorization: string | null }[];
 
@@ -12,6 +13,7 @@ beforeAll(async () => {
     stdin: { resolveDir: process.cwd(), contents: `
       import { EvolutionGoClient } from './src/lib/evolution';
       import { transcribeMessageAudio } from './src/lib/audio-transcription';
+      import { readMessageDocument } from './src/lib/document-reading';
       export default { async fetch(request) {
         const id = new URL(request.url).pathname.slice(1);
         const client = new EvolutionGoClient({ baseUrl: 'https://provider.invalid', instanceId: 'test-instance', instanceToken: 'instance-secret' });
@@ -20,6 +22,13 @@ beforeAll(async () => {
             ? await transcribeMessageAudio(client, {
                 EVOLUTION_BASE_URL: 'https://provider.invalid', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test',
                 AI: { run: async (_model, input) => ({ text: input.audio === '${audio.toString('base64')}' ? 'Transcrição de teste.' : '' }) },
+              }, id, request.signal)
+            : id.startsWith('document') ? await readMessageDocument(client, {
+                EVOLUTION_BASE_URL: 'https://provider.invalid', DOCUMENT_STORAGE_ORIGINS: 'https://storage.example.test',
+                AI: { toMarkdown: async (file, options) => ({
+                  format: 'markdown', data: file.blob.type === 'application/pdf' && await file.blob.text() === ${JSON.stringify(document.toString())}
+                    && options.conversionOptions.pdf.metadata === false && options.conversionOptions.pdf.images.convert === false ? 'Texto de teste.' : '',
+                }) },
               }, id, request.signal)
             : await client.getMessageImage(id, ['https://storage.example.test'], 1024);
           return Response.json(result);
@@ -36,22 +45,22 @@ beforeAll(async () => {
       if (new URL(request.url).origin === 'https://provider.invalid') {
         const { data: { id } } = await request.json() as { data: { id: string } };
         return Response.json({ jsonapi: { version: '1.1' }, data: {
-          type: 'message', id, attributes: { encodingFormat: id.startsWith('audio') ? 'audio/ogg' : 'image/png', body: { media: { url: 'https://storage.example.test/' + id } } },
+          type: 'message', id, attributes: { encodingFormat: id.startsWith('audio') ? 'audio/ogg' : id.startsWith('document') ? 'application/pdf' : 'image/png', body: { media: { url: 'https://storage.example.test/' + id } } },
         } });
       }
       if (request.url.endsWith('-redirect')) return new Response(null, { status: 302, headers: { location: 'https://attacker.example/private' } });
-      return new Response(request.url.includes('/audio') ? audio : image);
+      return new Response(request.url.includes('/audio') ? audio : request.url.includes('/document') ? document : image);
     },
   }));
 });
 
 afterAll(async () => { await runtime?.dispose(); });
 
-it.each(['audio', 'image'])('loads retained %s in Workers without exposing credentials or following redirects', async kind => {
+it.each(['audio', 'image', 'document'])('loads retained %s in Workers without exposing credentials or following redirects', async kind => {
   requests = [];
   const response = await runtime.dispatchFetch('https://local/' + kind);
   const result = await response.json();
-  expect({ status: response.status, result }).toEqual({ status: 200, result: kind === 'audio' ? 'Transcrição de teste.' : { mimeType: 'image/png', data: image.toString('base64') } });
+  expect({ status: response.status, result }).toEqual({ status: 200, result: kind === 'audio' ? 'Transcrição de teste.' : kind === 'document' ? 'Texto de teste.' : { mimeType: 'image/png', data: image.toString('base64') } });
   expect(requests).toHaveLength(2);
   expect(requests[0].apiKey).toBe('instance-secret');
   expect(requests[1]).toEqual({ url: 'https://storage.example.test/' + kind, apiKey: null, authorization: null });

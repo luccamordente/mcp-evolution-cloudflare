@@ -46,6 +46,14 @@ curl -i https://app.wapilot.com.br/.well-known/oauth-protected-resource/mcp
 
 O teste com um cliente real MCP e qualquer envio WhatsApp dependem da autenticação do cliente e de uma conexão Evolution Go real. Não execute envio real sem destinatário e conteúdo definidos.
 
+## Configuração da leitura de PDFs
+
+`read_message_document` usa o binding `AI` já declarado no `wrangler.jsonc`, pelo método `toMarkdown`, sem nova chave ou serviço de OCR. Configure `DOCUMENT_STORAGE_ORIGINS` com origens HTTPS exatas aprovadas para PDFs; essa allowlist é independente das de áudio e imagem e exclui a origem de `EVOLUTION_BASE_URL`. Sem configuração válida, o download falha fechado. A alteração de configuração só entra em produção após publicação autorizada.
+
+Atualize o catálogo do cliente após publicar e permita pelo menos **90.000 ms** por chamada. O WaPilot espera até 60.000 ms, aceita até 8 MiB ou `MAX_MEDIA_BYTES` menor e devolve até 200.000 caracteres, sem truncamento. O binding não garante cancelamento remoto de conversão em andamento; evite repetir automaticamente uma chamada interrompida. PDF e texto não são persistidos pelo WaPilot.
+
+A entrega não inclui OCR. Valide separadamente PDFs textuais, digitalizados e mistos, conferindo que a limitação seja comunicada e que texto parcial não seja apresentado como cobertura completa. Testes automatizados usam conversão simulada e não comprovam extração, qualidade ou latência reais. Consulte o [contrato da ferramenta](TOOLS.md#leitura-de-pdfs), a [API de conversão](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/usage/binding/) e o [processamento de PDFs](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/how-it-works/#pdfs). O stdio local não anuncia a ferramenta e mantém bindings remotos desativados.
+
 ## Configuração da transcrição de áudio
 
 O `wrangler.jsonc` declara o binding `ai: { binding: "AI" }` para `transcribe_message_audio` no MCP HTTP. A inferência usa o modelo `@cf/openai/whisper-large-v3-turbo` diretamente pelo binding, sem token REST adicional ou AI Gateway. Cada chamada gera consumo de Workers AI; não há cache nem retry de inferência. O binding só passa a existir no Worker publicado após um deploy autorizado; o perfil stdio não o utiliza nem habilita bindings remotos.

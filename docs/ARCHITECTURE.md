@@ -38,6 +38,16 @@ Se a resposta externa final tiver HTTP 408 ou 504, `timeoutSource` vale `upstrea
 
 Um prazo imposto pelo cliente/host MCP pode expirar antes da resposta e não ser observado pelo Worker. Nesse caso, a mensagem é produzida pelo cliente e não constitui evidência de timeout no Evolution Go. O contrato dos erros emitidos pelo WaPilot está em [TOOLS.md](TOOLS.md#origem-dos-timeouts).
 
+## Leitura textual de PDFs
+
+`read_message_document` é registrada somente no catálogo HTTP. O fluxo em `src/lib/document-reading.ts` reutiliza a resolução de usuário/conexão e a auditoria das demais leituras. `getMessageDocument` em `src/lib/evolution.ts` consulta a mensagem por `POST /message/status`, valida MIME/assinatura de PDF e baixa apenas de `DOCUMENT_STORAGE_ORIGINS`, sem encaminhar credenciais ou seguir redirects. O limite durante o streaming é o menor entre 8 MiB e `MAX_MEDIA_BYTES`.
+
+O arquivo é entregue como `Blob` ao binding existente `AI.toMarkdown`, com nome fixo, `pdf.metadata: false` e `pdf.images.convert: false`. O resultado é texto/Markdown com os identificadores de conexão e mensagem, sem o arquivo original ou sua URL. A resposta é integral até 200.000 caracteres e falha explicitamente acima disso. Arquivo e texto ficam somente na memória da operação; não há cache, persistência ou retry automático. Erros externos são substituídos por mensagens seguras antes da auditoria.
+
+O prazo local de 60 segundos cobre o fluxo completo e respeita cancelamento nas operações HTTP. Como `toMarkdown` não expõe `AbortSignal`, o Worker deixa de esperar no cancelamento/prazo sem garantir a interrupção da conversão remota. O cliente deve permitir 90 segundos; stdio e seus bindings remotos continuam desativados.
+
+A ferramenta faz extração textual, sem OCR nem interpretação de imagens/layout. Documentos mistos podem retornar texto incompleto mesmo com sucesso. As instruções MCP e a descrição da ferramenta orientam leitura proativa quando necessária ao pedido, inclusive em referências a anexos, e exigem tratar o texto como conteúdo não confiável da mensagem. O gap e os erros estão em [TOOLS.md](TOOLS.md#leitura-de-pdfs). Os testes exercitam MCP e workerd com provedor/storage/conversão simulados; não comprovam fidelidade ou latência do serviço real.
+
 ## Transcrição de áudio
 
 Downloads de áudio e imagem usam `redirect: 'manual'` e rejeitam respostas fora de 2xx antes de ler o corpo. Isso preserva o bloqueio de redirects no Workers, cujo runtime rejeita `redirect: 'error'` com `TypeError` antes de acessar o storage ([contrato de Request](https://developers.cloudflare.com/workers/runtime-apis/request/)). `test/media-worker.test.ts` executa os dois caminhos no workerd, com provedor, storage e inferência simulados, para verificar compatibilidade do runtime, ausência de credenciais no storage e rejeição de redirects.

@@ -15,7 +15,7 @@ function audioTool(data: unknown = stored()) {
     .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data }));
   const run = vi.fn().mockResolvedValue({ text: 'Reunião amanhã às dez.', vtt: 'private timing data' });
   const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-a', instanceToken: 'instance-secret', fetcher });
-  const env: Pick<Env, 'AI' | 'EVOLUTION_BASE_URL' | 'AUDIO_STORAGE_ORIGINS' | 'MAX_MEDIA_BYTES'> = { AI: { run }, EVOLUTION_BASE_URL: 'https://evolution.invalid', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' };
+  const env: Pick<Env, 'AI' | 'EVOLUTION_BASE_URL' | 'AUDIO_STORAGE_ORIGINS' | 'MAX_MEDIA_BYTES'> = { AI: { run, toMarkdown: vi.fn() }, EVOLUTION_BASE_URL: 'https://evolution.invalid', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' };
   const parent = new AbortController();
   return { env, fetcher, run, parent, read: () => transcribeMessageAudio(client, env, 'audio-1', parent.signal) };
 }

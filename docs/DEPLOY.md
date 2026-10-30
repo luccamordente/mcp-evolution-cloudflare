@@ -4,7 +4,7 @@
 
 - Worker: `mcp-evolution-cloudflare`
 - URLs: `https://app.wapilot.com.br`, `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
-- Revisão publicada durante esta entrega: `dd42d725-737f-46f3-94a8-779364cfc97f`
+- Revisão ativa conferida em 30 de outubro de 2026: `317043ed-e3d2-41b3-a349-675dca777b01`, com 100% do tráfego.
 - D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`), migrations `0001_init`, `0002_webhook_events`, `0003_connection_defaults` e `0004_remove_connection_runtime_state` aplicadas remotamente. O read-back de 17 de outubro de 2026 confirmou a remoção de `status`/`connection_state` e preservou os dois registros de conexão, seus `instance_id`, flags padrão e timestamps.
 - KV OAuth: `3a5b420e14594ee4ae821b720a9bf74a`; preview `29bb2b67785b46bfa7c31d84bbbe9344`.
 
@@ -45,6 +45,20 @@ curl -i https://app.wapilot.com.br/.well-known/oauth-protected-resource/mcp
 ```
 
 O teste com um cliente real MCP e qualquer envio WhatsApp dependem da autenticação do cliente e de uma conexão Evolution Go real. Não execute envio real sem destinatário e conteúdo definidos.
+
+## Configuração da transcrição de áudio
+
+O `wrangler.jsonc` declara o binding `ai: { binding: "AI" }` para `transcribe_message_audio` no MCP HTTP. A inferência usa o modelo `@cf/openai/whisper-large-v3-turbo` diretamente pelo binding, sem token REST adicional ou AI Gateway. Cada chamada gera consumo de Workers AI; não há cache nem retry de inferência. O binding só passa a existir no Worker publicado após um deploy autorizado; o perfil stdio não o utiliza nem habilita bindings remotos.
+
+Configure `AUDIO_STORAGE_ORIGINS` com as origens HTTPS exatas aprovadas para o download de áudios, separadas por vírgula. Use somente origens sem curingas, caminhos, queries ou credenciais; a origem de `EVOLUTION_BASE_URL` é excluída mesmo se cadastrada. Esta allowlist é independente de `IMAGE_STORAGE_ORIGINS` e não amplia a CSP da galeria. A ferramenta exige mensagem e áudio retidos, aplica até 8 MiB (ou `MAX_MEDIA_BYTES`, se menor) e falha explicitamente quando o arquivo não está disponível.
+
+Após uma publicação autorizada, atualize o catálogo do cliente e configure seu timeout para pelo menos **360.000 ms**. O WaPilot usa 300.000 ms para a operação completa; o cliente ou o serviço de inferência podem encerrar a chamada antes. Valide com uma amostra autorizada de nota de voz Ogg/Opus e de anexo de áudio, incluindo idioma original, formato de saída e ausência de áudio/URLs/credenciais na resposta e na auditoria. Os testes mockados não comprovam codec, qualidade ou latência reais. Não confunda `deploy --dry-run` com publicação ou validação de uma inferência remota.
+
+Em 30 de outubro de 2026, a primeira revisão de transcrição, `dc18ea3d-f4ce-41cc-b1e8-42f6b3f09fee`, foi publicada após `npm run check` (291 testes) e dry-run. O read-back confirmou o binding `AI`, `AUDIO_STORAGE_ORIGINS` e os segredos existentes. `/healthz` e a metadata OAuth responderam `200`; `/mcp` sem bearer respondeu `401` com o desafio OAuth. Uma chamada autenticada de `connection_status` pelo plugin WaPilot também funcionou. Essa validação inicial ainda não incluía transcrição de áudio real. A revisão anterior era `42f49c15-f664-4e1c-9982-bb5840786219`.
+
+Na mesma data, o diagnóstico reproduziu `audio_unavailable`/502 em dois áudios: o runtime Workers rejeitava `redirect: 'error'` antes de acessar o storage. A revisão ativa acima trocou a opção por `manual` nos downloads de áudio e imagem, preservando a rejeição de respostas 3xx. Antes do deploy autorizado, passaram `npm run check` (293 testes) e dry-run; o teste de regressão no workerd falhou com o código anterior e passou após a correção. O read-back confirmou 100% do tráfego na nova versão. As verificações públicas mantiveram os resultados esperados e as duas mensagens de áudio informadas pelo usuário foram transcritas com sucesso pelo plugin WaPilot em produção. Essa observação comprova essas amostras naquela sessão; outros formatos e a qualidade da transcrição não foram avaliados em produção.
+
+Consulte o [contrato da ferramenta](TOOLS.md#transcrição-de-áudio) e as fontes oficiais de [binding Workers AI](https://developers.cloudflare.com/workers-ai/configuration/bindings/), [Whisper Large v3 Turbo](https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/), [uso de dados](https://developers.cloudflare.com/workers-ai/platform/data-usage/) e [limites de duração do Worker](https://developers.cloudflare.com/workers/platform/limits/#duration).
 
 ## Configuração da galeria MCP Apps
 

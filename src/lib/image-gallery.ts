@@ -1,19 +1,5 @@
 import type { Message } from '../types';
 
-/** Only operator-approved HTTPS origins can enter either CSP or image data. */
-export function approvedImageOrigins(config?: string, evolutionBaseUrl?: string): string[] {
-  const origins = new Set<string>();
-  let excludedOrigin: string | undefined;
-  try { excludedOrigin = new URL(evolutionBaseUrl ?? '').origin; } catch { /* No valid API origin configured. */ }
-  for (const entry of (config ?? '').split(',')) {
-    try {
-      const url = new URL(entry.trim());
-      if (url.origin !== excludedOrigin && url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash && !url.origin.includes('*')) origins.add(url.origin);
-    } catch { /* Invalid configuration fails closed. */ }
-  }
-  return [...origins];
-}
-
 const RASTER_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
 
 /** A component-only projection: never expose this object in structuredContent. */

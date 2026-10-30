@@ -1,6 +1,7 @@
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 import { Buffer } from 'node:buffer';
 import { galleryImage } from './image-gallery';
+import { AudioTranscriptionError } from './audio-transcription';
 
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
@@ -122,7 +123,7 @@ function isJsonApiDocument(value: unknown): boolean {
 
 /** Shared HTTP boundary. GET reads retry transient 5xx/network failures; writes never retry. */
 async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: string, apiKey: string, init: EvolutionRequestInit = {}): Promise<T> {
-  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, signal: _parentSignal, ...fetchInit } = init;
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, signal: parentSignal, ...fetchInit } = init;
   const headers = new Headers(fetchInit.headers);
   headers.set('Accept', JSON_API_MEDIA_TYPE);
   if (fetchInit.body && !headers.has('Content-Type')) headers.set('Content-Type', JSON_API_MEDIA_TYPE);
@@ -136,14 +137,18 @@ async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: stri
     let payload: unknown = undefined;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const signal = parentSignal ? AbortSignal.any([parentSignal, controller.signal]) : controller.signal;
     try {
-      response = await fetcher(`${baseUrl}${path}`, { ...fetchInit, headers, signal: controller.signal });
+      signal.throwIfAborted();
+      response = await fetcher(`${baseUrl}${path}`, { ...fetchInit, headers, signal });
       const text = await response.text();
+      signal.throwIfAborted();
       if (text) {
         try { payload = JSON.parse(text); } catch { payload = text; }
       }
     } catch (error) {
       clearTimeout(timeout);
+      if (parentSignal?.aborted) throw error;
       if (controller.signal.aborted) {
         throw new EvolutionApiError(504, `WaPilot stopped waiting for the WhatsApp service after ${timeoutMs} ms (WaPilot timeout). The service outcome is unknown.`, { path, timeoutMs }, 'wapilot');
       }
@@ -505,11 +510,12 @@ export class EvolutionGoClient {
 
   /** Fetch one stored message by id (Evolution Go POST /message/status).
    * Returns undefined when Evolution Go did not store it. */
-  async getMessage(messageId: string): Promise<Message | undefined> {
+  async getMessage(messageId: string, signal?: AbortSignal): Promise<Message | undefined> {
     try {
       const payload = await this.request<unknown>('/message/status', {
         method: 'POST',
         body: jsonApiBody({ type: 'message', id: messageId }),
+        signal,
       });
       const item = documentData(payload);
       if (resource(item)?.type !== 'message') return undefined;
@@ -518,6 +524,60 @@ export class EvolutionGoClient {
     } catch (error) {
       if (error instanceof EvolutionApiError && (error.status === 404 || error.status === 400)) return undefined;
       throw error;
+    }
+  }
+
+  /** Read audio only from a retained message in this instance; never forward API credentials to storage. */
+  async getMessageAudio(messageId: string, approvedOrigins: string[], maxBytes: number, signal: AbortSignal): Promise<string> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new AudioTranscriptionError('audio_unavailable', 500, 'WaPilot audio size limit is invalid.');
+    let message: Message | undefined;
+    try { message = await this.getMessage(messageId, signal); }
+    catch (error) {
+      signal.throwIfAborted();
+      const status = error instanceof EvolutionApiError ? error.status : 502;
+      const code = error instanceof EvolutionApiError && error.timeoutSource ? (error.timeoutSource === 'wapilot' ? 'wapilot_timeout' : 'upstream_timeout') : 'audio_unavailable';
+      throw new AudioTranscriptionError(code, status, 'WaPilot could not retrieve the requested audio message.');
+    }
+    if (!message || message.id !== messageId) throw new AudioTranscriptionError('audio_unavailable', 404, 'WaPilot could not find this message in retained history.');
+    const mimeType = (message.media?.mimeType ?? message.type ?? '').split(';')[0].trim().toLowerCase();
+    if (!/^audio\/[a-z0-9][a-z0-9.+-]*$/.test(mimeType)) throw new AudioTranscriptionError('audio_unavailable', 415, 'WaPilot audio transcription requires an audio message.');
+    let url: URL;
+    try {
+      const source = message.media?.url ?? '';
+      url = new URL(source);
+      if (source.length > 8192 || url.protocol !== 'https:' || url.username || url.password || url.hash || !approvedOrigins.includes(url.origin)) throw new Error();
+    } catch {
+      throw new AudioTranscriptionError('audio_unavailable', 404, 'WaPilot cannot access retained audio for this message. Unavailable files do not prove deletion.');
+    }
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      signal.throwIfAborted();
+      const response = await this.fetcher(url.href, { redirect: 'manual', credentials: 'omit', signal: AbortSignal.any([signal, controller.signal]) });
+      if (response.status === 408 || response.status === 504) throw new AudioTranscriptionError('upstream_timeout', response.status, `Audio storage returned a timeout response (HTTP ${response.status}) to WaPilot.`);
+      if (!response.ok) throw new AudioTranscriptionError('audio_unavailable', response.status >= 400 ? response.status : 502, `WaPilot could not load audio from storage (HTTP ${response.status}).`);
+      if (Number(response.headers.get('content-length')) > maxBytes) throw new AudioTranscriptionError('media_too_large', 413, `Media exceeds configured limit of ${maxBytes} bytes`);
+      reader = response.body?.getReader();
+      if (!reader) throw new AudioTranscriptionError('audio_unavailable', 502, 'WaPilot received an empty audio response.');
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        signal.throwIfAborted();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) throw new AudioTranscriptionError('media_too_large', 413, `Media exceeds configured limit of ${maxBytes} bytes`);
+        chunks.push(value);
+      }
+      if (!size) throw new AudioTranscriptionError('audio_unavailable', 502, 'WaPilot received an empty audio response.');
+      return Buffer.concat(chunks, size).toString('base64');
+    } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof AudioTranscriptionError) throw error;
+      throw new AudioTranscriptionError('audio_unavailable', 502, 'WaPilot could not load audio from storage.');
+    } finally {
+      controller.abort();
+      reader?.releaseLock();
     }
   }
 
@@ -543,7 +603,7 @@ export class EvolutionGoClient {
     const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
-      const response = await this.fetcher(image.url, { redirect: 'error', credentials: 'omit', signal: controller.signal });
+      const response = await this.fetcher(image.url, { redirect: 'manual', credentials: 'omit', signal: controller.signal });
       if (response.status === 408 || response.status === 504) throw new EvolutionApiError(response.status, `Image storage returned a timeout response (HTTP ${response.status}) to WaPilot.`, undefined, 'upstream');
       if (!response.ok) throw new MessageImageError(response.status >= 400 ? response.status : 502, `WaPilot could not load the image from storage (HTTP ${response.status}).`);
       if (Number(response.headers.get('content-length')) > maxBytes) throw new MessageImageError(413, `Media exceeds configured limit of ${maxBytes} bytes`);

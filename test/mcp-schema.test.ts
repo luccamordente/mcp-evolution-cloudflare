@@ -89,7 +89,7 @@ describe('MCP tool output schema', () => {
   });
 
   it('documents every registered tool without exposing an implementation provider', () => {
-    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message_image', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media', 'forward_message'] as const;
+    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message_image', 'transcribe_message_audio', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media', 'forward_message'] as const;
     for (const name of expected) {
       expect(TOOL_DESCRIPTIONS[name].length).toBeGreaterThan(40);
       expect(TOOL_DESCRIPTIONS[name]).not.toMatch(/evolution|upstream|downstream/i);
@@ -97,6 +97,10 @@ describe('MCP tool output schema', () => {
     expect(MCP_SERVER_INSTRUCTIONS).toContain('list_connections');
     expect(MCP_SERVER_INSTRUCTIONS).toContain('By default, omit connectionId');
     expect(MCP_SERVER_INSTRUCTIONS).toContain('only to inspect or choose');
+    expect(MCP_SERVER_INSTRUCTIONS).toContain('transcribe_message_audio');
+    expect(MCP_SERVER_INSTRUCTIONS).toContain('even without an explicit transcription request');
+    expect(MCP_SERVER_INSTRUCTIONS).toContain('at least 6 minutes');
+    expect(MCP_SERVER_INSTRUCTIONS).toContain('do not retry it automatically');
     expect(MCP_SERVER_INSTRUCTIONS).not.toContain('send_text');
     expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/evolution|upstream|downstream/i);
     expect(TOOL_DESCRIPTIONS.list_connections).toContain('configuration metadata only');

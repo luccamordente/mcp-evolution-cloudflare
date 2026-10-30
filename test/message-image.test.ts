@@ -22,7 +22,7 @@ describe('retained image HTTP boundary', () => {
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({ data: { type: 'message', id: 'image-1' } });
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('instance-secret');
     expect(fetcher.mock.calls[1][0]).toBe(signedUrl);
-    expect(fetcher.mock.calls[1][1]).toMatchObject({ redirect: 'error', credentials: 'omit' });
+    expect(fetcher.mock.calls[1][1]).toMatchObject({ redirect: 'manual', credentials: 'omit' });
     expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('apikey')).toBeNull();
     expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('authorization')).toBeNull();
   });
@@ -82,7 +82,7 @@ describe('retained image HTTP boundary', () => {
     fetcher.mockResolvedValue(new Response(null, { status: 302, headers: { location: 'https://attacker.example' } }));
     await expect(read()).rejects.toMatchObject({ status: 502 });
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls[1][1]?.redirect).toBe('error');
+    expect(fetcher.mock.calls[1][1]?.redirect).toBe('manual');
   });
 
   it('replaces private network and message-lookup errors with fixed product messages', async () => {

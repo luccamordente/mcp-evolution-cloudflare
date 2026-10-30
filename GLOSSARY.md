@@ -1,6 +1,16 @@
 # WhatsApp MCP
 
-Termos canônicos para seleção de conexões nas ferramentas MCP.
+Termos canônicos do WaPilot.
+
+## Mensagens
+
+**Transcrição de áudio**:
+Representação textual da fala contida em uma mensagem de áudio, preservando o idioma original para permitir a compreensão sem ouvir a mensagem.
+_Avoid_: transcript, resumo do áudio
+
+**Mensagem de áudio**:
+Mensagem recebida ou enviada cujo conteúdo é uma nota de voz ou um arquivo de áudio anexado.
+_Avoid_: nota de voz como sinônimo de toda mensagem de áudio
 
 ## Conexões
 

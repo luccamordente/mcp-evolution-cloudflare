@@ -15,7 +15,7 @@ const retainedMessage = {
   relationships: { author: { data: { type: 'chat', id: '5511999999999' } } },
 };
 
-async function messageTool(defaultCount = 1) {
+async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly string[]) {
   const auditBindings: unknown[][] = [];
   const connection: ConnectionRecord = {
     id: connectionId, userId: 'db-user-a', friendlyName: 'Personal', instanceId: 'instance-a',
@@ -49,8 +49,9 @@ async function messageTool(defaultCount = 1) {
     },
   };
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: [retainedMessage] }));
-  const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
-  const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }), { legacy: 'reject', responseMode: 'json' });
+  const run = vi.fn().mockResolvedValue({ text: 'Reunião amanhã às dez.', vtt: 'private-timestamps' });
+  const env = { DB: db as unknown as D1Database, AI: { run }, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
+  const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }, trustedLocalScopes), { legacy: 'reject', responseMode: 'json' });
   async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown } }>(method: string, params: Record<string, unknown> = {}) {
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
@@ -63,10 +64,76 @@ async function messageTool(defaultCount = 1) {
     }));
     return response.json() as Promise<{ result: T }>;
   }
-  return { fetcher, rpc, auditBindings, image: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message_image', arguments: args }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: 'list_messages', arguments: args }) };
+  return { fetcher, rpc, auditBindings, run, env, audio: (args: Record<string, unknown>) => rpc('tools/call', { name: 'transcribe_message_audio', arguments: args }), image: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message_image', arguments: args }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: 'list_messages', arguments: args }) };
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('transcribe_message_audio HTTP MCP output', () => {
+  it('advertises a strict read-only tool on HTTP and omits it from the trusted local catalog', async () => {
+    const http = await messageTool();
+    const listed = await http.rpc<{ tools: Array<{ name: string }> }>('tools/list');
+    expect(listed.result.tools.find(tool => tool.name === 'transcribe_message_audio')).toMatchObject({ annotations: { readOnlyHint: true, idempotentHint: false }, inputSchema: { required: ['messageId'], additionalProperties: false } });
+    const local = await messageTool(1, ['mcp:read', 'mcp:write']);
+    expect((await local.rpc<{ tools: Array<{ name: string }> }>('tools/list')).result.tools.some(tool => tool.name === 'transcribe_message_audio')).toBe(false);
+    expect(http.fetcher).not.toHaveBeenCalled();
+    expect(http.run).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('returns only the transcript and message context for fromMe=%s', async (fromMe) => {
+    const { audio, fetcher, run, auditBindings } = await messageTool();
+    const bytes = Buffer.from('OggS-private-audio-bytes');
+    fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(bytes)
+      : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'audio/ogg', body: { text: 'private-caption', media: { url: 'https://storage.example.test/voice.ogg?signature=private-link' } } }, meta: { chat: '5511999999999', fromMe } } }));
+    const { result } = await audio({ connectionId: workConnectionId, messageId: 'message-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({ data: { connectionId: workConnectionId, messageId: 'message-1', text: 'Reunião amanhã às dez.' } });
+    expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(result.structuredContent.data) }]);
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('work-instance-secret');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toMatch(/private-link|signature|private-caption|private-timestamps|instance-secret|global-secret|private-audio-bytes/);
+    expect(JSON.stringify(auditBindings)).not.toMatch(/Reunião|private|signature|instance-secret|global-secret/);
+    expect(auditBindings).toHaveLength(1);
+    fetcher.mockClear();
+    run.mockClear();
+    expect((await audio({ connectionId: foreignConnectionId, messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([[0, 'no_default_connection'], [2, 'multiple_default_connections']])('rejects default count %s before retrieving audio', async (count, code) => {
+    const { audio, fetcher, run } = await messageTool(Number(count));
+    expect((await audio({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { messageId: ' ' }, { messageId: null }, { messageId: 'x'.repeat(201) }, { messageId: 'message-1', url: 'https://attacker.example/voice.ogg' }, { messageId: 'message-1', dataBase64: 'AAAA' }])('rejects invalid audio inputs before HTTP or AI: %j', async (args) => {
+    const { audio, fetcher, run } = await messageTool();
+    expect((await audio(args)).result.isError).toBe(true);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes inference errors and audit metadata and discourages automatic retries', async () => {
+    const { audio, fetcher, run, auditBindings } = await messageTool();
+    fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response('OggS-test')
+      : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'audio/ogg', body: { media: { url: 'https://storage.example.test/voice.ogg?signature=private-link' } } } } }));
+    run.mockRejectedValue(new Error('Cloudflare Whisper token=private-token private-transcript https://storage.example.test/voice.ogg?signature=private-link'));
+    const { result } = await audio({ messageId: 'message-1' });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'transcription_failed', status: 502, retryable: false, operation: 'transcribe_message_audio' } } } });
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/Cloudflare|Whisper|private|signature|instance-secret|global-secret/);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(auditBindings).toHaveLength(1);
+  });
+
+  it('reports unavailable transcription without downloading when the AI binding is absent', async () => {
+    const { audio, env, fetcher } = await messageTool();
+    delete env.AI;
+    expect((await audio({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'transcription_unavailable', status: 503, retryable: false } } } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
 
 describe('get_message_image native MCP output', () => {
   it('advertises an image-reading tool and returns actual pixels without private URLs, captions or credentials', async () => {

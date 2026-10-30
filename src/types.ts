@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
   OAUTH_KV?: KVNamespace;
+  AI?: Pick<Ai, 'run'>;
   EVOLUTION_BASE_URL: string;
   EVOLUTION_GLOBAL_API_KEY?: string;
   TOKEN_ENCRYPTION_KEY: string;
@@ -16,6 +17,8 @@ export interface Env {
   MAX_MEDIA_BYTES?: string;
   /** Comma-separated, exact HTTPS storage origins approved for gallery images. */
   IMAGE_STORAGE_ORIGINS?: string;
+  /** Comma-separated, exact HTTPS storage origins approved for audio transcription. */
+  AUDIO_STORAGE_ORIGINS?: string;
   MCP_PUBLIC_URL?: string;
 }
 

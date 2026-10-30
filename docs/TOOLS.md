@@ -81,7 +81,7 @@ O cliente/host MCP também pode atingir seu próprio prazo antes de receber a re
 
 ## Leitura visual de imagens
 
-Use `get_message_image` quando precisar interpretar uma imagem, ler seu texto ou responder sobre o que ela mostra. Primeiro obtenha seu `messageId` em `list_messages`; preserve o mesmo `connectionId` se a consulta tiver escolhido uma conexão explícita. Por exemplo:
+Use `get_message_image` quando precisar interpretar uma imagem, ler seu texto ou responder sobre o que ela mostra. Isso inclui mensagens que parecem se referir a uma imagem enviada na mesma conversa: leia a imagem quando necessário para compreender a referência e cumprir o pedido, mesmo sem uma solicitação explícita de análise visual. Primeiro obtenha seu `messageId` em `list_messages`; preserve o mesmo `connectionId` se a consulta tiver escolhido uma conexão explícita. Por exemplo:
 
 ```json
 { "messageId": "id-retornado-por-list_messages" }

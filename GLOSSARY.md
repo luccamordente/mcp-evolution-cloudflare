@@ -4,6 +4,18 @@ Termos canônicos do WaPilot.
 
 ## Mensagens
 
+**Comprovante de envio**:
+Representação do conteúdo e do resultado de uma tentativa de envio de mensagem, exibida após a operação. Não comprova entrega nem leitura pelo destinatário.
+_Avoid_: prévia de envio, confirmação de entrega, recibo de leitura
+
+**Envio aceito**:
+Tentativa de envio cujo aceite foi confirmado pelo serviço de mensagens. Não implica entrega nem leitura pelo destinatário.
+_Avoid_: mensagem entregue, mensagem lida
+
+**Resultado de envio desconhecido**:
+Tentativa de envio que pode ter produzido a mensagem, mas para a qual não há confirmação suficiente do resultado.
+_Avoid_: falha confirmada, mensagem não enviada
+
 **Transcrição de áudio**:
 Representação textual da fala contida em uma mensagem de áudio, preservando o idioma original para permitir a compreensão sem ouvir a mensagem.
 _Avoid_: transcript, resumo do áudio

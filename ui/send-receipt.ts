@@ -68,7 +68,9 @@ function appendFormatted(parent: HTMLElement, text: string) {
   lines.forEach((parts, index) => {
     if (index) (list ?? parent).appendChild(doc.createTextNode('\n'));
     const first = parts[0];
-    const prefix = first && !first.code ? first.text.match(/^([-*] |(\d+)\. |> )/) : null;
+    let prefix = first && !first.code ? first.text.match(/^([-*] |(\d+)\. |> )/) : null;
+    // Native list markers use signed 32-bit integers and discard leading zeros.
+    if (prefix?.[2] && (Number(prefix[2]) > 2147483647 || String(Number(prefix[2])) !== prefix[2])) prefix = null;
     const listTag = prefix && prefix[0] !== '> ' ? prefix[2] ? 'ol' : 'ul' : undefined;
     let line: HTMLElement;
     if (listTag) {
@@ -124,9 +126,11 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
   root.replaceChildren(header, status, context, bubble, note);
   root.dataset.state = 'waiting';
   let input: Pick<SendReceipt, 'text' | 'to' | 'isReply'> = { text: '', to: '' };
+  let lastReceipt: SendReceipt | undefined;
   let confirmed = false;
 
   function render(receipt: SendReceipt) {
+    lastReceipt = receipt;
     confirmed = receipt.state === 'accepted' || receipt.state === 'failed';
     root.dataset.state = receipt.state;
     status.textContent = SEND_RECEIPT_LABELS[receipt.state];
@@ -141,7 +145,7 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
       : 'A mensagem pode ter sido enviada. Não repita automaticamente. O histórico parcial não comprova ausência de envio.';
   }
   function unknown() {
-    if (!confirmed) render({ ...input, state: 'unknown' });
+    if (!confirmed) render({ ...(lastReceipt ?? input), state: 'unknown' });
   }
   bridge.ontoolinput = ({ arguments: args }) => {
     input = { text: typeof args?.text === 'string' ? args.text : '', to: typeof args?.to === 'string' ? args.to : '', isReply: typeof args?.messageId === 'string' && args.messageId.length > 0 };

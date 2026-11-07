@@ -39,6 +39,16 @@ describe('send receipt host bridge and presentation', () => {
     expect(message.querySelectorAll('blockquote')).toHaveLength(1);
   });
 
+  it('preserves unsupported list numbers literally and keeps the largest supported marker', () => {
+    const { root, bridge } = setup();
+    bridge.ontoolresult!(result('accepted', '2147483647. Limite\n2147483648. Acima\n999999999999999999999999999999. Enorme\n01. Zero inicial\n1.Sem espaço'));
+    const message = root.querySelector('.message-text')!;
+    expect(message.textContent).toBe('Limite\n2147483648. Acima\n999999999999999999999999999999. Enorme\n01. Zero inicial\n1.Sem espaço');
+    expect(message.querySelectorAll('ol li')).toHaveLength(1);
+    expect((message.querySelector('ol') as HTMLOListElement).start).toBe(2147483647);
+    expect((message.querySelector('ol li') as HTMLLIElement).value).toBe(2147483647);
+  });
+
   it('preserves whitespace, unknown syntax and incomplete markers and supports nested distinct emphasis', () => {
     const { root, bridge } = setup();
     const literal = '  👋\t# Título\n\n**duplo** foo_bar_baz [link](https://example.test)\n*incompleto _ incompleto ~ `aberto ```aberto';
@@ -125,6 +135,20 @@ describe('send receipt host bridge and presentation', () => {
     view.showError();
     expect(root.dataset.state).toBe('accepted');
     expect(root.textContent).toContain('Envio aceito');
+  });
+
+  it('preserves a restored unknown receipt on cancellation and bridge failure without replaying it', () => {
+    const { root, bridge, view, callServerTool } = setup();
+    const payload = { ...result('unknown', 'Texto restaurado 👋'), _meta: { sendReceipt: { ...result('unknown', 'Texto restaurado 👋')._meta.sendReceipt, isReply: true } } };
+    bridge.ontoolresult!(payload);
+    const restored = root.textContent;
+    bridge.ontoolcancelled!({ reason: 'private-host-error' });
+    expect(root.textContent).toBe(restored);
+    view.showError();
+    expect(root.textContent).toBe(restored);
+    expect(root.dataset.state).toBe('unknown');
+    expect(root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(false);
+    expect(callServerTool).not.toHaveBeenCalled();
   });
 
   it('does not infer confirmed failure from isError and does not mix independent receipt mounts', () => {

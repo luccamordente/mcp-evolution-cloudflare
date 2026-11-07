@@ -105,7 +105,7 @@ describe('send_text receipt MCP boundary', () => {
   it('returns an independent accepted receipt, exact sent text and useful fallback without changing structured send fields', async () => {
     const { rpc, fetcher, auditBindings } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-1', meta: { chat: '5511999999999' } } }));
-    const text = '  Olá 👋\n*Literal por enquanto* <script>alert(1)</script>  ';
+    const text = '  Olá 👋\n*Negrito* _Itálico_ ~Tachado~\n```literal *código*```\n`literal _inline_`\n- Item\n* Outro item\n1. Primeiro\n> Citação\n<script>alert(1)</script>  ';
     const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: '5511999999999', text } });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data).toEqual({ accepted: true, messageId: 'sent-1', conversationId: '5511999999999', jid: '5511999999999' });
@@ -115,7 +115,9 @@ describe('send_text receipt MCP boundary', () => {
     const bridge: SendReceiptBridge = { ontoolinput: undefined, ontoolresult: undefined, ontoolcancelled: undefined };
     mountSendReceipt(root, bridge);
     bridge.ontoolresult!({ ...result, content: [] });
-    expect(root.querySelector('.message-text')!.textContent).toBe(text);
+    expect(root.querySelector('.message-text')!.textContent).toBe('  Olá 👋\nNegrito Itálico Tachado\nliteral *código*\nliteral _inline_\nItem\nOutro item\nPrimeiro\nCitação\n<script>alert(1)</script>  ');
+    expect(root.querySelector('strong')?.textContent).toBe('Negrito');
+    expect(root.querySelector('blockquote')?.textContent).toBe('Citação');
     expect(root.querySelector('script')).toBeNull();
     expect(root.textContent).toContain('Personal');
     expect(result.content.map(item => item.text).join('\n')).toContain('Envio aceito');

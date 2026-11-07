@@ -14,6 +14,50 @@ function setup() {
 const result = (state = 'accepted', text = '  Olá 👋\n<img src=x onerror=alert(1)>  ') => ({ content: [], _meta: { sendReceipt: { state, text, to: '5511999999999', connectionName: 'Pessoal' } } });
 
 describe('send receipt host bridge and presentation', () => {
+  it('shows WhatsApp inline emphasis and keeps code literal without executing message HTML', () => {
+    const { root, bridge } = setup();
+    bridge.ontoolresult!(result('accepted', '*Negrito* _Itálico_ ~Tachado~ `*literal*` ```_mono_``` <img src=x>'));
+    const message = root.querySelector('.message-text')!;
+    expect(message.querySelector('strong')?.textContent).toBe('Negrito');
+    expect(message.querySelector('em')?.textContent).toBe('Itálico');
+    expect(message.querySelector('s')?.textContent).toBe('Tachado');
+    expect([...message.querySelectorAll('code')].map(node => node.textContent)).toEqual(['*literal*', '_mono_']);
+    expect(message.textContent).toBe('Negrito Itálico Tachado *literal* _mono_ <img src=x>');
+    expect(message.querySelector('img')).toBeNull();
+  });
+
+  it('shows lists and block quotes while protecting every line of monospace content', () => {
+    const { root, bridge } = setup();
+    const text = '- *Primeiro*\n* Segundo\n3. Terceiro\n4. Quarto\n> _Citação_\n```*literal*\n- não é lista\n> não é citação```';
+    bridge.ontoolresult!(result('accepted', text));
+    const message = root.querySelector('.message-text')!;
+    expect([...message.querySelectorAll('ul li')].map(node => node.textContent)).toEqual(['Primeiro', 'Segundo']);
+    expect([...message.querySelectorAll('ol li')].map(node => node.textContent)).toEqual(['Terceiro', 'Quarto']);
+    expect(message.querySelector('ol')?.getAttribute('start')).toBe('3');
+    expect(message.querySelector('blockquote em')?.textContent).toBe('Citação');
+    expect([...message.querySelectorAll('code')].map(node => node.textContent).join('\n')).toBe('*literal*\n- não é lista\n> não é citação');
+    expect(message.querySelectorAll('blockquote')).toHaveLength(1);
+  });
+
+  it('preserves whitespace, unknown syntax and incomplete markers and supports nested distinct emphasis', () => {
+    const { root, bridge } = setup();
+    const literal = '  👋\t# Título\n\n**duplo** foo_bar_baz [link](https://example.test)\n*incompleto _ incompleto ~ `aberto ```aberto';
+    bridge.ontoolresult!(result('accepted', literal));
+    expect(root.querySelector('.message-text')!.textContent).toBe(literal);
+    expect(root.querySelector('.message-text strong, .message-text em, .message-text s, .message-text code, .message-text a, .message-text h1')).toBeNull();
+    bridge.ontoolresult!(result('accepted', '*_ênfase combinada_* ~*revisado*~'));
+    expect(root.querySelector('strong em')?.textContent).toBe('ênfase combinada');
+    expect(root.querySelector('s strong')?.textContent).toBe('revisado');
+  });
+
+  it('does not interpret emphasis across literal code or block prefixes inside multiline code', () => {
+    const { root, bridge } = setup();
+    bridge.ontoolresult!(result('accepted', '*antes `*literal*` depois*\n```- literal\n1. literal\n> literal```'));
+    const message = root.querySelector('.message-text')!;
+    expect(message.querySelector('strong, li, blockquote')).toBeNull();
+    expect(message.textContent).toBe('*antes *literal* depois*\n- literal\n1. literal\n> literal');
+  });
+
   it('shows the attempt content and account as safe, exact text without offering actions or replaying on restoration', () => {
     const { root, bridge, callServerTool } = setup();
     const payload = result();
@@ -66,6 +110,15 @@ describe('send receipt host bridge and presentation', () => {
     expect(second.root.dataset.state).toBe('unknown');
     expect(second.root.textContent).not.toMatch(/Primeira|private-result/);
     expect(first.root.textContent).not.toContain('Segunda');
+  });
+
+  it('keeps the entire formatted message at the 10,000 character limit', () => {
+    const { root, bridge } = setup();
+    const code = 'https://example.test/'.padEnd(9994, 'a');
+    bridge.ontoolresult!(result('accepted', '```' + code + '```'));
+    expect(root.querySelector('code')?.textContent).toBe(code);
+    expect(root.querySelector('.message-text')!.textContent).toHaveLength(9994);
+    expect(root.querySelector('details, button, [aria-expanded]')).toBeNull();
   });
 
   it('shows all 10,000 characters, whitespace, emoji and long URLs without a collapsed region', () => {

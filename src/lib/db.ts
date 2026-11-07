@@ -224,7 +224,7 @@ export interface OutboundMessageInput {
   conversationId?: string;
   encodingFormat: string;
   text?: string;
-  media?: { mimeType?: string; fileName?: string; size?: number; url?: string };
+  media?: { mimeType?: string; fileName?: string; size?: number; url?: string; gifPlayback?: boolean };
   sentAt?: string;
 }
 

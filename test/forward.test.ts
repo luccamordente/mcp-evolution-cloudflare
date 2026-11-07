@@ -32,4 +32,19 @@ describe('forwardMessage', () => {
   it('rejects messages with nothing to forward', async () => {
     await expect(make([]).forwardMessage('to', { id: 'SRC' })).rejects.toThrow(/no forwardable/);
   });
+
+  it.each([64, 65])('preserves GIF playback from retained video flags %d', async (flags) => {
+    const requests: Array<{ url: string; body: any }> = [];
+    await make(requests).forwardMessage('to@s.whatsapp.net', { id: 'GIF', flags, text: 'Loop', media: { mimeType: 'video/mp4', fileName: 'loop.mp4', url: 'https://s.invalid/loop.mp4' } });
+    expect(requests[0].body.data.attributes).toEqual({ encodingFormat: 'video/mp4', filename: 'loop.mp4', forwardingScore: 1, gifPlayback: true, body: { text: 'Loop', media: { url: 'https://s.invalid/loop.mp4' } } });
+  });
+
+  it('preserves playback from local media metadata while ordinary video stays ordinary', async () => {
+    const requests: Array<{ url: string; body: any }> = [];
+    const client = make(requests);
+    await client.forwardMessage('to@s.whatsapp.net', { media: { mimeType: 'video/mp4', url: 'https://s.invalid/loop.mp4', gifPlayback: true } });
+    await client.forwardMessage('to@s.whatsapp.net', { media: { mimeType: 'video/mp4', url: 'https://s.invalid/video.mp4' } });
+    expect(requests[0].body.data.attributes.gifPlayback).toBe(true);
+    expect(requests[1].body.data.attributes).not.toHaveProperty('gifPlayback');
+  });
 });

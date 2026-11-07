@@ -119,7 +119,7 @@ export interface Message {
   timestamp?: string;
   type?: string;
   text?: string;
-  media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string };
+  media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string; gifPlayback?: boolean };
   medias?: MessageMediaItem[];
   flags?: number;
   quotedId?: string;
@@ -133,4 +133,5 @@ export interface SendMessageResult {
   conversationId?: string;
   jid?: string;
   accepted: boolean;
+  media?: { mimeType: string; fileName?: string; size?: number; gifPlayback?: boolean };
 }

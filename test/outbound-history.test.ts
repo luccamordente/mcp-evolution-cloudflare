@@ -11,12 +11,13 @@ const jsonapi = { version: '1.1' };
 
 type Route = (url: URL, body: any) => Response | undefined;
 
-async function harness(route: Route, scopes: string[] | null = ['mcp:read', 'mcp:write']) {
+async function harness(route: Route, scopes: string[] | null = ['mcp:read', 'mcp:write'], maxMediaBytes?: number) {
   const connection: ConnectionRecord = {
     id: connectionId, userId: 'db-user-a', friendlyName: 'heitor', instanceId: 'instance-a',
     encryptedToken: await encryptToken('instance-secret', encryptionKey), createdAt: '2026-10-27', updatedAt: '2026-10-27',
   };
   const outbound = new Map<string, unknown[]>();
+  const audits: unknown[][] = [];
   const db = {
     prepare(sql: string) {
       return {
@@ -45,6 +46,7 @@ async function harness(route: Route, scopes: string[] | null = ['mcp:read', 'mcp
             },
             async run() {
               if (sql.includes('INTO outbound_messages')) outbound.set(`${values[0]}|${values[1]}`, values);
+              if (sql.includes('INTO audit_log')) audits.push(values);
               return { meta: { changes: 1 } };
             },
           };
@@ -52,14 +54,14 @@ async function harness(route: Route, scopes: string[] | null = ['mcp:read', 'mcp
       };
     },
   };
-  const requests: Array<{ url: URL; body: any }> = [];
+  const requests: Array<{ url: URL; body: any; headers: Headers }> = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    requests.push({ url, body });
+    requests.push({ url, body, headers: new Headers(init?.headers) });
     return route(url, body) ?? Response.json({ jsonapi, data: [] });
   });
-  const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'g', ENVIRONMENT: 'local' } as Env;
+  const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'g', ENVIRONMENT: 'local', MAX_MEDIA_BYTES: maxMediaBytes === undefined ? undefined : String(maxMediaBytes) } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }), { legacy: 'reject', responseMode: 'json' });
   async function call(name: string, args: Record<string, unknown>, meta: Record<string, unknown> = {}) {
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
@@ -74,7 +76,7 @@ async function harness(route: Route, scopes: string[] | null = ['mcp:read', 'mcp
     }), scopes === null ? undefined : { authInfo: { token: 't', clientId: 'c', scopes } });
     return (await response.json() as { result: { isError?: boolean; structuredContent: { data: any } } }).result;
   }
-  return { call, requests, outbound };
+  return { call, requests, outbound, audits };
 }
 
 const sent = (id: string) => Response.json({ jsonapi, data: { type: 'message', id, meta: { chat: '551142000028' } } });
@@ -234,5 +236,113 @@ describe('list_messages includes saved sends', () => {
     save(outbound, 'SAME', 30);
     const page = await call('list_messages', {});
     expect(page.structuredContent.data.items.map((m: any) => m.id)).toEqual(['SAME']);
+  });
+});
+
+describe('GIF acceptance', () => {
+  const gifBase64 = 'R0lGODlhAQABAIAAAAAAAP///yH5BAAKAAAALAAAAAABAAEAAAICRAEAIfkEAAoAAAAsAAAAAAEAAQAAAgJEAQA7';
+  const acceptedGIF = (id = 'GIF1', fileSize: unknown = 2048) => Response.json({
+    jsonapi, data: {
+      type: 'message', id,
+      attributes: { encodingFormat: 'video/mp4', body: { medias: [{ encodingFormat: 'video/mp4', ...(fileSize === null ? {} : { fileSize }), fileName: 'animation.mp4', url: 'https://storage.invalid/private.mp4', mediaKey: 'private-upload-key' }] } },
+      meta: { chat: '551142000028', flags: 65, instanceToken: 'private-token' },
+    },
+  });
+
+  it('sends GIF bytes with caption and quote, and records safe converted metadata', async () => {
+    const { call, requests, outbound, audits } = await harness(() => acceptedGIF());
+    const result = await call('send_media', {
+      to: '551142000028', mimeType: 'image/gif', fileName: 'animation.gif', dataBase64: gifBase64,
+      caption: 'A looping animation', replyTo: 'QUOTED1',
+    });
+    expect(result.isError).toBeFalsy();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url.pathname).toBe('/send/media');
+    expect(requests[0].headers.get('apikey')).toBe('instance-secret');
+    expect(requests[0].headers.get('content-type')).toBe('application/vnd.api+json');
+    expect(requests[0].body.data).toEqual({
+      type: 'message', attributes: { encodingFormat: 'image/gif', filename: 'animation.gif', body: { text: 'A looping animation', media: { url: gifBase64 } } },
+      relationships: { recipient: { data: { type: 'chat', id: '551142000028' } }, quoted: { data: { type: 'message', id: 'QUOTED1' } } },
+    });
+    expect(result.structuredContent.data).toMatchObject({ accepted: true, messageId: 'GIF1', media: { mimeType: 'video/mp4', fileName: 'animation.mp4', size: 2048, gifPlayback: true } });
+    const row = outbound.get(`${connectionId}|GIF1`)!;
+    expect(row[3]).toBe('video/mp4');
+    expect(JSON.parse(String(row[5]))).toEqual({ mimeType: 'video/mp4', fileName: 'animation.mp4', size: 2048, gifPlayback: true });
+    expect(JSON.stringify({ result, outbound: [...outbound.values()], audits })).not.toMatch(/private-token|private-upload-key|private\.mp4|instance-secret/);
+    expect(JSON.stringify({ result, outbound: [...outbound.values()], audits })).not.toContain(gifBase64);
+  });
+
+  it('accepts an MP4 playback option and normalizes MIME case and parameters', async () => {
+    const { call, requests } = await harness(() => acceptedGIF());
+    const result = await call('send_media', { to: '551142000028', mimeType: ' VIDEO/MP4 ; codecs=avc1', gifPlayback: true, dataBase64: btoa('mp4-fixture') });
+    expect(result.isError).toBeFalsy();
+    expect(requests[0].body.data.attributes).toMatchObject({ encodingFormat: 'video/mp4', gifPlayback: true });
+  });
+
+  it('looks up a newly sent GIF in retained history before forwarding it as a GIF', async () => {
+    let sends = 0;
+    const { call, requests, outbound } = await harness((url) => {
+      if (url.pathname === '/message/status') return Response.json({ jsonapi, data: {
+        type: 'message', id: 'GIF1', attributes: { encodingFormat: 'video/mp4', body: { text: 'Loop', medias: [{ encodingFormat: 'video/mp4', url: 'https://storage.invalid/retained.mp4', fileName: 'animation.mp4' }] } }, meta: { chat: '551142000028', flags: 65 },
+      } });
+      if (url.pathname === '/send/media') return acceptedGIF(++sends === 1 ? 'GIF1' : 'GIF2');
+      return undefined;
+    });
+    await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    const forward = await call('forward_message', { to: '553175093234', conversationId: '551142000028', messageId: 'GIF1' });
+    expect(forward.isError).toBeFalsy();
+    expect(requests.map((r) => r.url.pathname)).toEqual(['/send/media', '/message/status', '/send/media']);
+    expect(requests[2].body.data.attributes).toEqual({ encodingFormat: 'video/mp4', filename: 'animation.mp4', forwardingScore: 1, gifPlayback: true, body: { text: 'Loop', media: { url: 'https://storage.invalid/retained.mp4' } } });
+    expect(JSON.parse(String(outbound.get(`${connectionId}|GIF2`)?.[5])).gifPlayback).toBe(true);
+  });
+
+  it('does not substitute the GIF input size when the converted response omits a size', async () => {
+    const { call, outbound } = await harness(() => acceptedGIF('GIF1', null));
+    await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    const media = JSON.parse(String(outbound.get(`${connectionId}|GIF1`)?.[5]));
+    expect(media.mimeType).toBe('video/mp4');
+    expect(media).not.toHaveProperty('size');
+  });
+
+  it('does not invent conversion metadata when the backend only acknowledges the send', async () => {
+    const { call, outbound } = await harness(() => sent('GIF1'));
+    const result = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    expect(result.structuredContent.data).not.toHaveProperty('media');
+    expect(outbound.get(`${connectionId}|GIF1`)?.[3]).toBe('image/gif');
+  });
+
+  it('rejects an incompatible playback option before any backend call', async () => {
+    const { call, requests, outbound } = await harness(() => acceptedGIF());
+    const result = await call('send_media', { to: '551142000028', mimeType: 'image/png', gifPlayback: true, dataBase64: btoa('png') });
+    expect(result.isError).toBe(true);
+    expect(requests).toHaveLength(0);
+    expect(outbound.size).toBe(0);
+  });
+
+  it.each([null, ['mcp:read']])('requires write authorization for GIF sending (%j)', async (scopes) => {
+    const { call, requests } = await harness(() => acceptedGIF(), scopes);
+    const result = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    expect(result.structuredContent.data.error).toMatchObject({ code: 'insufficient_scope', status: 403 });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('rejects another user connection and oversized input before sending', async () => {
+    const { call, requests } = await harness(() => acceptedGIF(), undefined, 16);
+    const foreign = await call('send_media', { connectionId: '54b85615-b212-4d2b-91e5-c41dcbec66ef', to: '551142000028', mimeType: 'image/gif', dataBase64: btoa('GIF89a') });
+    expect(foreign.structuredContent.data.error).toMatchObject({ code: 'connection_not_found' });
+    const large = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    expect(large.isError).toBe(true);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('does not retry a failed conversion or record a successful send', async () => {
+    const { call, requests, outbound, audits } = await harness(() => Response.json({ jsonapi, errors: [{ status: '503', detail: 'WaPilot GIF conversion is unavailable; token=private-token' }] }, { status: 503 }));
+    const result = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent.data.error).toMatchObject({ status: 503 });
+    expect(requests).toHaveLength(1);
+    expect(outbound.size).toBe(0);
+    expect(JSON.stringify({ result, audits })).not.toMatch(/private-token|instance-secret/);
+    expect(JSON.stringify({ result, audits })).not.toContain(gifBase64);
   });
 });

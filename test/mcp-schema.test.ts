@@ -119,6 +119,18 @@ describe('MCP tool output schema', () => {
     expect(TOOL_ANNOTATIONS.send).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: false });
   });
 
+  it('accepts GIF playback only for GIF or MP4 media', () => {
+    const input = { to: '5511999999999', dataBase64: 'AQ==', gifPlayback: true };
+    for (const mimeType of ['image/gif', 'video/mp4', ' VIDEO/MP4 ; codecs=avc1']) {
+      expect(sendMediaInput.safeParse({ ...input, mimeType }).success).toBe(true);
+    }
+    for (const mimeType of ['image/png', 'audio/ogg', 'application/pdf']) {
+      expect(sendMediaInput.safeParse({ ...input, mimeType }).success).toBe(false);
+      expect(sendMediaInput.safeParse({ ...input, mimeType, gifPlayback: false }).success).toBe(true);
+    }
+    expect(sendMediaInput.parse({ to: input.to, dataBase64: input.dataBase64, mimeType: 'image/gif' })).not.toHaveProperty('gifPlayback');
+  });
+
   it('describes the semantic meaning of message tool fields', () => {
     const schemas = [sendTextInput, replyToMessageInput, sendMediaInput, listMessagesInput];
     for (const schema of schemas) {

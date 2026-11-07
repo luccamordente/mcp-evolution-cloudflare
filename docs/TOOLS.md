@@ -19,7 +19,7 @@ O entrypoint de desenvolvimento `dev:stdio` reutiliza este catálogo, exceto `tr
 | `show_image_gallery` | Atender pedidos para ver, mostrar ou abrir fotos/imagens recebidas e enviadas, inclusive de uma conversa específica | Analisar conteúdo visual (use `get_message_image`), recuperar arquivos não retidos, enviar anexos (use `send_media`), baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
 | `send_text` | Enviar uma nova mensagem de texto | Responder citando uma mensagem existente | Resultado estruturado do envio; é uma ação externa e deve ter destino e texto finais. |
 | `reply_to_message` | Responder citando uma mensagem conhecida | Enviar uma mensagem nova sem referência | Resultado estruturado; requer destino, texto e `messageId` da mensagem citada. |
-| `send_media` | Enviar imagem, documento, áudio ou vídeo em base64 | Enviar apenas texto ou conteúdo ainda indisponível | Resultado estruturado; aceita legenda, nome de arquivo e referência opcional; respeita o limite de mídia configurado. |
+| `send_media` | Enviar imagem, GIF animado, documento, áudio ou vídeo em base64 | Enviar apenas texto ou conteúdo ainda indisponível | Resultado estruturado; GIF vira vídeo silencioso com reprodução em loop; aceita legenda, nome de arquivo e referência opcional; respeita o limite de mídia configurado. |
 
 ## Ordem de decisão
 
@@ -51,6 +51,7 @@ O cliente consulta diretamente `GET /message/search`, enviando a conversa como `
 - `messageId`: identificador da mensagem a ser citada, encaminhada, lida visualmente, transcrita ou com PDF a ser lido.
 - `dataBase64`: conteúdo do anexo codificado em Base64, sem prefixo de URL de dados.
 - `replyTo`: identificador opcional da mensagem que será citada junto com o anexo.
+- `gifPlayback`: opção de `send_media` para reproduzir um MP4 em loop como GIF; `true` exige `image/gif` ou `video/mp4`. Um GIF de entrada é convertido automaticamente, mesmo sem essa opção.
 
 Todas as respostas bem-sucedidas usam `structuredContent.data` e podem conter objetos, listas, strings, números, booleanos ou `null`. Erros de execução usam `isError: true`, repetem um envelope sanitizado em `content[0].text` e em `structuredContent.data.error`, com os campos:
 
@@ -67,7 +68,25 @@ As respostas MCP são normalizadas pelo Worker, mas a origem Evolution Go é JSO
 
 Administração de conexões, logout, exclusão de mensagens ou grupos e gestão ampla de participantes não fazem parte desta superfície MCP.
 
-### Origem dos timeouts
+## Envio de GIFs
+
+`send_media` aceita os bytes de um GIF com `mimeType: "image/gif"`, sem exigir conversão pelo cliente. O WaPilot converte um ciclo da animação para MP4 silencioso e solicita reprodução em loop. Legenda e `replyTo` seguem o mesmo contrato dos demais anexos. Para um MP4 já preparado, use `mimeType: "video/mp4"` e `gifPlayback: true`. Um MP4 comum, sem essa opção, continua sendo vídeo comum.
+
+```json
+{ "to": "5511999999999", "mimeType": "image/gif", "dataBase64": "<bytes-do-GIF-em-Base64>", "caption": "Uma animação" }
+```
+
+O limite de entrada do Worker continua sendo `MAX_MEDIA_BYTES`, com padrão de 8 MiB. O backend limita GIFs a 8 MiB de entrada e saída, 2048 pixels por dimensão, 300 quadros, 30 segundos por ciclo e 32 milhões de pixels decodificados. A conversão tem prazo de 20 segundos e admite duas conversões simultâneas. Esses valores são uma política de recursos do WaPilot, não limites universais do WhatsApp. Entradas acima dos limites falham por inteiro, sem cortar a animação. O prazo total de envio continua sendo 60 segundos; envios não são repetidos automaticamente.
+
+Quando o serviço confirma os metadados da mídia enviada, a resposta inclui `media` com `mimeType`, `size`, `fileName` e `gifPlayback`, conforme disponíveis. Um GIF convertido é descrito como `video/mp4`, e `size` representa os bytes do MP4. O tamanho do GIF original não substitui um tamanho de saída ausente. Uma resposta que somente reconhece o envio não comprova conversão nem acrescenta metadados inferidos. Links privados, Base64 e chaves de upload não integram esses metadados.
+
+O encaminhamento preserva a reprodução em loop dos GIFs retidos. Quando o registro local do envio ainda não contém um arquivo recuperável, o WaPilot consulta o mesmo identificador no histórico retido antes de encaminhar. A ausência de arquivo continua sendo uma falha explícita; o WaPilot não encaminha somente a legenda.
+
+Esse suporte depende da versão do backend que implementa conversão de GIF e `gifPlayback`. Publique o backend antes do Worker. A galeria continua consultando imagens e não exibe os MP4s resultantes. `get_message_image` continua aceitando somente JPEG, PNG e WebP.
+
+`npm run test:acceptance:gif` executa os testes de aceitação dos dois repositórios, conforme os [pré-requisitos e limites da validação](GIF-ACCEPTANCE.md). A etapa MCP verifica transporte, escopo de usuário, contrato, metadados e falhas com o backend simulado. A etapa Go usa conversão real e substitui somente o transporte WhatsApp. Nenhuma dessas etapas envia mensagens reais ou comprova reprodução nos aplicativos WhatsApp.
+
+## Origem dos timeouts
 
 | Código | Evidência | Mensagem |
 | --- | --- | --- |

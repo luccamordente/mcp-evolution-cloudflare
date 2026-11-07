@@ -113,14 +113,17 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
   status.setAttribute('role', 'status');
   const context = el('dl', 'receipt-context');
   const bubble = el('article', 'message-bubble');
+  const reply = el('p', 'message-reply', 'Em resposta a uma mensagem');
+  reply.hidden = true;
   const message = el('div', 'message-text');
   message.dir = 'auto';
+  bubble.appendChild(reply);
   bubble.appendChild(message);
   bubble.hidden = true;
   const note = el('p', 'receipt-note');
   root.replaceChildren(header, status, context, bubble, note);
   root.dataset.state = 'waiting';
-  let input: Pick<SendReceipt, 'text' | 'to'> = { text: '', to: '' };
+  let input: Pick<SendReceipt, 'text' | 'to' | 'isReply'> = { text: '', to: '' };
   let confirmed = false;
 
   function render(receipt: SendReceipt) {
@@ -128,6 +131,7 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
     root.dataset.state = receipt.state;
     status.textContent = SEND_RECEIPT_LABELS[receipt.state];
     context.replaceChildren(el('dt', '', 'Destinatário'), el('dd', '', receipt.to || 'Não informado'), el('dt', '', 'Conexão'), el('dd', '', receipt.connectionName || 'Não resolvida'));
+    reply.hidden = receipt.isReply !== true;
     message.replaceChildren();
     appendFormatted(message, receipt.text);
     bubble.hidden = false;
@@ -140,7 +144,7 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
     if (!confirmed) render({ ...input, state: 'unknown' });
   }
   bridge.ontoolinput = ({ arguments: args }) => {
-    input = { text: typeof args?.text === 'string' ? args.text : '', to: typeof args?.to === 'string' ? args.to : '' };
+    input = { text: typeof args?.text === 'string' ? args.text : '', to: typeof args?.to === 'string' ? args.to : '', isReply: typeof args?.messageId === 'string' && args.messageId.length > 0 };
   };
   bridge.ontoolresult = result => {
     const receipt = record(result._meta?.sendReceipt);
@@ -148,7 +152,7 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
       unknown();
       return;
     }
-    render({ text: receipt.text, to: receipt.to, connectionName: typeof receipt.connectionName === 'string' ? receipt.connectionName : undefined, state: receipt.state as SendReceipt['state'] });
+    render({ text: receipt.text, to: receipt.to, connectionName: typeof receipt.connectionName === 'string' ? receipt.connectionName : undefined, state: receipt.state as SendReceipt['state'], isReply: receipt.isReply === true });
   };
   bridge.ontoolcancelled = unknown;
   return { showError: unknown };

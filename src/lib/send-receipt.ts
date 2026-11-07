@@ -9,5 +9,6 @@ export interface SendReceipt {
   to: string;
   connectionId?: string;
   connectionName?: string;
+  isReply?: boolean;
   state: keyof typeof SEND_RECEIPT_LABELS;
 }

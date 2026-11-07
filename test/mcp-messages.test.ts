@@ -86,11 +86,11 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 
-describe('send_text receipt MCP boundary', () => {
-  it('discovers a static, read-only presentation without credentials or network access', async () => {
+describe('text send receipt MCP boundary', () => {
+  it.each(['send_text', 'reply_to_message'])('discovers a static, read-only presentation for %s without credentials or network access', async name => {
     const { rpc, fetcher } = await messageTool();
     const { result } = await rpc<{ tools: Array<{ name: string; _meta?: { ui: { resourceUri: string; visibility: string[] } }; annotations: { readOnlyHint: boolean } }> }>('tools/list');
-    const tool = result.tools.find(item => item.name === 'send_text')!;
+    const tool = result.tools.find(item => item.name === name)!;
     expect(tool.annotations.readOnlyHint).toBe(false);
     expect(tool._meta?.ui).toEqual({ resourceUri: 'ui://wapilot/send-receipt.html', visibility: ['model'] });
     const { result: resource } = await rpc<{ contents: Array<{ text: string; mimeType: string; _meta: { ui: { csp: { resourceDomains: string[]; connectDomains: string[] } } } }> }>('resources/read', { uri: tool._meta!.ui.resourceUri });
@@ -130,6 +130,36 @@ describe('send_text receipt MCP boundary', () => {
     expect(result._meta?.sendReceipt?.text).toBe(text);
     expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('apikey')).toBe('work-instance-secret');
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each([undefined, workConnectionId])('returns a reply receipt for connection %s without fetching quoted content', async selectedConnectionId => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'reply-sent' } }));
+    const text = '  Minha resposta 👋\n> Uma citação no novo texto  ';
+    const { result } = await rpc('tools/call', { name: 'reply_to_message', arguments: { connectionId: selectedConnectionId, to: 'destino', text, messageId: 'original-id', participant: 'autor@s.whatsapp.net' } });
+    expect(result).toMatchObject({ structuredContent: { data: { accepted: true, messageId: 'reply-sent' } }, _meta: { sendReceipt: { state: 'accepted', text, to: 'destino', connectionName: 'Personal', connectionId: selectedConnectionId ?? connectionId, isReply: true } } });
+    expect(result.content.map(item => item.text).join('\n')).toContain('Em resposta a uma mensagem');
+    expect(result.content.map(item => item.text).join('\n')).toContain(text);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).data).toMatchObject({ attributes: { body: { text } }, relationships: { recipient: { data: { id: 'destino' } }, quoted: { data: { type: 'message', id: 'original-id', meta: { participant: 'autor@s.whatsapp.net' } } } } });
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe(selectedConnectionId ? 'work-instance-secret' : 'instance-secret');
+    const fresh = await rpc('tools/call', { name: 'send_text', arguments: { to: 'outro-destino', text: 'Mensagem independente' } });
+    expect(fresh.result._meta?.sendReceipt).toMatchObject({ text: 'Mensagem independente', to: 'outro-destino', state: 'accepted' });
+    expect(fresh.result._meta?.sendReceipt).not.toHaveProperty('isReply');
+    expect(result._meta?.sendReceipt).toMatchObject({ text, isReply: true });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each(['foreign', 'scope', 'timeout', 'audit'])('keeps the reply receipt safe for %s without repeating the write', async kind => {
+    const { rpc, fetcher } = await messageTool(1, undefined, { scopes: kind === 'scope' ? ['mcp:read'] : undefined, auditFails: kind === 'audit' });
+    fetcher.mockResolvedValue(kind === 'timeout'
+      ? Response.json({ errors: [{ detail: 'private-provider-error' }] }, { status: 504 })
+      : Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'reply-sent' } }));
+    const { result } = await rpc('tools/call', { name: 'reply_to_message', arguments: { connectionId: kind === 'foreign' ? foreignConnectionId : undefined, to: 'destino', text: 'Minha resposta', messageId: 'original-id' } });
+    const state = kind === 'audit' ? 'accepted' : kind === 'timeout' ? 'unknown' : 'failed';
+    expect(result._meta?.sendReceipt).toMatchObject({ state, isReply: true, text: 'Minha resposta', to: 'destino' });
+    expect(result.isError === true).toBe(kind !== 'audit');
+    expect(result.content.map(item => item.text).join('\n')).toContain('Em resposta a uma mensagem');
+    expect(JSON.stringify(result)).not.toMatch(/private-|instance-secret|global-secret/);
+    expect(fetcher).toHaveBeenCalledTimes(kind === 'foreign' || kind === 'scope' ? 0 : 1);
   });
   it.each([
     { defaultCount: 0, code: 'no_default_connection' },

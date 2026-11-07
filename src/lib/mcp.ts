@@ -1,5 +1,7 @@
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { IMAGE_GALLERY_HTML } from '../generated/image-gallery';
+import { SEND_RECEIPT_HTML } from '../generated/send-receipt';
+import { SEND_RECEIPT_LABELS, type SendReceipt } from './send-receipt';
 import { galleryImage } from './image-gallery';
 import { approvedMediaOrigins } from './media-origins';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
@@ -320,6 +322,12 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       connectionId: id, messageId, text: await transcribeMessageAudio(c, env, messageId, ctx.mcpReq.signal),
     })));
   }
+  const receiptUri = 'ui://wapilot/send-receipt.html';
+  const receiptMeta = { ui: { csp: { resourceDomains: [], connectDomains: [], frameDomains: [], baseUriDomains: [] } } };
+  const receiptCsp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+  registerAppResource(server, 'WaPilot comprovante de envio', receiptUri, { _meta: receiptMeta }, async () => ({
+    contents: [{ uri: receiptUri, mimeType: RESOURCE_MIME_TYPE, text: SEND_RECEIPT_HTML.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${receiptCsp}">`), _meta: receiptMeta }],
+  }));
   const galleryUri = 'ui://whatsapp/image-gallery-v2.html';
   const galleryOrigins = approvedMediaOrigins(env.IMAGE_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL);
   const galleryCsp = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'none'; img-src ${galleryOrigins.join(' ') || "'none'"}; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
@@ -369,30 +377,50 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
     }
   };
 
-  const send = async (operation: string, ctx: unknown, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string) => Promise<unknown>) => {
+  const send = async (operation: string, ctx: unknown, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string) => Promise<SendMessageResult>, presentation?: Pick<SendReceipt, 'to' | 'text'>) => {
     let resolvedConnectionId: string | undefined;
+    let connectionName: string | undefined;
+    let dispatched = false;
+    const withReceipt = (result: CallToolResult, state: SendReceipt['state']) => {
+      if (!presentation) return result;
+      const receipt: SendReceipt = { ...presentation, connectionId: resolvedConnectionId, connectionName, state };
+      const fallback = `WaPilot · ${SEND_RECEIPT_LABELS[state]}\nDestinatário: ${receipt.to}\nConexão: ${connectionName ?? 'Não resolvida'}\n${state === 'accepted' ? 'O aceite não comprova entrega nem leitura.' : state === 'unknown' ? 'A mensagem pode ter sido enviada. Não repita automaticamente.' : 'A tentativa foi interrompida antes de chamar o envio.'}\n\n${receipt.text}`;
+      return { ...result, content: [...result.content, { type: 'text' as const, text: fallback }], _meta: { sendReceipt: toJsonValue(receipt) } };
+    };
     try {
       if (!canWrite(ctx)) throw new InsufficientScopeError();
       const { client, connection } = await clientFor(connectionId);
       resolvedConnectionId = connection.id;
+      connectionName = connection.friendlyName;
+      dispatched = true;
       const result = await fn(client, connection.id);
-      await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
-      return ok(result);
-    } catch (error) {
       try {
-        await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: auditFailure(error) });
+        await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
+      } catch (error) {
+        if (!presentation) throw error;
+        // A confirmed acceptance survives a later audit error.
+        try { await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'failure', metadata: { code: 'audit_failed', phase: 'after_send' } }); } catch { /* Preserve the send result. */ }
+      }
+      return withReceipt(ok(result), result.accepted === true ? 'accepted' : 'unknown');
+    } catch (error) {
+      const classified = classifyMcpError(error, operation);
+      try {
+        await audit(env.DB, { userId: ensured.id, connectionId: resolvedConnectionId, operation, outcome: 'failure', metadata: presentation ? { code: classified.code, status: classified.status } : auditFailure(error) });
       } catch {
         // An audit failure must not replace the operation error being reported.
       }
-      return fail(operation, error);
+      if (!presentation) return fail(operation, error);
+      const state = dispatched ? 'unknown' : 'failed';
+      const safeError = { ...classified, retryable: false, message: `WaPilot: ${SEND_RECEIPT_LABELS[state]}.`, hint: dispatched ? 'A mensagem pode ter sido enviada. Não repita automaticamente; o histórico parcial não comprova ausência de envio.' : 'Verifique a autorização e a conexão antes de uma nova tentativa.' };
+      return withReceipt({ isError: true, ...ok({ error: safeError }) }, state);
     }
   };
 
-  server.registerTool('send_text', { title: 'Send text message', description: TOOL_DESCRIPTIONS.send_text, inputSchema: sendTextInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, text }, ctx) => send('send_text', ctx, connectionId, async (c, id) => {
+  registerAppTool(server, 'send_text', { _meta: { ui: { resourceUri: receiptUri, visibility: ['model'] } }, title: 'Send text message', description: TOOL_DESCRIPTIONS.send_text, inputSchema: sendTextInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, text }, ctx) => send('send_text', ctx, connectionId, async (c, id) => {
     const result = await c.sendText(to, text);
     await recordSent(id, result, to, { encodingFormat: 'text/plain', text });
     return result;
-  }));
+  }, { to, text }));
   server.registerTool('reply_to_message', { title: 'Reply to a message', description: TOOL_DESCRIPTIONS.reply_to_message, inputSchema: replyToMessageInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, text, messageId, participant }, ctx) => send('reply_to_message', ctx, connectionId, async (c, id) => {
     const result = await c.sendText(to, text, messageId, participant);
     await recordSent(id, result, to, { encodingFormat: 'text/plain', text });

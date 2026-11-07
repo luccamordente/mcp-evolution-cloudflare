@@ -30,6 +30,18 @@ O provisionamento envia somente `name` e `token` ao criar uma conexão e grava o
 
 Antes de qualquer resposta estruturada de ferramenta MCP, o Worker percorre recursivamente os valores JSON e remove campos `undefined` para produzir JSON válido. URLs de mídia em `list_messages` são preservadas como o Evolution Go as devolve. A leitura explícita por `get_message_image` baixa o arquivo autorizado e retorna pixels conforme o contrato abaixo, sem hospedar ou publicar uma URL de mídia.
 
+## Envio de GIFs
+
+O contrato público mantém `send_media` com `mimeType: image/gif` e bytes Base64. A conversão pertence ao backend Evolution Go, que normaliza o GIF antes do upload e constrói `VideoMessage` com MIME `video/mp4` e `GifPlayback=true`. O Worker não executa conversão nem recebe dependências de vídeo. O campo opcional `gifPlayback` é enviado em `data.attributes` para MP4s que devem reproduzir em loop. O schema MCP rejeita `true` para outros formatos. A ausência da opção preserva o envio comum de MP4.
+
+O backend limita entrada e saída a 8 MiB, cada dimensão a 2048 pixels, a animação a 300 quadros e 30 segundos e o total a 32 milhões de pixels decodificados. O prazo de conversão é 20 segundos, com duas conversões simultâneas. São limites de recursos locais, independentes do limite de entrada configurável no Worker e do prazo de 60 segundos de `/send/media`. Falhas não autorizam repetição automática de escrita.
+
+A resposta JSON:API descreve a mídia efetivamente enviada em `attributes.encodingFormat`, nos metadados de `body.medias` e em `meta.flags`. O bit 64 identifica reprodução de GIF. `normalizeSendResult` projeta somente MIME, nome, tamanho seguro e reprodução em loop para `SendMessageResult.media`; URLs, bytes e credenciais de upload não são copiados. O registro D1 reutiliza `media_json` para persistir esses campos, sem migration. Quando a conversão muda o MIME, o registro não reutiliza o tamanho nem o nome do arquivo de entrada como se descrevessem a saída.
+
+Mensagens retidas já preservam `meta.flags` como `Message.flags`. O encaminhamento envia `gifPlayback=true` somente para MP4 marcado pelo bit 64 ou pelos metadados locais de GIF. Se os metadados locais de um envio não têm URL, o resolvedor tenta `POST /message/status` antes de concluir que o arquivo não está retido. O token continua restrito à conexão resolvida pelo usuário. Vídeos comuns não recebem a opção de loop. A galeria e a leitura visual de imagens conservam seus contratos existentes.
+
+Os testes de aceitação MCP usam o handler HTTP, o catálogo e o cliente JSON:API reais com D1 e backend simulados. Os testes Go exercitam o handler, a conversão real e a construção da mensagem com o transporte WhatsApp substituído. O comando `npm run test:acceptance:gif` reúne as duas etapas e exige o checkout canônico do backend. Esse resultado valida o contrato e a mídia produzida, sem comprovar entrega ou reprodução em dispositivos reais.
+
 ## Timeouts
 
 Os prazos de espera em `src/lib/evolution.ts` são definidos pelo WaPilot: 8 segundos por padrão, até 3 segundos para avatar, 300 segundos para grupos e 60 segundos para envio de mídia. Eles cobrem o fetch e a leitura da resposta; não são prazos informados pelo Evolution Go nem um limite global do transporte MCP. Quando o temporizador cancela a chamada, `EvolutionApiError.timeoutSource` vale `wapilot`, a mensagem informa o prazo local e o resultado remoto desconhecido, e o MCP retorna `wapilot_timeout` com status 504.

@@ -46,7 +46,7 @@ export const TOOL_DESCRIPTIONS = {
   send_text: 'Send a new text message to an individual or group. Use only when the destination and final text are known. This creates an external side effect and must not be used to quote an existing message.',
   forward_message: 'Forward an existing retained message (text or media) to another individual or group, marked as forwarded. Requires the source conversationId and messageId from list_messages. This creates an external side effect.',
   reply_to_message: 'Send a text reply quoting an existing message. Use only when the user explicitly wants a reply tied to a known message ID and destination. This creates an external side effect.',
-  send_media: 'Send an image, document, audio, or video attachment to an individual or group. Use when the user requests media delivery and the content is available as base64. This creates an external side effect and is subject to the configured size limit.'
+  send_media: 'Send an image, animated GIF, document, audio, or video attachment to an individual or group. GIF files are converted to silent looping video automatically. Set gifPlayback for an MP4 that should play as a GIF. Use when the user requests media delivery and the content is available as base64. This creates an external side effect and is subject to the configured size limit.'
 } as const;
 
 // `z.unknown()` emits an empty JSON Schema (`{}`), which declares no validation
@@ -109,7 +109,10 @@ export const sendMediaInput = z.object({
   fileName: z.string().max(255).optional().describe('Optional file name shown to the recipient.'),
   dataBase64: z.string().min(1).describe('Base64-encoded attachment content without a data URL prefix.'),
   caption: z.string().max(2000).optional().describe('Optional caption sent with the attachment.'),
-  replyTo: z.string().max(200).optional().describe('Optional message identifier to quote while sending the attachment.')
+  replyTo: z.string().max(200).optional().describe('Optional message identifier to quote while sending the attachment.'),
+  gifPlayback: z.boolean().optional().describe('Play an MP4 attachment as a looping GIF. GIF input is converted automatically; true is valid only with image/gif or video/mp4.')
+}).refine(({ mimeType, gifPlayback }) => !gifPlayback || ['image/gif', 'video/mp4'].includes(mimeType.split(';')[0].trim().toLowerCase()), {
+  path: ['gifPlayback'], message: 'WaPilot GIF playback requires image/gif or video/mp4.',
 });
 
 export const TOOL_ANNOTATIONS = {
@@ -399,9 +402,8 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
     return result;
   }));
   server.registerTool('forward_message', { title: 'Forward a message', description: TOOL_DESCRIPTIONS.forward_message, inputSchema: forwardMessageInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, conversationId, messageId }, ctx) => send('forward_message', ctx, connectionId, async (c, id) => {
-    // 1. Messages wapilot itself sent (Evolution Go does not store API sends).
     let source: Message | undefined = await findOutboundMessage(env.DB, id, messageId).catch(() => undefined);
-    // 2. Walk retained history newest-first, up to 5 pages of 50.
+    if (source?.media && !source.media.url) source = await c.getMessage(messageId) ?? source;
     let cursor: string | undefined;
     for (let pageNo = 0; pageNo < 5 && !source; pageNo++) {
       const page = await c.listMessages(undefined, 50, conversationId, undefined, cursor);
@@ -409,14 +411,14 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       if (!page.hasMore || !page.nextCursor) break;
       cursor = page.nextCursor;
     }
-    // 3. Direct lookup by id through Evolution Go's message API.
     if (!source) source = await c.getMessage(messageId);
     if (!source) throw new EvolutionApiError(404, 'Source message not found in the retained history of that conversation');
     const result = await c.forwardMessage(to, source);
-    await recordSent(id, result, to, { encodingFormat: source.media?.url ? (source.media.mimeType ?? source.type ?? 'application/octet-stream') : 'text/plain', text: source.text, media: source.media });
+    const actualMedia = result.media ? { ...(result.media.mimeType === source.media?.mimeType ? source.media : {}), ...result.media } : source.media;
+    await recordSent(id, result, to, { encodingFormat: result.media?.mimeType ?? (source.media?.url ? (source.media.mimeType ?? source.type ?? 'application/octet-stream') : 'text/plain'), text: source.text, media: actualMedia });
     return result;
   }));
-  server.registerTool('send_media', { title: 'Send media', description: TOOL_DESCRIPTIONS.send_media, inputSchema: sendMediaInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, mimeType, fileName, dataBase64, caption, replyTo }, ctx) => {
+  server.registerTool('send_media', { title: 'Send media', description: TOOL_DESCRIPTIONS.send_media, inputSchema: sendMediaInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, mimeType, fileName, dataBase64, caption, replyTo, gifPlayback }, ctx) => {
     if (!canWrite(ctx)) return fail('send_media', new InsufficientScopeError());
     const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
     if (dataBase64.length > max * 1.4) return fail('send_media', new Error(`Media exceeds configured limit of ${max} bytes`));
@@ -424,8 +426,15 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
     try { const binary = atob(dataBase64.replace(/\s/g, '')); data = Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer; } catch { return fail('send_media', new Error('dataBase64 is invalid')); }
     if (data.byteLength > max) return fail('send_media', new Error(`Media exceeds configured limit of ${max} bytes`));
     return send('send_media', ctx, connectionId, async (c, id) => {
-      const result = await c.sendMedia(to, { mimeType, fileName, data, caption }, replyTo);
-      await recordSent(id, result, to, { encodingFormat: mimeType.toLowerCase(), text: caption, media: { mimeType: mimeType.toLowerCase(), fileName, size: data.byteLength } });
+      const result = await c.sendMedia(to, { mimeType, fileName, data, caption, gifPlayback }, replyTo);
+      const inputMime = mimeType.split(';')[0].trim().toLowerCase();
+      const actualMime = result.media?.mimeType ?? inputMime;
+      const storedMedia = result.media ? {
+        ...result.media,
+        ...(result.media.fileName ? {} : inputMime === actualMime && fileName ? { fileName } : {}),
+        ...(result.media.size === undefined && inputMime === actualMime ? { size: data.byteLength } : {}),
+      } : { mimeType: inputMime, fileName, size: data.byteLength };
+      await recordSent(id, result, to, { encodingFormat: actualMime, text: caption, media: storedMedia });
       return result;
     });
   });

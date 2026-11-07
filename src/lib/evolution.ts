@@ -9,6 +9,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 const AVATAR_REQUEST_TIMEOUT_MS = 3_000;
 const GROUP_REQUEST_TIMEOUT_MS = 300_000;
 const MEDIA_REQUEST_TIMEOUT_MS = 60_000;
+const GIF_PLAYBACK_FLAG = 1 << 6;
 
 type EvolutionRequestInit = RequestInit & { timeoutMs?: number };
 
@@ -364,6 +365,7 @@ function normalizeMessage(value: unknown): Message {
   }
   if (typeof meta.flags === 'number') {
     message.flags = meta.flags;
+    if (message.media && message.media.mimeType === 'video/mp4' && (meta.flags & GIF_PLAYBACK_FLAG) !== 0) message.media.gifPlayback = true;
   }
   const quoted = stringValue(meta.quotedId) ?? stringValue(meta.quoted);
   if (quoted) {
@@ -393,11 +395,28 @@ function normalizeSendResult(payload: unknown, recipientId?: string): SendMessag
   if (!item || item.type !== 'message' || !messageId) throw new EvolutionApiError(502, 'Evolution Go returned an invalid message resource', payload);
   const meta = resourceMeta(item);
   const recipient = relationshipResource(item, 'recipient')?.id ?? recipientId;
+  const attributes = resourceAttributes(item);
+  const body = asRecord(attributes.body);
+  const firstMedia = Array.isArray(body?.medias) ? asRecord(body.medias[0]) : asRecord(body?.media);
+  const mimeType = stringValue(attributes.encodingFormat)?.split(';')[0].trim().toLowerCase();
+  const gifPlayback = mimeType === 'video/mp4' && typeof meta.flags === 'number' && (meta.flags & GIF_PLAYBACK_FLAG) !== 0;
+  let media: SendMessageResult['media'];
+  if (mimeType && mimeType !== 'text/plain' && (firstMedia || gifPlayback)) {
+    const size = firstMedia?.fileSize;
+    const fileName = stringValue(firstMedia?.fileName) ?? stringValue(attributes.filename);
+    media = {
+      mimeType,
+      ...(fileName ? { fileName: fileName.slice(0, 255) } : {}),
+      ...(typeof size === 'number' && Number.isSafeInteger(size) && size >= 0 ? { size } : {}),
+      ...(gifPlayback ? { gifPlayback: true } : {}),
+    };
+  }
   return {
     accepted: true,
     messageId,
     conversationId: stringValue(meta.chat) ?? stringValue(recipient),
     jid: stringValue(meta.chat) ?? stringValue(recipient),
+    ...(media ? { media } : {}),
   };
 }
 
@@ -729,6 +748,7 @@ export class EvolutionGoClient {
       body,
       forwardingScore: 1,
       ...(source.media?.fileName ? { filename: source.media.fileName } : {}),
+      ...(encodingFormat === 'video/mp4' && (source.media?.gifPlayback || ((source.flags ?? 0) & GIF_PLAYBACK_FLAG) !== 0) ? { gifPlayback: true } : {}),
     };
     const payload = await this.request<unknown>(path, {
       method: 'POST',
@@ -738,7 +758,7 @@ export class EvolutionGoClient {
     return normalizeSendResult(payload, to);
   }
 
-  async sendMedia(to: string, media: { mimeType: string; fileName?: string; data: ArrayBuffer; caption?: string }, replyTo?: string): Promise<SendMessageResult> {
+  async sendMedia(to: string, media: { mimeType: string; fileName?: string; data: ArrayBuffer; caption?: string; gifPlayback?: boolean }, replyTo?: string): Promise<SendMessageResult> {
     const bytes = new Uint8Array(media.data);
     let binary = '';
     for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -748,7 +768,7 @@ export class EvolutionGoClient {
     if (replyTo) relationships.quoted = { data: { type: 'message', id: replyTo } };
     const payload = await this.request<unknown>('/send/media', {
       method: 'POST',
-      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: media.mimeType.toLowerCase(), body, ...(media.fileName ? { filename: media.fileName } : {}) }, relationships }),
+      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: media.mimeType.split(';')[0].trim().toLowerCase(), body, ...(media.fileName ? { filename: media.fileName } : {}), ...(media.gifPlayback !== undefined ? { gifPlayback: media.gifPlayback } : {}) }, relationships }),
       timeoutMs: MEDIA_REQUEST_TIMEOUT_MS,
     });
     return normalizeSendResult(payload, to);

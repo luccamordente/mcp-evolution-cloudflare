@@ -108,24 +108,18 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
     node.textContent = content;
     return node;
   };
-  const header = el('header', 'receipt-header');
-  header.appendChild(el('p', 'receipt-brand', 'WaPilot'));
-  header.appendChild(el('h1', '', 'Comprovante de envio'));
-  const status = el('p', 'receipt-status', 'Aguardando resultado do envio…');
-  status.setAttribute('role', 'status');
-  const context = el('dl', 'receipt-context');
   const bubble = el('article', 'message-bubble');
-  const reply = el('p', 'message-reply', 'Em resposta a uma mensagem');
-  reply.hidden = true;
+  bubble.setAttribute('aria-label', 'Comprovante de envio');
   const message = el('div', 'message-text');
   message.dir = 'auto';
-  bubble.appendChild(reply);
   bubble.appendChild(message);
+  const metadata = el('footer', 'message-meta');
+  metadata.setAttribute('role', 'status');
+  bubble.appendChild(metadata);
   bubble.hidden = true;
-  const note = el('p', 'receipt-note');
-  root.replaceChildren(header, status, context, bubble, note);
+  root.replaceChildren(bubble);
   root.dataset.state = 'waiting';
-  let input: Pick<SendReceipt, 'text' | 'to' | 'isReply'> = { text: '', to: '' };
+  let input: Pick<SendReceipt, 'text' | 'to'> = { text: '', to: '' };
   let lastReceipt: SendReceipt | undefined;
   let confirmed = false;
 
@@ -133,22 +127,29 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
     lastReceipt = receipt;
     confirmed = receipt.state === 'accepted' || receipt.state === 'failed';
     root.dataset.state = receipt.state;
-    status.textContent = SEND_RECEIPT_LABELS[receipt.state];
-    context.replaceChildren(el('dt', '', 'Destinatário'), el('dd', '', receipt.to || 'Não informado'), el('dt', '', 'Conexão'), el('dd', '', receipt.connectionName || 'Não resolvida'));
-    reply.hidden = receipt.isReply !== true;
     message.replaceChildren();
     appendFormatted(message, receipt.text);
     bubble.hidden = false;
-    note.textContent = receipt.state === 'accepted'
-      ? 'O aceite não comprova entrega nem leitura pelo destinatário.'
-      : receipt.state === 'failed' ? 'A tentativa foi interrompida antes de chamar o envio.'
-      : 'A mensagem pode ter sido enviada. Não repita automaticamente. O histórico parcial não comprova ausência de envio.';
+    metadata.replaceChildren();
+    if (receipt.state === 'accepted') {
+      const date = receipt.sentAt ? new Date(receipt.sentAt) : undefined;
+      if (date && Number.isFinite(date.getTime())) {
+        const time = el('time', '', new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(date));
+        time.dateTime = date.toISOString();
+        metadata.appendChild(time);
+      }
+      const check = el('span', 'message-check', '✓');
+      check.setAttribute('role', 'img');
+      check.setAttribute('aria-label', 'Envio aceito');
+      check.title = 'Envio aceito; não confirma entrega nem leitura.';
+      metadata.appendChild(check);
+    } else metadata.textContent = SEND_RECEIPT_LABELS[receipt.state];
   }
   function unknown() {
     if (!confirmed) render({ ...(lastReceipt ?? input), state: 'unknown' });
   }
   bridge.ontoolinput = ({ arguments: args }) => {
-    input = { text: typeof args?.text === 'string' ? args.text : '', to: typeof args?.to === 'string' ? args.to : '', isReply: typeof args?.messageId === 'string' && args.messageId.length > 0 };
+    input = { text: typeof args?.text === 'string' ? args.text : '', to: typeof args?.to === 'string' ? args.to : '' };
   };
   bridge.ontoolresult = result => {
     const receipt = record(result._meta?.sendReceipt);
@@ -156,7 +157,7 @@ export function mountSendReceipt(root: HTMLElement, bridge: SendReceiptBridge) {
       unknown();
       return;
     }
-    render({ text: receipt.text, to: receipt.to, connectionName: typeof receipt.connectionName === 'string' ? receipt.connectionName : undefined, state: receipt.state as SendReceipt['state'], isReply: receipt.isReply === true });
+    render({ text: receipt.text, to: receipt.to, state: receipt.state as SendReceipt['state'], sentAt: typeof receipt.sentAt === 'string' ? receipt.sentAt : undefined });
   };
   bridge.ontoolcancelled = unknown;
   return { showError: unknown };

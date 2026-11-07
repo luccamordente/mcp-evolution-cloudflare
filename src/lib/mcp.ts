@@ -322,7 +322,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       connectionId: id, messageId, text: await transcribeMessageAudio(c, env, messageId, ctx.mcpReq.signal),
     })));
   }
-  const receiptUri = 'ui://wapilot/send-receipt.html';
+  const receiptUri = 'ui://wapilot/send-receipt-v2.html';
   const receiptMeta = { ui: { csp: { resourceDomains: [], connectDomains: [], frameDomains: [], baseUriDomains: [] } } };
   const receiptCsp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
   registerAppResource(server, 'WaPilot comprovante de envio', receiptUri, { _meta: receiptMeta }, async () => ({
@@ -380,10 +380,11 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
   const send = async (operation: string, ctx: unknown, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string) => Promise<SendMessageResult>, presentation?: Pick<SendReceipt, 'to' | 'text' | 'isReply'>) => {
     let resolvedConnectionId: string | undefined;
     let connectionName: string | undefined;
+    let sentAt: string | undefined;
     let dispatched = false;
     const withReceipt = (result: CallToolResult, state: SendReceipt['state']) => {
       if (!presentation) return result;
-      const receipt: SendReceipt = { ...presentation, connectionId: resolvedConnectionId, connectionName, state };
+      const receipt: SendReceipt = { ...presentation, connectionId: resolvedConnectionId, connectionName, state, sentAt };
       const fallback = `WaPilot · ${SEND_RECEIPT_LABELS[state]}\nDestinatário: ${receipt.to}\nConexão: ${connectionName ?? 'Não resolvida'}\n${state === 'accepted' ? 'O aceite não comprova entrega nem leitura.' : state === 'unknown' ? 'A mensagem pode ter sido enviada. Não repita automaticamente.' : 'A tentativa foi interrompida antes de chamar o envio.'}\n\n${receipt.isReply ? 'Em resposta a uma mensagem\n' : ''}${receipt.text}`;
       return { ...result, content: [...result.content, { type: 'text' as const, text: fallback }], _meta: { sendReceipt: toJsonValue(receipt) } };
     };
@@ -394,6 +395,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       connectionName = connection.friendlyName;
       dispatched = true;
       const result = await fn(client, connection.id);
+      if (result.accepted) sentAt = new Date().toISOString();
       try {
         await audit(env.DB, { userId: ensured.id, connectionId: connection.id, operation, outcome: 'success' });
       } catch (error) {

@@ -66,7 +66,7 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
   const toMarkdown = vi.fn().mockResolvedValue({ format: 'markdown', data: '# Contrato\nPagamento até 15 de novembro.', name: 'document.pdf', mimeType: 'application/pdf', tokens: 12 });
   const env = { DB: db as unknown as D1Database, AI: { run, toMarkdown }, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', DOCUMENT_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }, trustedLocalScopes), { legacy: 'reject', responseMode: 'json' });
-  async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown }; _meta?: { sendReceipt?: { text: string; to: string; connectionName?: string; connectionId?: string; state: string } } }>(method: string, params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown }; _meta?: { sendReceipt?: { text: string; to: string; connectionName?: string; connectionId?: string; state: string; sentAt?: string } } }>(method: string, params: Record<string, unknown> = {}, signal?: AbortSignal) {
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
       signal,
@@ -92,7 +92,7 @@ describe('text send receipt MCP boundary', () => {
     const { result } = await rpc<{ tools: Array<{ name: string; _meta?: { ui: { resourceUri: string; visibility: string[] } }; annotations: { readOnlyHint: boolean } }> }>('tools/list');
     const tool = result.tools.find(item => item.name === name)!;
     expect(tool.annotations.readOnlyHint).toBe(false);
-    expect(tool._meta?.ui).toEqual({ resourceUri: 'ui://wapilot/send-receipt.html', visibility: ['model'] });
+    expect(tool._meta?.ui).toEqual({ resourceUri: 'ui://wapilot/send-receipt-v2.html', visibility: ['model'] });
     const { result: resource } = await rpc<{ contents: Array<{ text: string; mimeType: string; _meta: { ui: { csp: { resourceDomains: string[]; connectDomains: string[] } } } }> }>('resources/read', { uri: tool._meta!.ui.resourceUri });
     expect(resource.contents[0].mimeType).toBe('text/html;profile=mcp-app');
     expect(resource.contents[0].text).toContain('<!doctype html>');
@@ -106,10 +106,14 @@ describe('text send receipt MCP boundary', () => {
     const { rpc, fetcher, auditBindings } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-1', meta: { chat: '5511999999999' } } }));
     const text = '  Olá 👋\n*Negrito* _Itálico_ ~Tachado~\n```literal *código*```\n`literal _inline_`\n- Item\n* Outro item\n1. Primeiro\n> Citação\n<script>alert(1)</script>  ';
+    const startedAt = Date.now();
     const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: '5511999999999', text } });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data).toEqual({ accepted: true, messageId: 'sent-1', conversationId: '5511999999999', jid: '5511999999999' });
-    expect(result._meta?.sendReceipt).toEqual({ text, to: '5511999999999', connectionId, connectionName: 'Personal', state: 'accepted' });
+    expect(result._meta?.sendReceipt).toEqual({ text, to: '5511999999999', connectionId, connectionName: 'Personal', state: 'accepted', sentAt: expect.any(String) });
+    const sentAt = Date.parse(result._meta!.sendReceipt!.sentAt!);
+    expect(sentAt).toBeGreaterThanOrEqual(startedAt);
+    expect(sentAt).toBeLessThanOrEqual(Date.now());
     const dom = new JSDOM('<main></main>');
     const root = dom.window.document.querySelector('main')!;
     const bridge: SendReceiptBridge = { ontoolinput: undefined, ontoolresult: undefined, ontoolcancelled: undefined };
@@ -119,7 +123,8 @@ describe('text send receipt MCP boundary', () => {
     expect(root.querySelector('strong')?.textContent).toBe('Negrito');
     expect(root.querySelector('blockquote')?.textContent).toBe('Citação');
     expect(root.querySelector('script')).toBeNull();
-    expect(root.textContent).toContain('Personal');
+    expect(root.textContent).not.toContain('Personal');
+    expect(root.querySelector('time')?.dateTime).toBe(new Date(sentAt).toISOString());
     expect(result.content.map(item => item.text).join('\n')).toContain('Envio aceito');
     expect(result.content.map(item => item.text).join('\n')).toContain(text);
     expect(fetcher).toHaveBeenCalledTimes(1);

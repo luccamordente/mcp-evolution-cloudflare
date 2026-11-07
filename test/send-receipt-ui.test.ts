@@ -11,7 +11,7 @@ function setup() {
   return { root, bridge, callServerTool, view };
 }
 
-const result = (state = 'accepted', text = '  Olá 👋\n<img src=x onerror=alert(1)>  ') => ({ content: [], _meta: { sendReceipt: { state, text, to: '5511999999999', connectionName: 'Pessoal' } } });
+const result = (state = 'accepted', text = '  Olá 👋\n<img src=x onerror=alert(1)>  ') => ({ content: [], _meta: { sendReceipt: { state, text, to: '5511999999999', connectionName: 'Pessoal', sentAt: '2026-11-07T14:35:00.000Z' } } });
 
 describe('send receipt host bridge and presentation', () => {
   it('shows WhatsApp inline emphasis and keeps code literal without executing message HTML', () => {
@@ -68,18 +68,20 @@ describe('send receipt host bridge and presentation', () => {
     expect(message.textContent).toBe('*antes *literal* depois*\n- literal\n1. literal\n> literal');
   });
 
-  it('shows the attempt content and account as safe, exact text without offering actions or replaying on restoration', () => {
+  it('shows only the message bubble, original send time and one check without actions or replay on restoration', () => {
     const { root, bridge, callServerTool } = setup();
     const payload = result();
     bridge.ontoolresult!(payload);
-    expect(root.textContent).toContain('WaPilot');
-    expect(root.textContent).toContain('Comprovante de envio');
-    expect(root.textContent).toContain('Envio aceito');
-    expect(root.textContent).toContain('5511999999999');
-    expect(root.textContent).toContain('Pessoal');
+    expect(root.children).toHaveLength(1);
+    expect(root.firstElementChild?.className).toBe('message-bubble');
+    expect(root.querySelector('header, h1, dl, .message-reply, .receipt-note')).toBeNull();
+    expect(root.textContent).not.toMatch(/WaPilot|Comprovante|Envio aceito|5511999999999|Pessoal/);
+    expect(root.querySelector('time')?.dateTime).toBe(payload._meta.sendReceipt.sentAt);
+    expect(root.querySelector('time')?.textContent).toMatch(/^\d{2}:\d{2}$/);
+    expect(root.querySelector('.message-check')?.textContent).toBe('✓');
+    expect(root.querySelector('.message-check')?.getAttribute('aria-label')).toBe('Envio aceito');
     expect(root.querySelector('.message-text')!.textContent).toBe(payload._meta.sendReceipt.text);
     expect(root.querySelector('img, script, iframe, button, a, [onerror]')).toBeNull();
-    expect(root.textContent).toContain('não comprova entrega nem leitura');
     const restored = setup();
     restored.bridge.ontoolresult!(payload);
     bridge.ontoolresult!(payload);
@@ -87,18 +89,17 @@ describe('send receipt host bridge and presentation', () => {
     expect(callServerTool).not.toHaveBeenCalled();
     expect(restored.callServerTool).not.toHaveBeenCalled();
   });
-  it('marks a reply separately from its new text and keeps new-message receipts independent', () => {
+  it('keeps only new text in reply bubbles and independent new-message receipts', () => {
     const reply = setup();
     const fresh = setup();
     const text = '> Uma citação dentro da resposta\nTexto novo 👋';
     const payload = { ...result('accepted', text), _meta: { sendReceipt: { ...result('accepted', text)._meta.sendReceipt, isReply: true } } };
     reply.bridge.ontoolresult!(payload);
     fresh.bridge.ontoolresult!(result('accepted', 'Mensagem nova'));
-    expect(reply.root.querySelector('.message-reply')!.textContent).toBe('Em resposta a uma mensagem');
+    expect(reply.root.querySelector('.message-reply')).toBeNull();
     expect(reply.root.querySelector('.message-text')!.textContent).toBe('Uma citação dentro da resposta\nTexto novo 👋');
     expect(reply.root.querySelector('blockquote')?.textContent).toBe('Uma citação dentro da resposta');
-    expect(reply.root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(false);
-    expect(fresh.root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(true);
+    expect(fresh.root.querySelector('.message-reply')).toBeNull();
     const restored = setup();
     restored.bridge.ontoolresult!(payload);
     expect(restored.root.textContent).toBe(reply.root.textContent);
@@ -109,7 +110,7 @@ describe('send receipt host bridge and presentation', () => {
     interrupted.bridge.ontoolinput!({ arguments: { to: 'destino', text: 'Resposta interrompida', messageId: 'original-id' } });
     interrupted.bridge.ontoolcancelled!({ reason: 'private-cancellation' });
     expect(interrupted.root.dataset.state).toBe('unknown');
-    expect(interrupted.root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(false);
+    expect(interrupted.root.querySelector('.message-check, time')).toBeNull();
     expect(interrupted.root.querySelector('.message-text')!.textContent).toBe('Resposta interrompida');
     expect(interrupted.callServerTool).not.toHaveBeenCalled();
   });
@@ -118,6 +119,7 @@ describe('send receipt host bridge and presentation', () => {
     bridge.ontoolresult!(result(state));
     expect(root.dataset.state).toBe(state);
     expect(root.querySelector('[role="status"]')!.textContent).toBe(label);
+    expect(root.querySelector('.message-check, time')).toBeNull();
     expect(root.querySelector('button, input, textarea')).toBeNull();
     expect(callServerTool).not.toHaveBeenCalled();
   });
@@ -134,7 +136,8 @@ describe('send receipt host bridge and presentation', () => {
     bridge.ontoolcancelled!({ reason: 'private-host-error' });
     view.showError();
     expect(root.dataset.state).toBe('accepted');
-    expect(root.textContent).toContain('Envio aceito');
+    expect(root.querySelector('.message-check')?.getAttribute('aria-label')).toBe('Envio aceito');
+    expect(root.querySelector('time')?.dateTime).toBe(result()._meta.sendReceipt.sentAt);
   });
 
   it('preserves a restored unknown receipt on cancellation and bridge failure without replaying it', () => {
@@ -147,7 +150,7 @@ describe('send receipt host bridge and presentation', () => {
     view.showError();
     expect(root.textContent).toBe(restored);
     expect(root.dataset.state).toBe('unknown');
-    expect(root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(false);
+    expect(root.querySelector('.message-check, time')).toBeNull();
     expect(callServerTool).not.toHaveBeenCalled();
   });
 
@@ -160,6 +163,14 @@ describe('send receipt host bridge and presentation', () => {
     expect(second.root.dataset.state).toBe('unknown');
     expect(second.root.textContent).not.toMatch(/Primeira|private-result/);
     expect(first.root.textContent).not.toContain('Segunda');
+  });
+
+  it.each([undefined, 'invalid-date'])('never invents a send time for a receipt without a valid timestamp: %s', sentAt => {
+    const { root, bridge } = setup();
+    const payload = result();
+    bridge.ontoolresult!({ ...payload, _meta: { sendReceipt: { ...payload._meta.sendReceipt, sentAt } } });
+    expect(root.querySelector('time')).toBeNull();
+    expect(root.querySelector('.message-check')?.textContent).toBe('✓');
   });
 
   it('keeps the entire formatted message at the 10,000 character limit', () => {

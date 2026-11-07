@@ -69,7 +69,7 @@ def shape(asset, x, y, height, color):
     return f'<g fill="{color}" transform="translate({x:.4f} {y:.4f}) scale({scale:.8f})">{asset["body"]}</g>'
 
 
-def layout(kind, ic, wc):
+def layout(kind, ic, wc, name):
     if kind == 'vertical':
         ih, wh, gap, pad = 240, 64, 28, 32
         iw, ww = icon['width'] * ih / icon['height'], word['width'] * wh / word['height']
@@ -81,9 +81,7 @@ def layout(kind, ic, wc):
         width, height = pad * 2 + iw + gap + ww, ih + pad * 2
         body = shape(icon, pad, pad, ih, ic) + shape(word, pad+iw+gap, (height-wh)/2, wh, wc)
     else:
-        # Icon-only marks get a little more breathing room while keeping the
-        # artwork itself at the same size as the lockups.
-        ih, pad = 240, 32
+        ih, pad = 240, 64 if name == 'negativo' else 32
         iw = icon['width'] * ih / icon['height']
         width = height = max(iw, ih) + pad * 2
         body = shape(icon, (width-iw)/2, (height-ih)/2, ih, ic)
@@ -110,11 +108,17 @@ for row, (name, ic, wc, bg, label) in enumerate(variants):
     cellx, celly = (row % 2) * 640, (row // 2) * 590
     preview.append(f'<rect x="{cellx}" y="{celly}" width="640" height="590" fill="{bg or "#FFFFFF"}"/>')
     for kind in ('vertical', 'inline', 'icone'):
-        width, height, body = layout(kind, ic, wc)
+        width, height, body = layout(kind, ic, wc, name)
         svg = ROOT / 'svg' / f'wapilot-{name}-{kind}.svg'
         svg.write_text(document(width, height, body, f'WaPilot — {name}, {kind}', bg))
         # Full-size PNG companions rendered from the actual vectors.
         subprocess.run(['rsvg-convert', '-w', '1600', '-o', str(ROOT/'png'/f'{svg.stem}.png'), str(svg)], check=True)
+        if name == 'negativo' and kind == 'icone':
+            # Check the actual silhouette, including the pointer, inside the padded circle.
+            image = Image.open(ROOT/'png'/f'{svg.stem}.png').convert('RGB')
+            size = image.width
+            assert all((x + .5 - size/2)**2 + (y + .5 - size/2)**2 <= (size * .45)**2
+                       for y in range(size) for x in range(size) if image.getpixel((x, y))[0] > 128)
         root = ET.parse(svg).getroot()
         assert not any(root.iter(NS+'text'))
         assert not any(root.iter(NS+'image'))

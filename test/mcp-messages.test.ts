@@ -1,3 +1,5 @@
+import { JSDOM } from 'jsdom';
+import { mountSendReceipt, type SendReceiptBridge } from '../ui/send-receipt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
@@ -19,7 +21,7 @@ const retainedPdf = (url = 'https://storage.example.test/document.pdf', mime = '
   attributes: { encodingFormat: mime, body: { media: { url } } },
 });
 
-async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly string[]) {
+async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly string[], options: { scopes?: string[]; auditFails?: boolean; recordFails?: boolean } = {}) {
   const auditBindings: unknown[][] = [];
   const connection: ConnectionRecord = {
     id: connectionId, userId: 'db-user-a', friendlyName: 'Personal', instanceId: 'instance-a',
@@ -46,7 +48,14 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
             async all() {
               return { results: sql.includes('FROM whatsapp_connections WHERE user_id = ?1 AND is_default = 1') && values[0] === connection.userId ? Array.from({ length: defaultCount }, () => connection) : [] };
             },
-            async run() { if (sql.includes('audit_log')) auditBindings.push(values); return { meta: { changes: 1 } }; },
+            async run() {
+              if (sql.includes('audit_log')) {
+                auditBindings.push(values);
+                if (options.auditFails) throw new Error('private-audit-failure');
+              }
+              if (sql.includes('outbound_messages') && options.recordFails) throw new Error('private-record-failure');
+              return { meta: { changes: 1 } };
+            },
           };
         },
       };
@@ -57,17 +66,17 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
   const toMarkdown = vi.fn().mockResolvedValue({ format: 'markdown', data: '# Contrato\nPagamento até 15 de novembro.', name: 'document.pdf', mimeType: 'application/pdf', tokens: 12 });
   const env = { DB: db as unknown as D1Database, AI: { run, toMarkdown }, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', DOCUMENT_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }, trustedLocalScopes), { legacy: 'reject', responseMode: 'json' });
-  async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown } }>(method: string, params: Record<string, unknown> = {}, signal?: AbortSignal) {
+  async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown }; _meta?: { sendReceipt?: { text: string; to: string; connectionName?: string; connectionId?: string; state: string } } }>(method: string, params: Record<string, unknown> = {}, signal?: AbortSignal) {
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
       signal,
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(method === 'tools/call' ? { 'Mcp-Name': String(params.name) } : {}) },
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(method === 'tools/call' ? { 'Mcp-Name': String(params.name) } : method === 'resources/read' ? { 'Mcp-Name': String(params.uri) } : {}) },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: {
         [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
         [CLIENT_INFO_META_KEY]: { name: 'message-tests', version: '1.0.0' },
         [CLIENT_CAPABILITIES_META_KEY]: {},
       } } }),
-    }));
+    }), { authInfo: { token: 'test-token', clientId: 'test-client', scopes: options.scopes ?? ['mcp:read', 'mcp:write'] } });
     const body = await response.text();
     return { status: response.status, ...(body ? JSON.parse(body) : {}) } as { status: number; result: T };
   }
@@ -75,6 +84,108 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
 }
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+
+describe('send_text receipt MCP boundary', () => {
+  it('discovers a static, read-only presentation without credentials or network access', async () => {
+    const { rpc, fetcher } = await messageTool();
+    const { result } = await rpc<{ tools: Array<{ name: string; _meta?: { ui: { resourceUri: string; visibility: string[] } }; annotations: { readOnlyHint: boolean } }> }>('tools/list');
+    const tool = result.tools.find(item => item.name === 'send_text')!;
+    expect(tool.annotations.readOnlyHint).toBe(false);
+    expect(tool._meta?.ui).toEqual({ resourceUri: 'ui://wapilot/send-receipt.html', visibility: ['model'] });
+    const { result: resource } = await rpc<{ contents: Array<{ text: string; mimeType: string; _meta: { ui: { csp: { resourceDomains: string[]; connectDomains: string[] } } } }> }>('resources/read', { uri: tool._meta!.ui.resourceUri });
+    expect(resource.contents[0].mimeType).toBe('text/html;profile=mcp-app');
+    expect(resource.contents[0].text).toContain('<!doctype html>');
+    expect(resource.contents[0].text).toContain('WaPilot');
+    expect(resource.contents[0].text).toContain("connect-src 'none'");
+    expect(resource.contents[0].text).not.toMatch(/instance-secret|global-secret|db-user-a/);
+    expect(resource.contents[0]._meta.ui.csp).toMatchObject({ resourceDomains: [], connectDomains: [] });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('returns an independent accepted receipt, exact sent text and useful fallback without changing structured send fields', async () => {
+    const { rpc, fetcher, auditBindings } = await messageTool();
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-1', meta: { chat: '5511999999999' } } }));
+    const text = '  Olá 👋\n*Literal por enquanto* <script>alert(1)</script>  ';
+    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: '5511999999999', text } });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toEqual({ accepted: true, messageId: 'sent-1', conversationId: '5511999999999', jid: '5511999999999' });
+    expect(result._meta?.sendReceipt).toEqual({ text, to: '5511999999999', connectionId, connectionName: 'Personal', state: 'accepted' });
+    const dom = new JSDOM('<main></main>');
+    const root = dom.window.document.querySelector('main')!;
+    const bridge: SendReceiptBridge = { ontoolinput: undefined, ontoolresult: undefined, ontoolcancelled: undefined };
+    mountSendReceipt(root, bridge);
+    bridge.ontoolresult!({ ...result, content: [] });
+    expect(root.querySelector('.message-text')!.textContent).toBe(text);
+    expect(root.querySelector('script')).toBeNull();
+    expect(root.textContent).toContain('Personal');
+    expect(result.content.map(item => item.text).join('\n')).toContain('Envio aceito');
+    expect(result.content.map(item => item.text).join('\n')).toContain(text);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).data.attributes.body.text).toBe(text);
+    expect(JSON.stringify(auditBindings)).not.toMatch(/Literal|script|instance-secret/);
+    const second = await rpc('tools/call', { name: 'send_text', arguments: { to: 'other-chat', text: 'Outro texto', connectionId: workConnectionId } });
+    expect(second.result._meta?.sendReceipt).toMatchObject({ text: 'Outro texto', to: 'other-chat', connectionId: workConnectionId });
+    expect(result._meta?.sendReceipt?.text).toBe(text);
+    expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('apikey')).toBe('work-instance-secret');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    { defaultCount: 0, code: 'no_default_connection' },
+    { defaultCount: 2, code: 'multiple_default_connections' },
+    { args: { connectionId: foreignConnectionId }, code: 'connection_not_found' },
+    { scopes: ['mcp:read'], code: 'insufficient_scope' },
+  ])('confirms rejection before any write while preserving authorization error codes: %j', async ({ defaultCount, args, scopes, code }) => {
+    const { rpc, fetcher } = await messageTool(defaultCount ?? 1, undefined, { scopes });
+    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Não enviar', ...args } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code, retryable: false } } }, _meta: { sendReceipt: { state: 'failed', text: 'Não enviar', to: 'destino' } } });
+    expect(result._meta?.sendReceipt?.connectionName).toBeUndefined();
+    expect(result.content.map(item => item.text).join('\n')).toContain('Falha confirmada');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([['http-error', 503], ['timeout-response', 504], ['invalid-success', 200], ['unreachable', 0]])('leaves an uncertain %s unknown without retry, provider details or false delivery claims', async (kind, status) => {
+    const { rpc, fetcher, auditBindings } = await messageTool();
+    fetcher.mockImplementation(async () => {
+      if (!status) throw new Error('private-network-error');
+      return Response.json(kind === 'invalid-success' ? { jsonapi: { version: '1.1' }, data: {} } : { jsonapi: { version: '1.1' }, errors: [{ detail: 'private-provider-body https://private.example' }] }, { status: Number(status) });
+    });
+    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Meu texto' } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { retryable: false } } }, _meta: { sendReceipt: { state: 'unknown', connectionName: 'Personal' } } });
+    expect(result.content.map(item => item.text).join('\n')).toContain('Não foi possível confirmar o envio');
+    expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private-|Evolution|instance-secret|global-secret/);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a local timeout unknown and never repeats the write', async () => {
+    vi.useFakeTimers();
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockImplementation(async (_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('private-abort')), { once: true });
+    }));
+    const pending = rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Talvez enviada' } });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(8001);
+    const { result } = await pending;
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', retryable: false } } }, _meta: { sendReceipt: { state: 'unknown' } } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{ auditFails: true }, { recordFails: true }])('preserves observed acceptance despite later persistence failure: %j', async options => {
+    const { rpc, fetcher, auditBindings } = await messageTool(1, undefined, options);
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-before-failure' } }));
+    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Conteúdo privado' } });
+    expect(result.isError).not.toBe(true);
+    expect(result).toMatchObject({ structuredContent: { data: { accepted: true, messageId: 'sent-before-failure' } }, _meta: { sendReceipt: { state: 'accepted' } } });
+    expect(JSON.stringify(auditBindings)).not.toMatch(/private-|Conteúdo privado|instance-secret/);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps trusted local write permissions separate from client arguments', async () => {
+    const { rpc, fetcher } = await messageTool(1, ['mcp:read'], { scopes: ['mcp:write'] });
+    expect((await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Não enviar', scopes: ['mcp:write'] } })).result).toMatchObject({ isError: true, _meta: { sendReceipt: { state: 'failed' } } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
 
 describe('read_message_document HTTP MCP output', () => {
   it('rejects a foreign connection before downloading or converting the document', async () => {

@@ -33,6 +33,31 @@ describe('send receipt host bridge and presentation', () => {
     expect(callServerTool).not.toHaveBeenCalled();
     expect(restored.callServerTool).not.toHaveBeenCalled();
   });
+  it('marks a reply separately from its new text and keeps new-message receipts independent', () => {
+    const reply = setup();
+    const fresh = setup();
+    const text = '> Uma citação dentro da resposta\nTexto novo 👋';
+    const payload = { ...result('accepted', text), _meta: { sendReceipt: { ...result('accepted', text)._meta.sendReceipt, isReply: true } } };
+    reply.bridge.ontoolresult!(payload);
+    fresh.bridge.ontoolresult!(result('accepted', 'Mensagem nova'));
+    expect(reply.root.querySelector('.message-reply')!.textContent).toBe('Em resposta a uma mensagem');
+    expect(reply.root.querySelector('.message-text')!.textContent).toBe(text);
+    expect(reply.root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(false);
+    expect(fresh.root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(true);
+    const restored = setup();
+    restored.bridge.ontoolresult!(payload);
+    expect(restored.root.textContent).toBe(reply.root.textContent);
+    expect(reply.callServerTool).not.toHaveBeenCalled();
+    expect(restored.callServerTool).not.toHaveBeenCalled();
+    expect(fresh.callServerTool).not.toHaveBeenCalled();
+    const interrupted = setup();
+    interrupted.bridge.ontoolinput!({ arguments: { to: 'destino', text: 'Resposta interrompida', messageId: 'original-id' } });
+    interrupted.bridge.ontoolcancelled!({ reason: 'private-cancellation' });
+    expect(interrupted.root.dataset.state).toBe('unknown');
+    expect(interrupted.root.querySelector('.message-reply')!.hasAttribute('hidden')).toBe(false);
+    expect(interrupted.root.querySelector('.message-text')!.textContent).toBe('Resposta interrompida');
+    expect(interrupted.callServerTool).not.toHaveBeenCalled();
+  });
   it.each([['failed', 'Falha confirmada'], ['unknown', 'Não foi possível confirmar o envio']])('distinguishes %s by text without suggesting delivery, retry or editing', (state, label) => {
     const { root, bridge, callServerTool } = setup();
     bridge.ontoolresult!(result(state));

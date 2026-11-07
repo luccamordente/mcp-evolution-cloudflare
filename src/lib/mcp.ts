@@ -377,14 +377,14 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
     }
   };
 
-  const send = async (operation: string, ctx: unknown, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string) => Promise<SendMessageResult>, presentation?: Pick<SendReceipt, 'to' | 'text'>) => {
+  const send = async (operation: string, ctx: unknown, connectionId: string | undefined, fn: (client: EvolutionGoClient, connectionId: string) => Promise<SendMessageResult>, presentation?: Pick<SendReceipt, 'to' | 'text' | 'isReply'>) => {
     let resolvedConnectionId: string | undefined;
     let connectionName: string | undefined;
     let dispatched = false;
     const withReceipt = (result: CallToolResult, state: SendReceipt['state']) => {
       if (!presentation) return result;
       const receipt: SendReceipt = { ...presentation, connectionId: resolvedConnectionId, connectionName, state };
-      const fallback = `WaPilot · ${SEND_RECEIPT_LABELS[state]}\nDestinatário: ${receipt.to}\nConexão: ${connectionName ?? 'Não resolvida'}\n${state === 'accepted' ? 'O aceite não comprova entrega nem leitura.' : state === 'unknown' ? 'A mensagem pode ter sido enviada. Não repita automaticamente.' : 'A tentativa foi interrompida antes de chamar o envio.'}\n\n${receipt.text}`;
+      const fallback = `WaPilot · ${SEND_RECEIPT_LABELS[state]}\nDestinatário: ${receipt.to}\nConexão: ${connectionName ?? 'Não resolvida'}\n${state === 'accepted' ? 'O aceite não comprova entrega nem leitura.' : state === 'unknown' ? 'A mensagem pode ter sido enviada. Não repita automaticamente.' : 'A tentativa foi interrompida antes de chamar o envio.'}\n\n${receipt.isReply ? 'Em resposta a uma mensagem\n' : ''}${receipt.text}`;
       return { ...result, content: [...result.content, { type: 'text' as const, text: fallback }], _meta: { sendReceipt: toJsonValue(receipt) } };
     };
     try {
@@ -421,11 +421,11 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
     await recordSent(id, result, to, { encodingFormat: 'text/plain', text });
     return result;
   }, { to, text }));
-  server.registerTool('reply_to_message', { title: 'Reply to a message', description: TOOL_DESCRIPTIONS.reply_to_message, inputSchema: replyToMessageInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, text, messageId, participant }, ctx) => send('reply_to_message', ctx, connectionId, async (c, id) => {
+  registerAppTool(server, 'reply_to_message', { _meta: { ui: { resourceUri: receiptUri, visibility: ['model'] } }, title: 'Reply to a message', description: TOOL_DESCRIPTIONS.reply_to_message, inputSchema: replyToMessageInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, text, messageId, participant }, ctx) => send('reply_to_message', ctx, connectionId, async (c, id) => {
     const result = await c.sendText(to, text, messageId, participant);
     await recordSent(id, result, to, { encodingFormat: 'text/plain', text });
     return result;
-  }));
+  }, { to, text, isReply: true }));
   server.registerTool('forward_message', { title: 'Forward a message', description: TOOL_DESCRIPTIONS.forward_message, inputSchema: forwardMessageInput, annotations: sendAnnotations, outputSchema: dataOutput }, async ({ connectionId, to, conversationId, messageId }, ctx) => send('forward_message', ctx, connectionId, async (c, id) => {
     // 1. Messages wapilot itself sent (Evolution Go does not store API sends).
     let source: Message | undefined = await findOutboundMessage(env.DB, id, messageId).catch(() => undefined);

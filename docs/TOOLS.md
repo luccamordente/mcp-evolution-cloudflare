@@ -156,7 +156,9 @@ O botão **Atualizar** consulta novamente pelo host autorizado e mantém o UUID 
 
 ## Comprovante de envio de texto
 
-`send_text` mantém os argumentos, o limite de 10.000 caracteres, a autorização de escrita e a resolução da conexão explícita/padrão. Cada chamada representa uma tentativa independente. Depois da tentativa, um host MCP Apps pode exibir `ui://wapilot/send-receipt.html`: uma bolha somente de leitura com o conteúdo integral, o destinatário disponível e o nome da conexão resolvida no servidor. Não há confirmação adicional antes do envio, busca de nomes de contatos, ferramenta de reenvio ou consultas de histórico para construir o comprovante.
+`send_text` e `reply_to_message` mantêm os argumentos, o limite de 10.000 caracteres, a autorização de escrita e a resolução da conexão explícita/padrão. Cada chamada representa uma tentativa independente. Depois da tentativa, um host MCP Apps pode exibir `ui://wapilot/send-receipt.html`: uma bolha somente de leitura com o conteúdo integral, o destinatário disponível e o nome da conexão resolvida no servidor. Não há confirmação adicional antes do envio, busca de nomes de contatos, ferramenta de reenvio ou consultas de histórico para construir o comprovante.
+
+As respostas com `reply_to_message` reutilizam o mesmo comprovante e acrescentam “Em resposta a uma mensagem” no componente e no fallback. A referência citada e o participante opcional seguem no envio, mas o comprovante mostra somente o novo texto: não consulta nem inventa conteúdo ou autoria da mensagem original. O marcador de resposta é separado de uma citação de bloco escrita no próprio texto.
 
 O resultado distingue três observações:
 
@@ -166,7 +168,7 @@ O resultado distingue três observações:
 
 Nenhuma escrita tem retry automático. Um resultado desconhecido pode corresponder a uma mensagem enviada; a ausência no histórico parcial não comprova ausência de envio. Os erros preservam os campos estruturados anteriores, incluindo código e status, mas usam mensagem de produto, orientação segura e `retryable: false`. A auditoria do comprovante registra somente código/status, sem texto da mensagem, corpo do serviço ou credenciais. Se o próprio armazenamento da auditoria falhar, o resultado observado do envio continua sendo retornado.
 
-Os campos de sucesso existentes em `structuredContent.data` permanecem intactos. Os dados exclusivos da apresentação estão em `_meta.sendReceipt`: `text`, `to`, `connectionId`, `connectionName` e `state` (`accepted`, `failed` ou `unknown`). Identidade/nome não resolvidos não são inventados. `content` preserva o bloco JSON existente e acrescenta fallback legível com resultado, destino, conexão e texto integral, útil também sem UI.
+Os campos de sucesso existentes em `structuredContent.data` permanecem intactos. Os dados exclusivos da apresentação estão em `_meta.sendReceipt`: `text`, `to`, `connectionId`, `connectionName`, `state` (`accepted`, `failed` ou `unknown`) e `isReply` nas respostas. Identidade/nome não resolvidos não são inventados. `content` preserva o bloco JSON existente e acrescenta fallback legível com resultado, destino, conexão e texto integral, útil também sem UI.
 
 O recurso HTML é estático, sem dados de usuário. A CSP não permite imagens, conexões de rede, frames ou recursos externos; fontes são incorporadas como na galeria. O componente recebe dados pela ponte autenticada do host e não chama ferramentas, inclusive ao montar, restaurar ou receber interrupções. HTML da mensagem é texto, sem execução ou carregamento de recursos. A bolha cresce com o conteúdo, preserva espaços, quebras e emojis, quebra URLs longas e não tem rolagem interna, truncamento ou recolhimento. Tema, fontes do host, áreas seguras e ajuste automático de altura seguem a integração da galeria.
 

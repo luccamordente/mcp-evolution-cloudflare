@@ -92,7 +92,7 @@ describe('text send receipt MCP boundary', () => {
     const { result } = await rpc<{ tools: Array<{ name: string; _meta?: { ui: { resourceUri: string; visibility: string[] } }; annotations: { readOnlyHint: boolean } }> }>('tools/list');
     const tool = result.tools.find(item => item.name === name)!;
     expect(tool.annotations.readOnlyHint).toBe(false);
-    expect(tool._meta?.ui).toEqual({ resourceUri: 'ui://wapilot/send-receipt-v2.html', visibility: ['model'] });
+    expect(tool._meta?.ui).toEqual({ resourceUri: 'ui://wapilot/send-receipt-v3.html', visibility: ['model'] });
     const { result: resource } = await rpc<{ contents: Array<{ text: string; mimeType: string; _meta: { ui: { csp: { resourceDomains: string[]; connectDomains: string[] } } } }> }>('resources/read', { uri: tool._meta!.ui.resourceUri });
     expect(resource.contents[0].mimeType).toBe('text/html;profile=mcp-app');
     expect(resource.contents[0].text).toContain('<!doctype html>');

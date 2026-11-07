@@ -322,7 +322,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       connectionId: id, messageId, text: await transcribeMessageAudio(c, env, messageId, ctx.mcpReq.signal),
     })));
   }
-  const receiptUri = 'ui://wapilot/send-receipt-v2.html';
+  const receiptUri = 'ui://wapilot/send-receipt-v3.html';
   const receiptMeta = { ui: { csp: { resourceDomains: [], connectDomains: [], frameDomains: [], baseUriDomains: [] } } };
   const receiptCsp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
   registerAppResource(server, 'WaPilot comprovante de envio', receiptUri, { _meta: receiptMeta }, async () => ({

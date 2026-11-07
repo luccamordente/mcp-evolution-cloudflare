@@ -4,7 +4,7 @@
   font-size: 1rem;
   line-height: 1.5;
   color: #fff;
-  background: transparent;
+  background: rgb(0 0 0 / 3%);
 }
 * { box-sizing: border-box; }
 body { margin: 0; }
@@ -15,7 +15,7 @@ body { margin: 0; }
   min-inline-size: 0;
   margin-inline-start: auto;
   padding: .5rem .75rem;
-  background: #0b7a3b;
+  background: #0f9f4d;
   border-radius: .75rem .75rem .2rem .75rem;
   overflow-wrap: anywhere;
 }

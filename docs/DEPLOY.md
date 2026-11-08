@@ -1,10 +1,42 @@
 # Deploy e configuração
 
-## Estado publicado
+## Container do sender
+
+O `wrangler.jsonc` prepara a imagem de `sender/Dockerfile` como `sender`, sob a política nativa `durable_object`, e associa `CallbackSender` ao binding interno `CALLBACK_SENDER`. O controlador escolhe `instance: "lite"` ao iniciar e todas as chamadas usam o objeto de nome fixo `shared`. Essa política não aceita `max_instances` na versão fixada do Wrangler; a escolha de uma única instância é mantida pelo código da aplicação, sem um teto financeiro prometido. O perfil `local` possui seu próprio binding e Container; o perfil `stdio` os exclui.
+
+Não é necessário cadastrar um novo segredo: o controlador deriva um token interno de `TOKEN_ENCRYPTION_KEY` e o passa ao Node como `CALLBACK_SENDER_TOKEN`, sem expor a chave original. Nenhum segredo é colocado na imagem. O processo Node trata SIGTERM e preserva chamadas em andamento durante o encerramento limitado; o controlador define um minuto de inatividade pela API nativa, sem manter um monitor permanente que prolongue a atividade. Não habilite interceptação HTTPS para esse sender, pois DNS, IP e identidade TLS devem permanecer sob o controle do Node.
+
+Validação local: `npm run check`, `npm --prefix sender test`, `npm --prefix sender run test:container`, `npm run test:sender-container` e `npx wrangler deploy --env '' --dry-run`. O dry-run constrói a imagem e o bundle sem publicar. A suíte de Container constrói uma imagem de fixture com CA temporária e usa DNS/TLS controlados; comprova bytes, endereço aprovado, hostname/SNI/certificado e ciclo de vida no Docker/workerd local. O wrapper de rede existe apenas na fixture e não integra a imagem publicada.
+
+O registro de publicação controlada abaixo descreve a infraestrutura remota criada com autorização específica. Antes de declarar conformidade completa em produção, homologue o caminho efetivo do Container na Cloudflare: inicialização e prontidão, uma única instância compartilhada, chamada ativa durante parada, inatividade e nova inicialização, bloqueios de rede, preservação de DNS/IP/TLS e corpo assinado. Ausência de uma instância rodando enquanto o serviço está ocioso é esperada; falha de inicialização não é aceite HTTP do callback e o trabalho deve permanecer sob o controle de D1/Queue.
+
+## Correção dos filtros de monitoramento em 8 de novembro de 2026 (UTC)
+
+Com autorização para publicação, o código `61bf98e` da PR #49 foi publicado na revisão `29d451b8-9251-4b8e-8c4d-7f9f3058c02a`, tag `pr49-61bf98e`. O deployment `688413e5-8685-4173-bf75-13889e69dfd2`, criado às 14:30:57 UTC, foi confirmado com 100% do tráfego. A correção permite selecionar assinaturas por telefone quando o webhook identifica a conversa por JID ou por seu alias individual explícito; grupos mantêm correspondência exata.
+
+Antes da publicação, os 32 fontes do projeto presentes no sourcemap da revisão ativa `c1c273e5-1130-4dac-aff3-d5e1eaa96ed3` foram comparados com a base publicada. A única diferença funcional da candidata era `src/lib/event-deliveries.ts`, preservando GIFs, PDFs e comprovantes. Passaram `npm run check` (39 arquivos, 562 testes) e o dry-run. A publicação foi feita em duas etapas com `wrangler versions upload` e `wrangler versions deploy`, preservando variáveis, segredos e bindings existentes. A aplicação do sender permaneceu na versão 1, com atualização registrada em 02:25:10 UTC; não houve rollout de instâncias do Container nem execução de migrations nesta publicação.
+
+O read-back confirmou `/healthz` e metadata OAuth com `200`, `/mcp` sem bearer com `401` e desafio OAuth, protocolo `2026-07-28` e conexão real online pelo plugin. Na leitura de 14:35 UTC, três notificações novas do monitoramento de grupo, recebidas após a publicação, estavam `accepted`/`http_2xx`, na primeira tentativa e com seus corpos removidos. O aceite HTTP isolado não comprova execução pelo host; posteriormente, o usuário confirmou que o acompanhamento estava funcionando no ChatGPT. Essa confirmação completa a validação do fluxo observado do grupo. Não houve confirmação separada de um monitoramento individual; os testes locais cobrem telefone, JID, aliases e isolamento. O histórico das conversas não foi consultado para essa validação.
+
+## Publicação controlada de MCP Events em 8 de novembro de 2026 (UTC)
+
+Com autorização para publicação e homologação sintética, o commit `4e61c66ed83c61dd64c2219d8d28ad3f8ecd0b9b` foi integrado e enviado ao `main`. A integração preservou comprovantes de envio, GIFs e PDFs da revisão então publicada; o checkout de release `41ec4642ea56a35b1ef3fbaae23e052f08d0c3d9` possui a mesma árvore Git. Passaram `npm run check` (39 arquivos, 553 testes) e o dry-run com construção da imagem. O deploy manual produziu a revisão `f8882fca-2638-4486-a806-2377a1d0957c`, confirmada com 100% do tráfego.
+
+A produção foi mantida na conta existente, após o upgrade informado pelo usuário. Foram aplicadas apenas as migrations aditivas `0006`–`0008`; o read-back confirmou `0001`–`0008`, mantendo `webhook_events` e `outbound_messages`. **A migration destrutiva `0009` não foi autorizada nem aplicada.** Ela permaneceu fora do diretório de migrations do checkout usado para a aplicação remota, preservada no Git. Não execute `migrations apply` indiscriminadamente no checkout completo.
+
+As filas `wapilot-events` e `wapilot-events-failed` foram criadas com retenção de 86.400 segundos, com consumidores principal/DLQ, binding `EVENT_DELIVERIES`, Cron `* * * * *`, binding `CALLBACK_SENDER` e aplicação Container `wapilot-callback-sender` sob política `durable_object`. D1, KV OAuth, binding AI, variáveis e os seis segredos existentes foram preservados. Publicações manuais e automáticas concorrentes foram pausadas por confirmação do usuário; a API Workers Builds retornou `403`, portanto a automação não foi verificada por API nem reativada nesta sessão.
+
+A homologação Cloudflare usou uma conexão temporária sem instância real, OAuth normal com consentimento e PKCE, webhook sintético e receptor HTTPS controlado. Passaram desafio assinado, entrega por Queue → Durable Object → Container, verificação dos bytes e assinatura Standard Webhooks, deduplicação, prévia Unicode com 2.000 caracteres, filtro de conversa, renovação e cancelamento. Também passaram bloqueios de IPv4/IPv6 privados, redirect sem seguimento, rejeição de certificado para hostname incompatível e prazo de resposta de aproximadamente dez segundos. A instância compartilhada foi observada parada por inatividade e reiniciou em nova verificação. Ciclos do Cron observados tiveram backlog, retries, falhas e atraso de limpeza iguais a zero. A revogação do grant temporário invalidou seu bearer, revogou as assinaturas e removeu seus segredos, preservando as demais autorizações.
+
+`/healthz` e a metadata OAuth responderam `200`; `/mcp` sem bearer respondeu `401` com o desafio esperado. O plugin WaPilot existente continuou listando conexões após a publicação. No cliente OpenAI, foi confirmada uma assinatura ativa para a conexão e conversa sintéticas, com callback em `connectors.api.openai.com`. Dois eventos distintos (prévia Unicode truncada e código curto exato) foram aceitos na primeira tentativa e tiveram seus corpos removidos. Após o processamento assíncrono, o usuário confirmou o recebimento no cliente e o read-back observou o cancelamento da assinatura pelo host, com remoção do segredo. Isso valida o ciclo sintético Cloudflare → OpenAI, sem atribuir a execução a uma variante específica. A conexão temporária foi então removida; a conexão padrão e as autorizações preexistentes foram preservadas. O grant OAuth, receptor HTTPS e túnel usados no teste controlado também foram encerrados.
+
+Não houve captura remota do IP conectado/SNI nem SIGTERM durante chamada ativa; as provas detalhadas desses casos continuam locais. Não foram testados `get_message` com mensagem real nem envio remoto com idempotência, e nenhum envio ou mensagem real foi usado nesta homologação. A migration `0009` continua pendente de autorização separada.
+
+## Leituras históricas de publicação
 
 - Worker: `mcp-evolution-cloudflare`
 - URLs: `https://app.wapilot.com.br`, `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
-- Revisão ativa conferida em 8 de novembro de 2026: `1717fbe5-779b-4327-8a58-7cae868f679c`, com 100% do tráfego.
+- Revisão conferida em 8 de novembro de 2026: `1717fbe5-779b-4327-8a58-7cae868f679c`, com 100% do tráfego.
 - D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`), migrations `0001_init`, `0002_webhook_events`, `0003_connection_defaults` e `0004_remove_connection_runtime_state` aplicadas remotamente. O read-back de 17 de outubro de 2026 confirmou a remoção de `status`/`connection_state` e preservou os dois registros de conexão, seus `instance_id`, flags padrão e timestamps.
 - KV OAuth: `3a5b420e14594ee4ae821b720a9bf74a`; preview `29bb2b67785b46bfa7c31d84bbbe9344`.
 
@@ -20,7 +52,7 @@ Um teste autorizado com GIF confirmou conversão real no container de produção
 
 ## Deploy automático
 
-O Worker está conectado ao repositório GitHub `luccamordente/mcp-evolution-cloudflare` pelo Workers Builds. Pushes em `main` executam `npm ci` e `npx wrangler deploy`, com `auto_build_enabled` ativo e sem previews.
+A configuração observada anteriormente conectava o Worker ao repositório GitHub `luccamordente/mcp-evolution-cloudflare` pelo Workers Builds. Naquela configuração, pushes em `main` executavam `npm ci` e `npx wrangler deploy`, com `auto_build_enabled` ativo e sem previews.
 
 O push do commit `371901d` gerou o build `1b2e77e1-8469-498d-826e-da7655778a88`, encerrado com sucesso. O endpoint `/healthz` publicado respondeu `200` depois do build.
 
@@ -36,15 +68,9 @@ Para entrar na interface, abra `https://app.wapilot.com.br/connections` ou `http
 
 Foram configurados `TOKEN_ENCRYPTION_KEY`, `CONSENT_SECRET`, `ACCESS_JWKS_URL`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE` e `EVOLUTION_GLOBAL_API_KEY` como Workers Secrets. `EVOLUTION_BASE_URL` está configurado como `https://zipt-zopt.neurau.com.br`. Uma chamada controlada sem token de instância respondeu `401 not authorized`, confirmando que o endpoint está acessível sem declarar uma conexão autenticada como sucesso.
 
-Para concluir a integração, configure:
+Revalide os segredos e bindings no ambiente antes de publicar. A transição de mensagens exige a ordem abaixo; aplicar todas as migrations enquanto o Worker antigo ainda grava nas tabelas legadas quebra o ingresso e os envios antigos. Publicação, segredos e migrations remotas precisam de autorização específica.
 
-```sh
-npx wrangler secret put EVOLUTION_GLOBAL_API_KEY # somente se o deployment usar chave administrativa
-npx wrangler d1 migrations apply mcp-evolution --remote
-npx wrangler deploy
-```
-
-Cadastre cada instância em `/connections` ou `POST /api/connections` com nome amigável, ID da instância, número opcional e token específico. A resposta de criação entrega uma única URL de webhook; não reutilize nem registre o segredo. Configure no Evolution Go os eventos `MESSAGE`, `SEND_MESSAGE`, `HISTORY_SYNC` e `GROUP` para essa URL.
+Cadastre cada instância em `/connections` ou `POST /api/connections` com nome amigável, ID da instância, número opcional e token específico. A resposta de criação entrega uma única URL de webhook; não reutilize nem registre o segredo. Para MCP Events, habilite o evento live `Message` no formato JSON:API aceito pelo contrato da instância. Histórico, envios próprios e eventos de protocolo não geram notificações; o endpoint não é um arquivo geral.
 
 ## Verificação
 
@@ -89,3 +115,48 @@ O build da UI deve preceder testes e empacotamento do Worker: `npm run build:gal
 Em 19 de outubro de 2026, uma leitura autenticada de mensagens retidas confirmou `https://storage.neurau.com.br` como origem das URLs de mídia, incluindo uma imagem. Essa origem está configurada em `vars.IMAGE_STORAGE_ORIGINS` no `wrangler.jsonc`; a configuração só passa a valer em produção após um deploy autorizado. Caminhos de arquivos, assinaturas e conteúdo das mensagens não foram registrados nesta documentação. Essa observação não garante retenção permanente nem disponibilidade de todos os arquivos.
 
 Após publicar alterações da ferramenta ou do recurso UI, atualize o catálogo do cliente e abra uma nova galeria. Confirme descoberta, leitura do recurso, exibição de imagens recebidas e enviadas já retidas, ampliação e retorno de foco. Teste separadamente cada host utilizado: o registro HTTP/OAuth do servidor não garante suporte à renderização de MCP Apps.
+
+## Assinaturas MCP Events
+
+As migrations `0007_event_subscriptions.sql` e `0008_event_deliveries.sql` criam assinaturas, marcadores de revogação, deduplicação e outbox de entregas. Reutilizam D1, OAuth KV, `TOKEN_ENCRYPTION_KEY` e `CALLBACK_SENDER`, sem novo segredo. Não aplicam migrations remotas nem publicam recursos. O código interrompe todas as gravações e leituras do arquivo geral/cache de envios. A migration `0009_drop_legacy_message_storage.sql` elimina as duas tabelas legadas sem copiar payloads; ela está preparada e testada localmente, sem aplicação remota nesta entrega.
+
+`test/mcp-events.test.ts` executa o Provider 1.2.3 real com KV e D1 locais no workerd, credenciais sintéticas criadas por APIs públicas e sender HTTP controlado. Confere discovery do SDK 2.3.1 sem atualização de dependências, autorização, desafio/assinatura, prazos, concorrência, rotação, cancelamento e revogação. O `2xx` da verificação comprova somente o desafio. O handler agendado já integra a limpeza e cada entrega revalida autorização; a publicação futura deve homologar o ciclo completo no cliente OpenAI com autorização específica; não confundir os testes locais com essa homologação.
+
+
+### Filas e retenção de MCP Events
+
+O HTTP configura `EVENT_DELIVERIES` como produtor de `wapilot-events`, consumidor nativo nessa mesma fila e DLQ `wapilot-events-failed`. A DLQ tem consumidor de drenagem, `max_retries: 0` e nenhuma outra DLQ. As duas filas contêm somente IDs; corpo, assinatura e callback ficam fora do broker. O Cron `* * * * *` limpa entregas/origens, assinaturas e operações de envio, depois recupera trabalhos pendentes. O perfil `local` usa filas com sufixo `-local`, D1/KV sintéticos explicitamente locais e produtor com `remote: false`. O perfil `stdio` declara filas e Cron vazios, sem Container, KV ou bindings remotos.
+
+Antes de qualquer publicação autorizada, criar ou atualizar **tanto a fila principal quanto a DLQ** com retenção de no máximo **86.400 segundos**. O schema instalado do Wrangler 4.150 não expõe retenção no `wrangler.jsonc`; a CLI oferece a opção `--message-retention-period-secs`. Exemplos somente para futura execução autorizada, não executados nesta implementação:
+
+```sh
+npx wrangler queues create wapilot-events --message-retention-period-secs 86400
+npx wrangler queues create wapilot-events-failed --message-retention-period-secs 86400
+# Para filas já existentes, usar queues update <nome> com a mesma opção.
+```
+
+Criar a DLQ explicitamente antes do deploy evita depender de criação automática com retenção padrão. Conferir as duas configurações no controle remoto após eventual criação; o dry-run não comprova existência nem retenção. [Comandos oficiais de Queues](https://developers.cloudflare.com/queues/reference/wrangler-commands/) e [configuração de DLQ](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/) descrevem essas operações. Esta etapa não executou `queues create/update`, deploy, migração remota ou mensagens reais.
+
+O D1 limita cada entrega a seis tentativas e mantém os intervalos de 1, 2, 4, 8 e 15 minutos e a hora original, inclusive após queda, restart, publicação repetida ou DLQ. São transitórios `408`, `429`, `5xx`, rede, inicialização e timeout; `410`, `413`, redirects, outros status permanentes e destinos/contratos bloqueados encerram o trabalho. O Cron recupera até 100 IDs devidos por minuto, priorizando publicação ausente/mais antiga. Uma publicação sem consumo pode ser repetida após um minuto; o consumidor usa posse condicional de 60 segundos para conter duplicatas. A DLQ apenas reconhece o ID e libera publicação pendente, sem envio direto ou reset de orçamento. Não reenvie jobs manualmente alterando estado, contadores ou prazos no D1. Corrija a dependência indisponível e deixe Cron/consumidor usar o estado existente; entregas terminais ou vencidas exigem novos eventos live, sem replay.
+
+Monitore os logs JSON `mcp_events_maintenance`: `backlog`, `retries` (reattempts nos registros retidos), `failures`, `publication_recoveries`, `publication_failures`, `lease_recoveries`, `attempt_limit_failures`, `cleanup_lag_ms` e `schedule_lag_ms`. Backlog crescente com falhas de publicação aponta a fila; leases recuperados repetidamente apontam interrupções/armazenamento; retries/falhas com fila saudável apontam autorização, sender ou callback. Atrasos de limpeza/agendamento acima da cadência de um minuto pedem investigação do Cron e D1. `mcp_events_ingress` conta descartes inválidos, não suportados e excessivos; `mcp_events_delivery`, `mcp_events_queue` e `mcp_events_dlq` contam transições, falhas de infraestrutura e drenagem. Os logs não contêm valores de mensagens, IDs, callbacks completos, segredos ou assinaturas. Esses sinais não consultam mensagens periodicamente.
+
+`test/event-recovery.test.ts` complementa `test/event-deliveries.test.ts` pelas entradas reais HTTP/Queue/agendamento no workerd, com D1 e Provider/KV locais reais. Cobre perda de publicação, backoff, restart, falha ao guardar aceite, concorrência/posse antiga, autorização, prazos exatos, DLQ e métricas sanitizadas. Um aceite externo seguido de falha local pode duplicar a notificação; `2xx` não comprova execução do agente. O transporte interno usa prazo absoluto validado também no Node, sem depender de propagação de cancelamento; testes Container cobrem prontidão lenta e DNS/TLS tardios. Essas provas locais não comprovam broker remoto, retenção das filas, egress da Cloudflare ou execução no cliente OpenAI.
+
+
+## Procedimento da transição de mensagens
+
+Publicação e exclusão de dados de produção exigem autorização específica; a publicação controlada acima não autorizou o DROP. Os registros de publicação são históricos; antes de uma nova etapa remota, confirme Worker, revisão com tráfego, automação de builds, migrations aplicadas, filas e retenção, segredos, bindings e versão do provedor. Suspenda publicações automáticas concorrentes durante a mudança autorizada.
+
+A ordem segura separa a expansão do schema da remoção:
+
+1. Prepare um checkout de release do commit revisado. Para a primeira aplicação de migrations, mantenha nesse checkout somente `0001`–`0008` em `migrations/`; deixe `0009` fora do diretório temporariamente, preservada no Git. Confira a lista pendente com `npx wrangler d1 migrations list mcp-evolution --remote`. Aplique o prefixo com `npx wrangler d1 migrations apply mcp-evolution --remote` somente após conferir essa lista. As tabelas antigas continuam disponíveis para a revisão anterior; não reescreva migrations já aplicadas.
+2. Crie ou confira ambas as filas com a retenção descrita acima e publique o bundle revisado com `npx wrangler deploy --env ''`. Esse código funciona com as tabelas legadas ainda presentes, sem acessá-las. Confirme 100% do tráfego na revisão nova, ausência de produtores antigos e saúde de MCP/UI/webhook, filas, Cron e sender. Não use divisão de tráfego com revisões antigas durante o DROP.
+3. Abra uma janela de manutenção para o corte destrutivo: pause ingresso de webhook no provedor e novas operações MCP, aguarde chamadas antigas em andamento terminarem e confirme que nenhum outro Worker ou consumidor usa as tabelas legadas. Se não puder confirmar a ausência de escritores antigos, adie o DROP. Recoloque `0009` no diretório do mesmo checkout, confira que é a única migration pendente e aplique-a. Não copie seus payloads para outra tabela, exportação ou cache. Confira por consultas sem conteúdo a ausência de `webhook_events`/`outbound_messages`, integridade de FKs e preservação de usuários, conexões, defaults, ciphertext, hashes de webhook, auditoria e registros operacionais válidos; OAuth continua no mesmo Provider/KV.
+4. Retome o ingresso e as operações, valide os endpoints de saúde e OAuth e execute o ciclo de homologação autorizado abaixo. Compare a configuração preservada por IDs e resultados seguros, sem expor tokens ou conteúdo. Observe backlog, falhas e atraso de limpeza por pelo menos um ciclo do Cron.
+
+Depois do DROP, rollback para código que consulta ou grava as tabelas antigas é incompatível. Prefira correção para frente ou uma revisão já compatível com o schema final. Restaurar código não restaura D1; não recrie histórico nem restaure payloads para contornar a remoção. Antes do DROP ainda é possível voltar ao código anterior, mas ele retomaria a retenção legada; mantenha a manutenção até decidir o próximo passo autorizado. Não publique os perfis de desenvolvimento `local`/`stdio`.
+
+Protocolo completo de homologação, respeitando a autorização de cada etapa e os resultados já registrados: com receptor controlado, comprove no Container real da Cloudflare resolução DNS, IP conectado, SNI/hostname/certificado, rejeição de redes privadas/redirects, bytes assinados, prazo absoluto e parada/retomada. Depois, no cliente OpenAI autenticado, verifique discovery, desafio, assinatura, evento sintético via webhook, callback e execução observada do agente. Testes de `get_message` com mensagem real e de uma ação com a mesma chave de idempotência exigem autorização para os dados e efeitos reais; defina destinatário e conteúdo finais antes de enviar. Confirme cancelamento via `events/unsubscribe`, revogação e limpeza. Logs e resultados devem permanecer redigidos. Um `2xx`, teste local ou dry-run não comprova execução do agente, e a instância compartilhada não é teto de custo.
+
+O contrato final mantém vigência de assinatura de até sete dias; corpo pendente por até uma hora desde o recebimento e remoção após aceite ou encerramento; IDs/resultados por 24 horas; metadados de assinaturas inativas até 24 horas após o fim; marcador mínimo de revogação por sete dias. Idempotência de envio guarda somente metadados por 24 horas. Consulte [ARCHITECTURE.md](ARCHITECTURE.md) para o detalhe e [TOOLS.md](TOOLS.md#assinaturas-mcp-events) para cancelamento, conteúdo não confiável e limites. Histórico integral depende exclusivamente da retenção do provedor, sem promessa de disponibilidade, replay ou entrega exatamente uma vez; aceite seguido de falha de armazenamento pode duplicar notificações.

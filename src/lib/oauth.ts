@@ -12,6 +12,7 @@ import { authenticateAccessRequest, AuthError } from './auth';
 import { callsWriteTool, createMcpServer, mcpBodyLimit, WRITE_SCOPE } from './mcp';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { logOAuthError } from './oauth-diagnostics';
+import { registerMcpEvents } from './mcp-events';
 import { WAPILOT_LOGO_SVG } from '../ui/wapilot-logo';
 
 const scopesSupported = ['mcp:read', 'mcp:write', 'offline_access'];
@@ -30,15 +31,16 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
         const props = (ctx as ExecutionContext & { props?: { user?: AuthenticatedUser } }).props;
         const user = props?.user;
         if (!user) return Response.json({ error: 'OAuth user context missing' }, { status: 500 });
-        const auth = (ctx as ExecutionContext & { auth?: { token: string; clientId?: string; scope: string[]; expiresAt?: number } }).auth;
+        const auth = (ctx as ExecutionContext & { auth?: OAuthResourceAuth }).auth;
         // Step-up: a send tool called with a read-only token gets a standard 403
         // insufficient_scope challenge naming mcp:write, so clients can re-authorize.
         if (auth && !auth.scope.includes(WRITE_SCOPE) && request.method === 'POST' && await callsWriteTool(request)) {
           return insufficientScope(auth as unknown as OAuthResourceAuth, ['mcp:read', WRITE_SCOPE], 'Sending WhatsApp messages requires the mcp:write scope.');
         }
         const server = await createMcpServer(env, user);
+        if (auth) registerMcpEvents(server, env, user, auth, getOAuthApi(oauthOptions(resourceBaseUrl), env));
         const handler = createMcpHandler(() => server, {
-          legacy: 'stateless',
+          legacy: 'reject',
           responseMode: 'json',
           maxRequestBodySize: mcpBodyLimit(env),
         });
@@ -67,7 +69,7 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
     resourceMetadata: {
       resource,
       authorization_servers: [resourceBaseUrl.replace(/\/$/, '')],
-      resource_name: 'Evolution Go WhatsApp MCP',
+      resource_name: 'WaPilot',
     },
     clientIdMetadataDocumentEnabled: true,
   };

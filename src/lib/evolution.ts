@@ -325,11 +325,12 @@ function normalizeMessage(value: unknown): Message {
   };
   if (typeof body.text === 'string') message.text = body.text;
   const media = asRecord(body.media);
-  if (media && typeof media.url === 'string') {
-    const fileName = stringValue(media.fileName) ?? stringValue(attributes.filename) ?? stringValue(body.filename);
+  const fileName = stringValue(media?.fileName) ?? stringValue(attributes.filename) ?? stringValue(body.filename);
+  const mimeType = stringValue(media?.encodingFormat);
+  if (typeof media?.url === 'string' || fileName || mimeType) {
     message.media = {
-      mimeType: stringValue(media.encodingFormat) ?? stringValue(attributes.encodingFormat),
-      url: media.url,
+      mimeType: mimeType ?? stringValue(attributes.encodingFormat),
+      url: stringValue(media?.url),
       ...(fileName ? { fileName } : {}),
     };
   }
@@ -354,10 +355,11 @@ function normalizeMessage(value: unknown): Message {
         longitude: typeof rec.longitude === 'number' ? rec.longitude : undefined,
       };
     });
-    if (!message.media && message.medias[0]?.url) {
+    if (!message.media?.url && message.medias[0]?.url) {
       const first = message.medias[0];
       message.media = {
-        mimeType: first.encodingFormat ?? stringValue(attributes.encodingFormat),
+        ...message.media,
+        mimeType: first.encodingFormat ?? message.media?.mimeType ?? stringValue(attributes.encodingFormat),
         url: first.url,
         ...(first.fileName ? { fileName: first.fileName } : {}),
       };
@@ -538,9 +540,8 @@ export class EvolutionGoClient {
         signal,
       });
       const item = documentData(payload);
-      if (resource(item)?.type !== 'message') return undefined;
-      const message = normalizeMessage(item);
-      return message.id ? message : { ...message, id: messageId };
+      if (resource(item)?.type !== 'message' || resource(item)?.id !== messageId) return undefined;
+      return normalizeMessage(item);
     } catch (error) {
       if (error instanceof EvolutionApiError && (error.status === 404 || error.status === 400)) return undefined;
       throw error;
@@ -731,7 +732,7 @@ export class EvolutionGoClient {
     let path = '/send/text';
     let encodingFormat = 'text/plain';
     let timeoutMs: number | undefined;
-    if (source.media && !source.media.url) {
+    if (!source.media?.url && (source.media || source.medias?.length || (source.type && source.type !== 'text/plain'))) {
       // Never silently drop the file and forward only the caption.
       throw new EvolutionApiError(422, 'The file of this message is not retained, so it cannot be forwarded; send it again with send_media');
     }

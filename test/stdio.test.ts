@@ -48,7 +48,7 @@ it('serves the shared tools and resources with a persistent default connection o
       : request.url?.startsWith('/user/contacts') ? [{ type: 'chat', id: '5511999999999', attributes: { name: 'Fixture contact' } }]
       : request.url?.startsWith('/group/list') ? [{ type: 'chat', id: 'fixture-group@g.us', attributes: { name: 'Fixture group' } }]
       : [{ type: 'message', id: 'fixture-message', attributes: { at: 1792058400000, encodingFormat: 'text/plain', body: { text: 'Fixture message' } }, meta: { chat: '5511999999999' } }];
-    response.end(JSON.stringify({ jsonapi: { version: '1.1' }, data }));
+    response.end(JSON.stringify({ jsonapi: { version: '1.1' }, data: request.url === '/message/status' && Array.isArray(data) ? data[0] : data }));
   });
   await new Promise<void>((done) => upstream.listen(0, '127.0.0.1', done));
   cleanup.push(() => new Promise<void>((done) => upstream.close(() => done())));
@@ -77,6 +77,7 @@ it('serves the shared tools and resources with a persistent default connection o
     return { client, close, stderr: () => stderr };
   }
   const first = await open();
+  expect(first.client.getServerCapabilities()).not.toHaveProperty('events');
   expect((await first.client.listTools()).tools.map((tool) => tool.name)).toContain('connection_status');
   const resources = await first.client.listResources();
   expect((await first.client.readResource({ uri: resources.resources[0].uri })).contents).toHaveLength(1);
@@ -108,10 +109,10 @@ it('serves the shared tools and resources with a persistent default connection o
   expect((reopened.structuredContent as { data: Array<{ id: string }> }).data.map((item) => item.id)).toEqual([connections[0].id]);
   expect((await second.client.callTool({ name: 'connection_status', arguments: { connectionId: connections[0].id } })).isError).not.toBe(true);
   const history = await second.client.callTool({ name: 'list_messages', arguments: {} });
-  expect((history.structuredContent as { data: { items: Array<{ id: string; text?: string }> } }).data.items).toContainEqual(expect.objectContaining({ id: 'local-send-1', text: 'Local fixture send' }));
+  expect((history.structuredContent as { data: { items: Array<{ id: string }> } }).data.items.map(item => item.id)).toEqual(['fixture-message']);
   for (const tool of [
     { name: 'reply_to_message', arguments: { to: '5511999999999', text: 'Fixture reply', messageId: 'local-send-1' } },
-    { name: 'forward_message', arguments: { to: '5511999999999', conversationId: '5511999999999', messageId: 'local-send-1' } },
+    { name: 'forward_message', arguments: { to: '5511999999999', conversationId: '5511999999999', messageId: 'fixture-message' } },
   ]) expect((await second.client.callTool(tool)).isError).not.toBe(true);
   await second.close();
   expect(await readFile(resolve(state, 'encryption.key'), 'utf8') === keyBefore).toBe(true);
@@ -203,3 +204,88 @@ it('exits promptly when stdin closes during setup', async () => {
   expect(result.stdout).toBe('');
   expect(Date.now() - start).toBeLessThan(2000);
 });
+
+it('cleans expired send metadata on startup and during an idle local stdio session without polling messages', async () => {
+  const workspace = await fixtureWorkspace();
+  const migrationPath = resolve(workspace, 'migrations/0009_drop_legacy_message_storage.sql');
+  const migration = await readFile(migrationPath, 'utf8');
+  await rm(migrationPath);
+  const requests: string[] = [];
+  const upstream = createServer((request, response) => {
+    requests.push(`${request.method} ${request.url}`);
+    response.setHeader('content-type', 'application/vnd.api+json');
+    response.end(JSON.stringify({ jsonapi: { version: '1.1' }, data: { type: 'connection', id: 'retention-instance', attributes: { connected: true } } }));
+  });
+  await new Promise<void>(done => upstream.listen(0, '127.0.0.1', done));
+  cleanup.push(() => new Promise<void>(done => upstream.close(() => done())));
+  async function open() {
+    const transport = new StdioClientTransport({ command: process.execPath, args: ['scripts/dev-stdio.mjs'], cwd: workspace, stderr: 'pipe', env: {
+      PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${(upstream.address() as { port: number }).port}`,
+      LOCAL_INSTANCE_ID: 'retention-instance', LOCAL_INSTANCE_TOKEN: 'retention-credential',
+    } });
+    let stderr = '';
+    transport.stderr!.on('data', chunk => { stderr += chunk.toString(); });
+    const client = new Client({ name: 'retention-tests', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+    const errors: unknown[] = [];
+    client.onerror = error => { errors.push(error); };
+    await client.connect(transport);
+    expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+    let closed = false;
+    const close = async () => {
+      if (closed) return;
+      closed = true;
+      const start = Date.now();
+      await client.close();
+      expect(Date.now() - start).toBeLessThan(1800);
+      expect(errors).toEqual([]);
+      expect(stderr).not.toContain('retention-credential');
+      expect(stderr).not.toContain('WaPilot: não foi possível limpar');
+    };
+    cleanup.push(close);
+    return { client, close };
+  }
+  const { getPlatformProxy } = await import('wrangler');
+  async function database<T>(run: (db: D1Database) => Promise<T>) {
+    const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: resolve(workspace, 'wrangler.jsonc'), environment: 'stdio', remoteBindings: false, envFiles: [], persist: { path: resolve(workspace, '.wrangler/stdio/bindings/v3') } });
+    try { return await run(proxy.env.DB); } finally { await proxy.dispose(); }
+  }
+  const initial = await open();
+  await initial.close();
+  const keyBefore = await readFile(resolve(workspace, '.wrangler/stdio/encryption.key'), 'utf8');
+  const connectionBefore = await database(async db => {
+    const connection = await db.prepare('SELECT * FROM whatsapp_connections').first<{ id: string; user_id: string }>();
+    await db.prepare("INSERT INTO webhook_events (id,connection_id,event_name,message_json) VALUES ('legacy-hook',?,'Message','synthetic legacy webhook')").bind(connection!.id).run();
+    await db.prepare("INSERT INTO outbound_messages (connection_id,message_id,encoding_format,text,sent_at) VALUES (?,'legacy-send','text/plain','synthetic legacy send',datetime('now'))").bind(connection!.id).run();
+    for (const state of ['completed', 'pending', 'unknown']) await db.prepare("INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,result_json,expires_at) VALUES (?,?,?,'send_text',?,'synthetic-hash',?,?,?)")
+      .bind(state, connection!.user_id, connection!.id, state, state, state === 'completed' ? '{"messageId":"old-send"}' : null, Date.now() - 1000).run();
+    await db.prepare("INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES ('live',?,?,'send_text','live','live-hash','pending',?)").bind(connection!.user_id, connection!.id, Date.now() + 86400000).run();
+    await db.prepare("INSERT INTO audit_log (id,user_id,connection_id,operation,outcome) VALUES ('retained-audit',?,?,'send_text','success')").bind(connection!.user_id, connection!.id).run();
+    return connection;
+  });
+  await writeFile(migrationPath, migration);
+  const restarted = await open();
+  expect((await restarted.client.listTools()).tools.length).toBeGreaterThan(0);
+  await restarted.close();
+  const expiresAt = await database(async db => {
+    expect((await db.prepare('SELECT id FROM send_operations ORDER BY id').all()).results).toEqual([{ id: 'live' }]);
+    expect(await db.prepare('SELECT * FROM whatsapp_connections').first()).toEqual(connectionBefore);
+    expect(await db.prepare("SELECT id FROM audit_log WHERE id = 'retained-audit'").first()).toEqual({ id: 'retained-audit' });
+    expect((await db.prepare("SELECT name FROM sqlite_master WHERE name IN ('webhook_events','outbound_messages')").all()).results).toEqual([]);
+    const expiry = Date.now() + 20_000;
+    await db.prepare("INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES ('soon',?,?,'send_text','soon','soon-hash','unknown',?)").bind(connectionBefore!.user_id, connectionBefore!.id, expiry).run();
+    return expiry;
+  });
+  const idle = await open();
+  expect(Date.now()).toBeLessThan(expiresAt);
+  const count = requests.length;
+  // One real minute exercises Node's production timer while no tool calls keep the process busy.
+  await new Promise(resolve => setTimeout(resolve, 65_000));
+  expect(requests).toHaveLength(count);
+  await idle.close();
+  await database(async db => {
+    expect((await db.prepare('SELECT id FROM send_operations ORDER BY id').all()).results).toEqual([{ id: 'live' }]);
+    expect(await db.prepare('SELECT * FROM whatsapp_connections').first()).toEqual(connectionBefore);
+  });
+  expect(await readFile(resolve(workspace, '.wrangler/stdio/encryption.key'), 'utf8')).toBe(keyBefore);
+  expect(requests.every(request => request === 'GET /instance/status')).toBe(true);
+}, 100_000);

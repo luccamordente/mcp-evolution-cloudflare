@@ -1,5 +1,9 @@
+import type { CallbackSender } from './lib/sender-container';
+
 export interface Env {
   DB: D1Database;
+  EVENT_DELIVERIES?: Queue<string>;
+  CALLBACK_SENDER?: DurableObjectNamespace<CallbackSender>;
   OAUTH_KV?: KVNamespace;
   AI?: Pick<Ai, 'run' | 'toMarkdown'>;
   EVOLUTION_BASE_URL: string;

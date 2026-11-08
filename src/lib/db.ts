@@ -1,4 +1,4 @@
-import type { AuthenticatedUser, ConnectionRecord, ConnectionSummary, Message } from '../types';
+import type { AuthenticatedUser, ConnectionRecord, ConnectionSummary } from '../types';
 import { decryptToken, encryptToken } from './crypto';
 
 export async function ensureUser(db: D1Database, user: AuthenticatedUser): Promise<{ id: string; email: string }> {
@@ -154,9 +154,9 @@ export async function audit(db: D1Database, input: { userId: string; connectionI
   await db.prepare('INSERT INTO audit_log (id, user_id, connection_id, operation, outcome, metadata_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(crypto.randomUUID(), input.userId, input.connectionId ?? null, input.operation, input.outcome, input.metadata ? JSON.stringify(input.metadata) : null).run();
 }
 
-export async function ingestWebhookEvent(db: D1Database, secret: string, payload: unknown): Promise<{ accepted: boolean; status: number; error?: string }> {
+export async function validateWebhookEvent(db: D1Database, secret: string, payload: unknown): Promise<{ accepted: boolean; status: number; error?: string; connection?: {id:string;userId:string}; eventName?:string; resources?:Record<string,unknown>[] }> {
   const hash = await sha256(secret);
-  const connection = await db.prepare('SELECT id, instance_id as instanceId FROM whatsapp_connections WHERE webhook_secret_hash = ?1').bind(hash).first<{ id: string; instanceId: string }>();
+  const connection = await db.prepare('SELECT id, user_id as userId, instance_id as instanceId FROM whatsapp_connections WHERE webhook_secret_hash = ?1').bind(hash).first<{ id: string; userId: string; instanceId: string }>();
   if (!connection) return { accepted: false, status: 404, error: 'Unknown webhook' };
   const document = asRecord(payload);
   const jsonApiVersion = asRecord(document.jsonapi)?.version;
@@ -171,20 +171,7 @@ export async function ingestWebhookEvent(db: D1Database, secret: string, payload
   if (resources.some((resource) => !isJsonApiResource(resource))) {
     return { accepted: false, status: 400, error: 'Invalid JSON:API data' };
   }
-  const safeMeta = Object.fromEntries(Object.entries(meta).filter(([key]) => key !== 'instanceToken'));
-  const statements = resources.map((resource) => {
-    const item = resource as Record<string, unknown>;
-    const resourceId = typeof item.id === 'string' && item.id.trim() ? item.id : undefined;
-    const resourceMeta = asRecord(item.meta);
-    const conversationId = typeof resourceMeta.chat === 'string' && resourceMeta.chat.trim() ? resourceMeta.chat : undefined;
-    const safeDocument = { jsonapi: document.jsonapi, data: item, meta: safeMeta };
-    return db.prepare('INSERT OR IGNORE INTO webhook_events (id, connection_id, event_name, message_id, conversation_id, message_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-      .bind(crypto.randomUUID(), connection.id, eventName, resourceId ?? null, conversationId ?? null, JSON.stringify(safeDocument));
-  });
-  if (!statements.length) return { accepted: true, status: 202 };
-  const results = await db.batch(statements);
-  const inserted = results.reduce((count, result) => count + ((result.meta?.changes ?? 0) > 0 ? 1 : 0), 0);
-  return { accepted: inserted > 0, status: inserted > 0 ? 202 : 200 };
+  return { accepted: true, status: 202, connection: {id:connection.id,userId:connection.userId}, eventName, resources };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -204,8 +191,8 @@ function randomSecret(): string {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+export async function sha256(value: string | ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', typeof value === 'string' ? new TextEncoder().encode(value) : value);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
@@ -217,56 +204,4 @@ export async function repointConnection(db: D1Database, encryptionKey: string, u
   const result = await db.prepare("UPDATE whatsapp_connections SET instance_id = ?1, encrypted_token = ?2, updated_at = datetime('now') WHERE id = ?3 AND user_id = ?4").bind(input.instanceId, encryptedToken, connectionId, userId).run();
   const changes = (result as { meta?: { changes?: number } })?.meta?.changes;
   return changes === undefined ? true : changes > 0;
-}
-
-export interface OutboundMessageInput {
-  messageId: string;
-  conversationId?: string;
-  encodingFormat: string;
-  text?: string;
-  media?: { mimeType?: string; fileName?: string; size?: number; url?: string; gifPlayback?: boolean };
-  sentAt?: string;
-}
-
-/** Record a message wapilot just sent so forward_message can find it even
- * when Evolution Go did not store it and the webhook points elsewhere. */
-export async function recordOutboundMessage(db: D1Database, connectionId: string, input: OutboundMessageInput): Promise<void> {
-  await db.prepare('INSERT OR REPLACE INTO outbound_messages (connection_id, message_id, conversation_id, encoding_format, text, media_json, sent_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
-    .bind(connectionId, input.messageId, input.conversationId ?? null, input.encodingFormat, input.text ?? null, input.media ? JSON.stringify(input.media) : null, input.sentAt ?? new Date().toISOString())
-    .run();
-}
-
-export async function findOutboundMessage(db: D1Database, connectionId: string, messageId: string): Promise<Message | undefined> {
-  const row = await db.prepare('SELECT message_id as messageId, conversation_id as conversationId, encoding_format as encodingFormat, text, media_json as mediaJson, sent_at as sentAt FROM outbound_messages WHERE connection_id = ?1 AND message_id = ?2')
-    .bind(connectionId, messageId)
-    .first<{ messageId: string; conversationId: string | null; encodingFormat: string; text: string | null; mediaJson: string | null; sentAt: string }>();
-  return row ? outboundRowToMessage(row) : undefined;
-}
-
-type OutboundRow = { messageId: string; conversationId: string | null; encodingFormat: string; text: string | null; mediaJson: string | null; sentAt: string };
-
-function outboundRowToMessage(row: OutboundRow): Message {
-  const message: Message = {
-    id: row.messageId,
-    conversationId: row.conversationId ?? undefined,
-    jid: row.conversationId ?? undefined,
-    direction: 'outbound',
-    timestamp: row.sentAt,
-    type: row.encodingFormat,
-  };
-  if (row.text) message.text = row.text;
-  if (row.mediaJson) {
-    try { message.media = JSON.parse(row.mediaJson); } catch { /* ignore malformed metadata */ }
-  }
-  return message;
-}
-
-/** Saved sends with sent_at in [after, before) (Unix ms bounds, either optional), newest first. */
-export async function listOutboundMessages(db: D1Database, connectionId: string, window: { before?: number; after?: number; max?: number }): Promise<Message[]> {
-  const before = window.before !== undefined ? new Date(window.before).toISOString() : '9999-12-31T23:59:59.999Z';
-  const after = window.after !== undefined ? new Date(window.after).toISOString() : '0000-01-01T00:00:00.000Z';
-  const result = await db.prepare('SELECT message_id as messageId, conversation_id as conversationId, encoding_format as encodingFormat, text, media_json as mediaJson, sent_at as sentAt FROM outbound_messages WHERE connection_id = ?1 AND sent_at < ?2 AND sent_at >= ?3 ORDER BY sent_at DESC LIMIT ?4')
-    .bind(connectionId, before, after, window.max ?? 500)
-    .all<OutboundRow>();
-  return (result.results ?? []).map(outboundRowToMessage);
 }

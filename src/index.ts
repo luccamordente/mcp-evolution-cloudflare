@@ -1,6 +1,8 @@
+import { ingestEventDeliveries } from './lib/event-deliveries';
+import { invalidateEventGrant } from './lib/mcp-events';
 import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
-import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, repointConnection, revealConnectionToken, setDefaultConnection, updateConnection, ingestWebhookEvent } from './lib/db';
+import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, repointConnection, revealConnectionToken, setDefaultConnection, updateConnection, validateWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
 import { avatarLookupJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
@@ -172,6 +174,7 @@ async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
   }
   try {
     if (!isValidAuthorizationId(revokeId)) return c.json({ error: 'Autorização inválida.' }, 400);
+    await invalidateEventGrant(c.env.DB, user.id, revokeId);
     await oauth.revokeGrant(revokeId, userId);
     await audit(c.env.DB, { userId: user.id, operation: 'authorization_revoke', outcome: 'success' });
     return c.json({ ok: true });
@@ -627,8 +630,14 @@ function findQr(value) { if (!value || typeof value !== 'object') return ''; if 
 /** Evolution Go webhook ingress. The URL must contain the per-connection secret
  * configured by the connection UI; the payload's instance token is discarded. */
 app.post('/webhooks/evolution/:secret', async (c) => {
-  const result = await ingestWebhookEvent(c.env.DB, c.req.param('secret'), await c.req.json().catch(() => ({})));
-  return result.accepted ? c.json({ ok: true }, 202) : c.json({ error: result.error }, result.status as 400 | 404 | 409);
+  const result = await validateWebhookEvent(c.env.DB, c.req.param('secret'), await c.req.json().catch(() => ({})));
+  if (!result.accepted) {console.log(JSON.stringify({event:'mcp_events_ingress',invalid:1,unsupported:0,oversized:0}));return c.json({ error: result.error }, result.status as 400 | 404 | 409);}
+  try {
+    const [{getOAuthApi},{oauthOptions}] = await Promise.all([import('@cloudflare/workers-oauth-provider'),import('./lib/oauth')]);
+    const base = (c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin).replace(/\/$/,'');
+    await ingestEventDeliveries(c.env,getOAuthApi(oauthOptions(base),c.env),result.connection!,result.eventName!,result.resources!);
+    return c.json({ok:true},202);
+  } catch { return c.json({error:'WaPilot could not process this notification. Please try again.'},503); }
 });
 
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char)); }

@@ -11,6 +11,7 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit && tsc --noEmit -p ui/tsconfig.json",
     "test": "vitest run",
+    "test:sender-container": "node --test test/sender-container.container.mjs",
     "test:acceptance:gif": "node scripts/acceptance-gif.mjs",
     "check": "npm run check:gallery && npm run typecheck && npm test",
     "build:gallery": "node scripts/build-gallery.mjs",

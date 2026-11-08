@@ -14,7 +14,7 @@ O registro de publicação controlada abaixo descreve a infraestrutura remota cr
 
 Com autorização para publicação e homologação sintética, o commit `4e61c66ed83c61dd64c2219d8d28ad3f8ecd0b9b` foi integrado e enviado ao `main`. A integração preservou comprovantes de envio, GIFs e PDFs da revisão então publicada; o checkout de release `41ec4642ea56a35b1ef3fbaae23e052f08d0c3d9` possui a mesma árvore Git. Passaram `npm run check` (39 arquivos, 553 testes) e o dry-run com construção da imagem. O deploy manual produziu a revisão `f8882fca-2638-4486-a806-2377a1d0957c`, confirmada com 100% do tráfego.
 
-A produção foi mantida na conta existente, após o upgrade informado pelo usuário. Foram aplicadas apenas as migrations aditivas `0006`–`0008`; o read-back confirmou `0001`–`0008`, mantendo `webhook_events` e `outbound_messages`. **A migration destrutiva `0009` não foi autorizada nem aplicada.** Ela permaneceu fora do diretório de migrations do checkout usado para a aplicação remota, preservada no Git. Não execute `migrations apply` indiscriminadamente no checkout completo.
+A produção foi mantida na conta existente, após o upgrade informado pelo usuário. Na primeira etapa foram aplicadas apenas as migrations aditivas `0006`–`0008`; o read-back confirmou `0001`–`0008`, mantendo `webhook_events` e `outbound_messages`. A migration destrutiva `0009` ficou fora desse primeiro corte, preservada no Git e fora do diretório de migrations do checkout usado para a aplicação remota. Seu corte posterior está registrado abaixo. Não execute migrations pendentes indiscriminadamente.
 
 As filas `wapilot-events` e `wapilot-events-failed` foram criadas com retenção de 86.400 segundos, com consumidores principal/DLQ, binding `EVENT_DELIVERIES`, Cron `* * * * *`, binding `CALLBACK_SENDER` e aplicação Container `wapilot-callback-sender` sob política `durable_object`. D1, KV OAuth, binding AI, variáveis e os seis segredos existentes foram preservados. Publicações manuais e automáticas concorrentes foram pausadas por confirmação do usuário; a API Workers Builds retornou `403`, portanto a automação não foi verificada por API nem reativada nesta sessão.
 
@@ -28,7 +28,17 @@ Durante uma chamada HTTPS retida pelo receptor controlado, um diagnóstico fixo 
 
 O Worker de diagnóstico exigia segredo próprio e aceitava somente o receptor controlado e comandos fixos. Não recebeu bindings D1/KV/Queues/OAuth nem credenciais de produção. Worker, namespace próprio, aplicação Container, receptor, túnel e arquivos locais temporários foram removidos; a imagem compartilhada de produção foi preservada. Antes e depois da prova, a revisão de produção permaneceu a mesma, `/healthz` respondeu `200` e `/mcp` sem bearer respondeu `401`. O resultado comprova esses casos nessa imagem e execução remotas; não é teste de carga ou garantia de disponibilidade contínua.
 
-Não foram testados `get_message` com mensagem real nem envio remoto com idempotência, e nenhum envio ou mensagem real foi usado nesta homologação. A migration `0009` continua pendente de autorização separada.
+Não foram testados `get_message` com mensagem real nem envio remoto com idempotência, e nenhum envio ou mensagem real foi usado nesta homologação.
+
+## Corte da migration 0009 em 8 de novembro de 2026 (UTC)
+
+Após autorização explícita do usuário, `0009_drop_legacy_message_storage.sql` foi aplicada remotamente. Foram removidas apenas as tabelas `webhook_events` (178 registros) e `outbound_messages` (156 registros); nenhum payload legado foi lido ou exportado para realizar o corte. A lista de migrations confirmou `0001`–`0009` aplicadas, sem pendências.
+
+O bundle ativo `c1c273e5-1130-4dac-aff3-d5e1eaa96ed3`, com 100% do tráfego, não continha referências a essas tabelas; o inventário encontrou somente esse Worker vinculado ao D1 de produção. Entre 13:34:04 e 13:37:06 UTC, os eventos de mensagens das duas instâncias que entregam ao WaPilot foram suspensos, mantendo o evento de controle `CONNECTION`. Uma rota para um Worker temporário retornou `503` com `Retry-After` no domínio principal, e o alias workers.dev e as URLs de preview foram temporariamente desativados. A terceira instância cadastrada, com destino de webhook diferente, não foi alterada. Antes do DROP, os registros legados estavam estáveis, as entregas pendentes estavam zeradas e a revisão compatível permanecia ativa.
+
+Contagens e hashes das nove tabelas preservadas ficaram idênticos na conferência imediatamente antes/depois: usuários, conexões (incluindo defaults, ciphertext e hashes de webhook), auditoria, clientes OAuth, idempotência e estado operacional de eventos. `PRAGMA foreign_key_check` não encontrou violações e `PRAGMA quick_check` retornou `ok`. A aplicação manteve o mesmo Provider/KV OAuth e a mesma revisão durante todo o corte.
+
+As configurações originais do provedor, rota, alias e previews foram restauradas; o Worker de manutenção foi removido. Passaram `/healthz` e metadata OAuth (`200`), `/mcp` sem bearer (`401` com metadata), listagem autenticada pelo plugin e um webhook sintético de controle (`202`), sem gerar notificações de mensagem. O ciclo de Cron observado após a retomada teve backlog, retries, falhas de publicação e atraso de limpeza zerados. **Rollback para código que usa as tabelas removidas é incompatível com o schema atual.**
 
 ## Leituras históricas de publicação
 
@@ -144,7 +154,7 @@ Monitore os logs JSON `mcp_events_maintenance`: `backlog`, `retries` (reattempts
 
 ## Procedimento da transição de mensagens
 
-Publicação e exclusão de dados de produção exigem autorização específica; a publicação controlada acima não autorizou o DROP. Os registros de publicação são históricos; antes de uma nova etapa remota, confirme Worker, revisão com tráfego, automação de builds, migrations aplicadas, filas e retenção, segredos, bindings e versão do provedor. Suspenda publicações automáticas concorrentes durante a mudança autorizada.
+Publicação e exclusão de dados de produção exigem autorização específica. O DROP foi autorizado separadamente e executado no corte registrado acima. Os registros de publicação são históricos; antes de uma nova etapa remota, confirme Worker, revisão com tráfego, automação de builds, migrations aplicadas, filas e retenção, segredos, bindings e versão do provedor. Suspenda publicações automáticas concorrentes durante a mudança autorizada.
 
 A ordem segura separa a expansão do schema da remoção:
 

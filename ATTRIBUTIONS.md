@@ -19,6 +19,8 @@ As licenças e versões fixadas estão no lockfile:
 - `hono` 4.13.13 — MIT; roteamento Web API para a interface e webhook.
 - `jose` 6.2.12 — MIT; validação JWT/JWKS de assertions do Cloudflare Access.
 - `zod` 4.6.7 — MIT; schemas explícitos das ferramentas.
+- `@hyzyla/pdfium` 3.0.0 — wrapper MIT para PDFium; preserva o módulo WebAssembly já utilizado pela leitura de páginas publicada. [Licença distribuída pelo pacote](third_party/pdfium-wrapper-LICENSE.txt).
+- `fast-png` 8.0.0 — MIT; codificação de PNG para imagens de páginas. [Licença distribuída pelo pacote](third_party/fast-png-LICENSE.txt).
 
 Consulte os arquivos LICENSE distribuídos pelos pacotes para os textos completos. Nenhum token, segredo ou dado de usuário é incluído neste repositório.
 

@@ -4,9 +4,19 @@
 
 - Worker: `mcp-evolution-cloudflare`
 - URLs: `https://app.wapilot.com.br`, `https://mcp-evolution-cloudflare.luccamordente.workers.dev`
-- Revisão ativa conferida em 30 de outubro de 2026: `317043ed-e3d2-41b3-a349-675dca777b01`, com 100% do tráfego.
+- Revisão ativa conferida em 8 de novembro de 2026: `1717fbe5-779b-4327-8a58-7cae868f679c`, com 100% do tráfego.
 - D1: `mcp-evolution` (`d25ad771-5b81-4e41-88ed-6f980a32dbf9`), migrations `0001_init`, `0002_webhook_events`, `0003_connection_defaults` e `0004_remove_connection_runtime_state` aplicadas remotamente. O read-back de 17 de outubro de 2026 confirmou a remoção de `status`/`connection_state` e preservou os dois registros de conexão, seus `instance_id`, flags padrão e timestamps.
 - KV OAuth: `3a5b420e14594ee4ae821b720a9bf74a`; preview `29bb2b67785b46bfa7c31d84bbbe9344`.
+
+## Publicação de GIFs em 8 de novembro de 2026
+
+O backend foi publicado no deployment `evolution-go-production`, namespace `evolution`, no cluster `evolution-cluster-production`. A imagem `0.7.4-gif-40d7e022` foi fixada pelo digest `sha256:a6c10733ed858823030025c40a1365f634cea91131db5bf7d10c949f86e54bd6`. O rollout confirmou uma réplica atualizada e pronta. A release preserva a branch de desempenho que já estava em produção, incluindo a versão mais recente da biblioteca de mensagens usada por essa branch.
+
+O Worker foi publicado com a tag `gif-43b4863` e `--keep-vars`, após 396 testes, os testes de aceitação dos dois repositórios e o dry-run. A leitura posterior confirmou a revisão acima com 100% do tráfego. `/healthz` e a metadata OAuth responderam 200; `/mcp` sem bearer respondeu 401 com `resource_metadata`.
+
+As funcionalidades PDF e os comprovantes de envio publicados anteriormente ainda não estavam todos no `main`. A release recuperou os fontes originais do sourcemap da revisão anterior, preservou os cinco módulos PDF e conferiu o hash do WASM publicado. Testes no workerd confirmaram inspeção de páginas e renderização PNG. Antes de outra publicação, confira a versão ativa e as funcionalidades existentes; o `main` sozinho não descreve necessariamente o estado publicado.
+
+Um teste autorizado com GIF confirmou conversão real no container de produção para H.264/yuv420p, sem áudio, com 16 quadros em dois segundos. O envio via MCP foi aceito e a consulta posterior encontrou a mensagem como `video/mp4`, com `gifPlayback=true` e bit 64. Essa verificação não comprova a reprodução visual em todos os dispositivos.
 
 ## Deploy automático
 

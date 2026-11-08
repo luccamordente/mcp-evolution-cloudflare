@@ -11,6 +11,8 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit && tsc --noEmit -p ui/tsconfig.json",
     "test": "vitest run",
+    "test:sender-container": "node --test test/sender-container.container.mjs",
+    "test:acceptance:gif": "node scripts/acceptance-gif.mjs",
     "check": "npm run check:gallery && npm run typecheck && npm test",
     "build:gallery": "node scripts/build-gallery.mjs",
     "check:gallery": "node scripts/build-gallery.mjs --check"
@@ -21,9 +23,11 @@
   "type": "module",
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.3",
+    "@hyzyla/pdfium": "3.0.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@modelcontextprotocol/server": "2.3.1",
+    "fast-png": "8.0.0",
     "hono": "4.13.13",
     "jose": "6.2.12",
     "zod": "4.6.7"

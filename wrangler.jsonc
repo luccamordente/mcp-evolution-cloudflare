@@ -15,6 +15,22 @@
   "workers_dev": true,
   "ai": { "binding": "AI" },
   "observability": { "enabled": true },
+  "containers": [{
+    "name": "wapilot-callback-sender",
+    "class_name": "CallbackSender",
+    "scheduling_policy": "durable_object",
+    "images": { "sender": { "dockerfile": "sender/Dockerfile", "build_context": "sender" } }
+  }],
+  "queues": {
+    "producers": [{ "binding": "EVENT_DELIVERIES", "queue": "wapilot-events", "remote": false }],
+    "consumers": [
+      { "queue": "wapilot-events", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 3, "dead_letter_queue": "wapilot-events-failed" },
+      { "queue": "wapilot-events-failed", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 0 }
+    ]
+  },
+  "triggers": { "crons": ["* * * * *"] },
+  "durable_objects": { "bindings": [{ "name": "CALLBACK_SENDER", "class_name": "CallbackSender" }] },
+  "exports": { "CallbackSender": { "type": "durable-object", "storage": "sqlite", "container": "wapilot-callback-sender" } },
   "d1_databases": [{
     "binding": "DB",
     "database_name": "mcp-evolution",
@@ -39,6 +55,11 @@
   "env": {
     "stdio": {
       "name": "wapilot-stdio-local",
+      "containers": [],
+      "queues": { "producers": [], "consumers": [] },
+      "triggers": { "crons": [] },
+      "durable_objects": { "bindings": [] },
+      "exports": {},
       "d1_databases": [{
         "binding": "DB",
         "database_name": "wapilot-stdio-local",
@@ -51,6 +72,30 @@
     },
     "local": {
       "name": "mcp-evolution-cloudflare-local",
+      "d1_databases": [{
+        "binding": "DB",
+        "database_name": "mcp-evolution",
+        "database_id": "00000000-0000-0000-0000-000000000039",
+        "migrations_dir": "migrations",
+        "remote": false
+      }],
+      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000039", "remote": false }],
+      "queues": {
+        "producers": [{ "binding": "EVENT_DELIVERIES", "queue": "wapilot-events-local", "remote": false }],
+        "consumers": [
+          { "queue": "wapilot-events-local", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 3, "dead_letter_queue": "wapilot-events-failed-local" },
+          { "queue": "wapilot-events-failed-local", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 0 }
+        ]
+      },
+      "triggers": { "crons": ["* * * * *"] },
+      "containers": [{
+        "name": "wapilot-callback-sender-local",
+        "class_name": "CallbackSender",
+        "scheduling_policy": "durable_object",
+        "images": { "sender": { "dockerfile": "sender/Dockerfile", "build_context": "sender" } }
+      }],
+      "durable_objects": { "bindings": [{ "name": "CALLBACK_SENDER", "class_name": "CallbackSender" }] },
+      "exports": { "CallbackSender": { "type": "durable-object", "storage": "sqlite", "container": "wapilot-callback-sender-local" } },
       "vars": {
         "EVOLUTION_BASE_URL": "http://127.0.0.1:8789",
         "MCP_PUBLIC_URL": "http://localhost:8787",

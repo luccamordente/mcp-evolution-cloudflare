@@ -1,5 +1,9 @@
+import type { CallbackSender } from './lib/sender-container';
+
 export interface Env {
   DB: D1Database;
+  EVENT_DELIVERIES?: Queue<string>;
+  CALLBACK_SENDER?: DurableObjectNamespace<CallbackSender>;
   OAUTH_KV?: KVNamespace;
   AI?: Pick<Ai, 'run' | 'toMarkdown'>;
   EVOLUTION_BASE_URL: string;
@@ -119,7 +123,7 @@ export interface Message {
   timestamp?: string;
   type?: string;
   text?: string;
-  media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string };
+  media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string; gifPlayback?: boolean };
   medias?: MessageMediaItem[];
   flags?: number;
   quotedId?: string;
@@ -133,4 +137,5 @@ export interface SendMessageResult {
   conversationId?: string;
   jid?: string;
   accepted: boolean;
+  media?: { mimeType: string; fileName?: string; size?: number; gifPlayback?: boolean };
 }

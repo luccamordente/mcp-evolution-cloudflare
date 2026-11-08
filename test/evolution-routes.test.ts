@@ -107,6 +107,29 @@ describe('Evolution Go route contracts', () => {
     expect(JSON.parse(body)).not.toHaveProperty('ptt');
   });
 
+  it('sends MP4 playback intent and reads only safe converted media metadata', async () => {
+    let body: unknown;
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'i', instanceToken: 'secret', fetcher: async (_request, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'GIF1',
+        attributes: { encodingFormat: 'video/mp4', body: { medias: [{ fileName: 'loop.mp4', fileSize: 1024, url: 'https://private.invalid/loop', mediaKey: 'private-key' }] } },
+        meta: { flags: 65, instanceToken: 'private-token' },
+      } });
+    } });
+    const result = await client.sendMedia('5511999999999', { mimeType: ' VIDEO/MP4 ; codecs=avc1', gifPlayback: true, data: Uint8Array.from([1]).buffer });
+    expect(body).toMatchObject({ data: { attributes: { encodingFormat: 'video/mp4', gifPlayback: true, body: { media: { url: 'AQ==' } } } } });
+    expect(result.media).toEqual({ mimeType: 'video/mp4', fileName: 'loop.mp4', size: 1024, gifPlayback: true });
+    expect(JSON.stringify(result)).not.toMatch(/private/);
+  });
+
+  it.each([-1, 1.5, '1024', null])('ignores invalid reported output size %j', async (fileSize) => {
+    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'i', instanceToken: 'secret', fetcher: async () => Response.json({ jsonapi: { version: '1.1' }, data: {
+      type: 'message', id: 'GIF1', attributes: { encodingFormat: 'video/mp4', body: { medias: [{ fileSize }] } }, meta: { flags: 64 },
+    } }) });
+    const result = await client.sendMedia('5511999999999', { mimeType: 'image/gif', data: Uint8Array.from([1]).buffer });
+    expect(result.media).toEqual({ mimeType: 'video/mp4', gifPlayback: true });
+  });
+
   it('retries transient GET failures before returning an Evolution error', async () => {
     let attempts = 0;
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored', instanceToken: 'secret', fetcher: async () => {

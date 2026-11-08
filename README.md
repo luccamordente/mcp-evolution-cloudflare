@@ -1,26 +1,26 @@
-# MCP Evolution Go no Cloudflare Workers
+# WaPilot MCP no Cloudflare Workers
 
-Servidor MCP remoto para conversas individuais e grupos do WhatsApp por meio do Evolution Go. O endpoint público é:
+Servidor MCP remoto para conversas individuais e grupos do WhatsApp por meio do Evolution Go. O endpoint público configurado é:
 
-`https://mcp-evolution-cloudflare.luccamordente.workers.dev/mcp`
+`https://app.wapilot.com.br/mcp`
 
-O protocolo publicado é **MCP 2026-07-28**, com transporte Streamable HTTP stateless, respostas JSON por troca e autenticação OAuth 2.1 + PKCE. Não há SSE, WebSocket, stdio, sessões persistentes, `/sse` ou `createLegacyMcpHandler`.
+O protocolo publicado é **MCP 2026-07-28**, com transporte Streamable HTTP stateless, respostas JSON por troca e autenticação OAuth 2.1 + PKCE. O Worker não oferece SSE, WebSocket ou sessões persistentes. O stdio é exclusivo do desenvolvimento isolado; consulte [DEVELOPMENT.md](DEVELOPMENT.md).
 
-## O que está pronto
+## Contrato do repositório
 
-- Worker publicado com Hono, TypeScript, D1 e KV.
+- Worker com Hono, TypeScript, D1 e KV; publicação de MCP Events e da migração final depende de autorização separada.
 - OAuth Provider oficial `@cloudflare/workers-oauth-provider` 1.2.3, discovery, CIMD/DCR compatível, Authorization Code, PKCE S256, refresh e revogação.
 - Cloudflare Access com One-time PIN e allowlist de `luccamordente@gmail.com` e `heitorsalazar@gmail.com` em `/authorize`, `/connections` e `/api`.
-- Tokens das instâncias protegidos por AES-GCM e resolvidos apenas por UUID interno do usuário nas ferramentas de conexão; `list_connections` usa a chave administrativa do Evolution Go e redige credenciais.
-- Ferramentas de status, contatos, grupos, conversas/histórico capturados, texto, resposta e mídia.
-- Webhook por conexão com segredo opaco, verificação da instância e deduplicação em D1.
+- Tokens das instâncias protegidos por AES-GCM e resolvidos apenas por UUID interno do usuário nas ferramentas de conexão; `list_connections` lista somente o cadastro do usuário.
+- Ferramentas de status, contatos, grupos, mensagens retidas no provedor, leitura integral, texto, resposta, encaminhamento e mídia.
+- Webhook por conexão com segredo opaco e seleção de mensagens live para MCP Events no HTTP. D1 guarda somente prévias pendentes por até uma hora e metadados operacionais com prazo; não mantém arquivo geral nem cache de envios.
 - Testes unitários locais e dry-run do Wrangler.
 
 ## Limite do Evolution Go
 
-O contrato usa o header `apikey` e as rotas `/instance/status`, `/user/contacts`, `/group/list`, `/message/search`, `/send/text` e `/send/media`. `list_messages` consulta mensagens persistidas diretamente na API e depende de `DATABASE_SAVE_MESSAGES=true`; o fork não possui endpoint de listagem de chats. O webhook continua disponível para receber eventos.
+O contrato usa o header `apikey` e as rotas `/instance/status`, `/user/contacts`, `/group/list`, `/message/search`, `/send/text` e `/send/media`. `list_messages` consulta mensagens persistidas diretamente na API e depende de `DATABASE_SAVE_MESSAGES=true`; o fork não possui endpoint de listagem de chats. Listagem e encaminhamento usam somente mensagens retidas no provedor; disponibilidade futura não é garantida. A migration `0009_drop_legacy_message_storage.sql` remove conteúdo legado sem copiá-lo.
 
-A URL do Evolution Go e a API key global já estão configuradas no Worker. Ainda falta cadastrar um token específico de instância em `/connections`; por isso nenhuma conexão, histórico real ou envio WhatsApp foi declarado como concluído.
+O estado publicado precisa de nova leitura antes de qualquer operação. Os testes desta transição são locais e sintéticos; não comprovam egress na Cloudflare, execução de agente na OpenAI ou disponibilidade de mensagens reais. Consulte [a ordem de publicação e homologação](docs/DEPLOY.md#publicação-futura-da-transição-de-mensagens).
 
 ## Desenvolvimento
 

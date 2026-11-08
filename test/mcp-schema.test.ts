@@ -89,7 +89,7 @@ describe('MCP tool output schema', () => {
   });
 
   it('documents every registered tool without exposing an implementation provider', () => {
-    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message_image', 'transcribe_message_audio', 'read_message_document', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media', 'forward_message'] as const;
+    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message', 'get_message_image', 'transcribe_message_audio', 'read_message_document', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media', 'forward_message'] as const;
     for (const name of expected) {
       expect(TOOL_DESCRIPTIONS[name].length).toBeGreaterThan(40);
       expect(TOOL_DESCRIPTIONS[name]).not.toMatch(/evolution|upstream|downstream/i);
@@ -117,6 +117,18 @@ describe('MCP tool output schema', () => {
   it('marks read and send tools with distinct behavior hints', () => {
     expect(TOOL_ANNOTATIONS.readOnly).toMatchObject({ readOnlyHint: true, destructiveHint: false, idempotentHint: true });
     expect(TOOL_ANNOTATIONS.send).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: false });
+  });
+
+  it('accepts GIF playback only for GIF or MP4 media', () => {
+    const input = { to: '5511999999999', dataBase64: 'AQ==', gifPlayback: true };
+    for (const mimeType of ['image/gif', 'video/mp4', ' VIDEO/MP4 ; codecs=avc1']) {
+      expect(sendMediaInput.safeParse({ ...input, mimeType }).success).toBe(true);
+    }
+    for (const mimeType of ['image/png', 'audio/ogg', 'application/pdf']) {
+      expect(sendMediaInput.safeParse({ ...input, mimeType }).success).toBe(false);
+      expect(sendMediaInput.safeParse({ ...input, mimeType, gifPlayback: false }).success).toBe(true);
+    }
+    expect(sendMediaInput.parse({ to: input.to, dataBase64: input.dataBase64, mimeType: 'image/gif' })).not.toHaveProperty('gifPlayback');
   });
 
   it('describes the semantic meaning of message tool fields', () => {

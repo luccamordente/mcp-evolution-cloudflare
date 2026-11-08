@@ -11,6 +11,7 @@ import { createMcpServer, mcpBodyLimit } from '../lib/mcp';
 import { EvolutionGoClient } from '../lib/evolution';
 import { createConnection, ensureUser, getConnection, listConnections, revealConnectionToken } from '../lib/db';
 import type { Env } from '../types';
+import { cleanupSendOperations } from '../lib/send-idempotency';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 class SetupError extends Error {}
@@ -18,12 +19,28 @@ let proxy: PlatformProxy<Env> | undefined;
 let pendingProxy: Promise<PlatformProxy<Env>> | undefined;
 let server: StdioServerHandle | undefined;
 let closing: Promise<void> | undefined;
+let cleanupTimer: NodeJS.Timeout | undefined;
+let pendingCleanup: Promise<void> | undefined;
+async function cleanSendMetadata(db: D1Database) {
+  try { await cleanupSendOperations(db); }
+  catch { console.error('WaPilot: não foi possível limpar os metadados de envio locais.'); }
+  finally {
+    if (!closing) {
+      cleanupTimer = setTimeout(() => { if (!closing) pendingCleanup = cleanSendMetadata(db); }, 60_000);
+      cleanupTimer.unref();
+    }
+  }
+}
 function close() {
+  clearTimeout(cleanupTimer);
   return closing ??= Promise.resolve().then(async () => {
     try { await server?.close(); }
     finally {
-      try { await (proxy ?? await pendingProxy?.catch(() => undefined))?.dispose(); }
-      finally { process.stdin.destroy(); input.destroy(); }
+      try { await pendingCleanup; }
+      finally {
+        try { await (proxy ?? await pendingProxy?.catch(() => undefined))?.dispose(); }
+        finally { process.stdin.destroy(); input.destroy(); }
+      }
     }
   });
 }
@@ -92,11 +109,16 @@ try {
     await writeFile(metadataPath, metadata, { mode: 0o600, flag: previousMetadata === undefined ? 'wx' : 'w' });
     await createConnection(db, key, { userId: user.id, friendlyName: 'Desenvolvimento WaPilot', instanceId, token });
   }
-  const env: Env = { DB: db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: baseUrl, MAX_MEDIA_BYTES: '8388608', IMAGE_STORAGE_ORIGINS: config.IMAGE_STORAGE_ORIGINS };
-  const transport = new StdioServerTransport(input, process.stdout, { maxBufferSize: mcpBodyLimit(env) });
-  server = serveStdio(() => createMcpServer(env, identity, ['mcp:read', 'mcp:write']), { transport, onerror: () => console.error('WaPilot: erro no protocolo MCP local.') });
-  const transportClosed = transport.onclose;
-  transport.onclose = () => { transportClosed?.(); stop(); };
+  if (!closing) {
+    await (pendingCleanup = cleanSendMetadata(db));
+    if (!closing) {
+      const env: Env = { DB: db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: baseUrl, MAX_MEDIA_BYTES: '8388608', IMAGE_STORAGE_ORIGINS: config.IMAGE_STORAGE_ORIGINS };
+      const transport = new StdioServerTransport(input, process.stdout, { maxBufferSize: mcpBodyLimit(env) });
+      server = serveStdio(() => createMcpServer(env, identity, ['mcp:read', 'mcp:write']), { transport, onerror: () => console.error('WaPilot: erro no protocolo MCP local.') });
+      const transportClosed = transport.onclose;
+      transport.onclose = () => { transportClosed?.(); stop(); };
+    }
+  }
 } catch (error) {
   // Only our fixed setup messages are safe; dependency errors can contain configuration.
   const message = error instanceof SetupError

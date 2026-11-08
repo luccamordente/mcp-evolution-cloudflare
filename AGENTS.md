@@ -13,6 +13,7 @@ Esses documentos são a referência técnica; o histórico das conversas registr
 
 ## Invariantes de arquitetura
 
+- O MCP do WaPilot deve seguir a [especificação oficial MCP `2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28), a revisão estável mais recente verificada em 2026-11-06 e fixada neste projeto. Consulte essa revisão ao implementar ou revisar transporte, mensagens, capacidades e autorização; atualizações de versão devem ser explícitas, com revisão de compatibilidade, documentação e testes.
 - O entrypoint publicado é `src/worker.ts`; `src/index.ts` contém o app Hono para UI, webhook e fallback de testes.
 - O endpoint MCP é `POST /mcp`, com MCP `2026-07-28`, Streamable HTTP stateless, `legacy: 'reject'` e `responseMode: 'json'`. Cada request cria o servidor. Preserve a ausência de sessões de transporte, `Mcp-Session-Id`, SSE, WebSocket, `/sse` e `createLegacyMcpHandler`.
 - A spec #17 autoriza stdio exclusivamente no entrypoint Node de desenvolvimento `src/dev/stdio.ts`; consulte `DEVELOPMENT.md`. Preserve D1 e chave locais por worktree, stdout exclusivo para MCP e bindings remotos desativados. O bundle publicado permanece independente desse entrypoint.

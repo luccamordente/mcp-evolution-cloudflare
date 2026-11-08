@@ -1,0 +1,29 @@
+:root {
+  color-scheme: light dark;
+  font-family: "DM Sans", var(--font-sans, system-ui), sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #fff;
+  background: rgb(0 0 0 / 3%);
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+#receipt { padding: clamp(1rem, 4vw, 1.5rem); max-inline-size: 80ch; min-inline-size: 0; margin-inline: auto; }
+.message-bubble {
+  inline-size: fit-content;
+  max-inline-size: calc((100% - min(1.25rem, 4vw)) * 2 / 3);
+  min-inline-size: 0;
+  margin-inline-start: auto;
+  padding: .5rem .75rem;
+  background: #0f9f4d;
+  border-radius: .75rem .75rem .2rem .75rem;
+  overflow-wrap: anywhere;
+}
+.message-text { white-space: normal; overflow-wrap: anywhere; }
+.message-line { white-space: break-spaces; min-block-size: 1.5em; margin: 0; }
+.message-text ul, .message-text ol { margin: 0; padding-inline-start: 1.5em; }
+.message-text ol { list-style-position: inside; padding-inline-start: 0; }
+.message-text blockquote { border-inline-start: .2rem solid #ffffff80; padding-inline-start: .75em; }
+.message-text code { font-family: var(--font-mono, ui-monospace, monospace); white-space: break-spaces; overflow-wrap: anywhere; }
+.message-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .25rem; margin-block-start: .25rem; font-size: .6875rem; line-height: 1.2; }
+.message-check { font-size: .8rem; }

@@ -34,6 +34,19 @@ function notification(connectionId:string, item:Record<string,unknown>) {
     ...(format !== 'text/plain' ? {media:{mimeType,...(fileName ? {fileName} : {}),...(typeof size === 'number' && Number.isSafeInteger(size) && size>=0 ? {size} : {})}} : {})};
 }
 
+function conversationIds(item:Record<string,unknown>, chat:string): string[] {
+  const ids=[chat], alternate=record(item.meta).senderAlt;
+  const direct=/^\d+(?::\d+)?@(s\.whatsapp\.net|lid)$/;
+  // A group sender is not an alternate identity for the group conversation.
+  if (direct.test(chat) && text(alternate,200) && direct.test(alternate)) ids.push(alternate);
+  for (const id of [...ids]) {
+    const phone=/^(\d+)(?::\d+)?@s\.whatsapp\.net$/.exec(id);
+    if (phone) ids.push(phone[1],`${phone[1]}@s.whatsapp.net`);
+  }
+  if (/^\d+$/.test(chat)) ids.push(`${chat}@s.whatsapp.net`);
+  return [...new Set(ids)];
+}
+
 /** A candidate marker gates the entire fan-out in one transaction, including no-interest sources. */
 export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, connection:{id:string;userId:string}, eventName:string, resources:Record<string,unknown>[]): Promise<void> {
   const drops={invalid:0,unsupported:0,oversized:0};
@@ -43,8 +56,9 @@ export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, con
     if (typeof data==='string') {drops[data]++;continue;}
     const now=Date.now(), occurred=Date.parse(data.timestamp);
     if (await env.DB.prepare('SELECT id FROM event_sources WHERE connection_id = ? AND message_id = ? AND expires_at > ?').bind(connection.id,data.messageId,now).first()) continue;
-    const candidates=await env.DB.prepare("SELECT * FROM event_subscriptions WHERE user_id = ? AND connection_id = ? AND state = 'active' AND expires_at > ? AND activated_at <= ? AND encrypted_secret IS NOT NULL AND (conversation_id IS NULL OR conversation_id = ?)")
-      .bind(connection.userId,connection.id,now,occurred,data.conversationId).all<Subscription>();
+    const conversations=conversationIds(item,data.conversationId);
+    const candidates=await env.DB.prepare(`SELECT * FROM event_subscriptions WHERE user_id = ? AND connection_id = ? AND state = 'active' AND expires_at > ? AND activated_at <= ? AND encrypted_secret IS NOT NULL AND (conversation_id IS NULL OR conversation_id IN (${conversations.map(()=>'?').join(',')}))`)
+      .bind(connection.userId,connection.id,now,occurred,...conversations).all<Subscription>();
     const selected:Subscription[]=[];
     // An unavailable Provider must fail ingress before reserving the source marker.
     for (const row of candidates.results) if (await eventAuthorizationValid(env.DB,oauth,principal(row),connection.id)) selected.push(row);

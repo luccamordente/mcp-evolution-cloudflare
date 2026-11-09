@@ -260,3 +260,44 @@ it('skips identifiers beyond the tool contract and omits excessive media metadat
   expect(requests).toHaveLength(before+1);
   expect(JSON.parse(requests[before].body).data.media).toEqual({mimeType:'image/jpeg'});
 });
+
+it.each([
+  {name:'full-jid',filter:'551199998888@s.whatsapp.net',chat:'551199998888@s.whatsapp.net',senderAlt:''},
+  {name:'phone-number',filter:'551199998888',chat:'551199998888@s.whatsapp.net',senderAlt:''},
+  {name:'linked-phone',filter:'551199998888',chat:'87654321@lid',senderAlt:'551199998888@s.whatsapp.net'},
+  {name:'linked-device',filter:'551199998888@s.whatsapp.net',chat:'87654321@lid',senderAlt:'551199998888:4@s.whatsapp.net'},
+  {name:'linked-id',filter:'87654321@lid',chat:'551199998888@s.whatsapp.net',senderAlt:'87654321@lid'},
+  {name:'bare-chat',filter:'551199998888@s.whatsapp.net',chat:'551199998888',senderAlt:''},
+])('matches equivalent direct conversation identifiers: $name',async({name,filter,chat,senderAlt})=>{
+  const owner=await fixture.issue({email:name+'@example.test'}),original=hook;
+  hook=await fixture.webhook(owner.connections[0]);
+  try {
+    await fixture.rpc(owner.accessToken,'events/subscribe',subscription(owner.connections[0],filter,name));
+    const payload=message(name);
+    Object.assign(payload.data.meta,{chat,...(senderAlt ? {senderAlt} : {})});
+    const before=requests.length;
+    expect((await ingress(payload)).status).toBe(202);
+    expect(await drain()).toHaveLength(1);
+    expect(JSON.parse(requests[before].body).data.conversationId).toBe(payload.data.meta.chat);
+  } finally { hook=original; }
+});
+
+it.each([
+  {name:'group-sender',chat:'123456@g.us',senderAlt:'551199998888@s.whatsapp.net'},
+  {name:'unrelated-linked-id',chat:'551199998888@lid',senderAlt:''},
+  {name:'recipient-alias',chat:'551188887777@s.whatsapp.net',senderAlt:''},
+])('keeps contact subscriptions outside unrelated conversations: $name',async({name,chat,senderAlt})=>{
+  const owner=await fixture.issue({email:name+'@example.test'}),original=hook;
+  hook=await fixture.webhook(owner.connections[0]);
+  try {
+    await fixture.rpc(owner.accessToken,'events/subscribe',subscription(owner.connections[0],'551199998888',name));
+    const payload=message(name);
+    Object.assign(payload.data.meta,{chat,senderAlt,recipientAlt:'551199998888@s.whatsapp.net'});
+    payload.data.relationships.author.data.id='551199998888';
+    const before=requests.length;
+    expect((await ingress(payload)).status).toBe(202);
+    expect(await drain()).toEqual([]);
+    expect(requests).toHaveLength(before);
+    expect((await fixture.db.prepare('SELECT COUNT(*) AS count FROM event_deliveries WHERE subscription_id IN (SELECT id FROM event_subscriptions WHERE connection_id = ?)').bind(owner.connections[0]).first())?.count).toBe(0);
+  } finally { hook=original; }
+});

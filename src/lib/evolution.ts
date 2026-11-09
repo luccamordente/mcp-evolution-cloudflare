@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer';
 import { galleryImage } from './image-gallery';
 import { AudioTranscriptionError } from './audio-transcription';
 import { DocumentReadingError } from './document-reading';
+import { messageUpdateSchema } from './message-update';
 
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
@@ -376,6 +377,8 @@ function normalizeMessage(value: unknown): Message {
   if (Array.isArray(meta.mentions)) {
     message.mentions = meta.mentions.filter((m): m is string => typeof m === 'string');
   }
+  const update = messageUpdateSchema.safeParse(meta.update);
+  if (update.success) message.update = update.data;
   // Evolution Go reports application/octet-stream when a stored row has
   // neither a body nor a file. That happens for text messages on instances with
   // saveMessageBodies off (only id and time are kept), so octet-stream does not
@@ -386,7 +389,13 @@ function normalizeMessage(value: unknown): Message {
     message.type = 'text/plain';
   } else if (isGenericFormat && message.text === undefined && !message.media) {
     message.type = undefined;
+    if (message.update?.state !== 'unsupported') message.contentUnavailable = true;
+  }
+  if (message.update?.state === 'unavailable') {
     message.contentUnavailable = true;
+    message.contentUnavailableReason = message.update.reason;
+  } else if (message.update?.state === 'unsupported' && isGenericFormat) {
+    message.type = 'application/vnd.whatsapp.update';
   }
   return message;
 }

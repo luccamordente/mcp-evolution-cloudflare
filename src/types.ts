@@ -1,4 +1,5 @@
 import type { CallbackSender } from './lib/sender-container';
+import type { ContentUnavailableReason, MessageUpdate } from './lib/message-update';
 
 export interface Env {
   DB: D1Database;
@@ -128,8 +129,9 @@ export interface Message {
   flags?: number;
   quotedId?: string;
   mentions?: string[];
-  /** True when Evolution Go kept only the id and time (no text or file). */
   contentUnavailable?: boolean;
+  contentUnavailableReason?: ContentUnavailableReason;
+  update?: MessageUpdate;
 }
 
 export interface SendMessageResult {

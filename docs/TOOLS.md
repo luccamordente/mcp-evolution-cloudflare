@@ -90,6 +90,12 @@ O envelope nunca inclui tokens, chaves, credenciais, payloads ou `details` do Ev
 
 As respostas MCP são normalizadas pelo Worker, mas a origem Evolution Go é JSON:API 1.1. `list_messages` lê a coleção diretamente de `data`; cada mensagem usa `id`, `attributes.at` em milissegundos, `attributes.encodingFormat`, `attributes.body`, `relationships.author` e `meta.chat`. Recibos são mensagens próprias com `body.state` e `relationships.target`. O cliente não depende de `data.items`, `raw`, `message_id`, `timestamp` ou de um `status` na mensagem.
 
+Atualizações criptografadas podem incluir `update`, com `kind`, `state`, `targetId` e `reason` conforme o resultado. O identificador da atualização permanece em `id`; `update.targetId` identifica a mensagem original. Edições decodificadas usam `kind: "message_edit"`, `state: "decoded"` e o conteúdo normal em `text` ou `media`. A presença de `state: "decoded"` não garante retenção do conteúdo: se o provedor não salvou o corpo, `contentUnavailable: true` continua presente.
+
+Quando a decodificação falha, `update.state` é `unavailable` e `contentUnavailableReason` distingue `missing_original_secret`, `decryption_failed` e `invalid_target`. Um subtipo sem suporte usa `update.state: "unsupported"` e `update.reason: "unsupported_subtype"`. Ele não recebe `contentUnavailable` como se fosse uma mensagem de texto vazia. Se o provedor retorna um formato genérico, o tipo normalizado é `application/vnd.whatsapp.update`.
+
+Os tipos de atualização aceitos são `message_edit`, `event_edit`, `poll_edit`, `poll_add_option`, `message_schedule` e `unknown`. O Worker valida esses campos e descarta metadados extras ou inválidos. Mensagens antigas sem esses metadados preservam o comportamento anterior. A resposta nunca inclui o envelope criptografado, segredos ou erros internos. A consulta não reprocessa mensagens antigas nem recupera conteúdo que o provedor descartou.
+
 Administração de conexões, logout, exclusão de mensagens ou grupos e gestão ampla de participantes não fazem parte desta superfície MCP.
 
 ## Envio de GIFs

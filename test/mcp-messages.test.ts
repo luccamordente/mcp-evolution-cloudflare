@@ -826,6 +826,36 @@ describe('list_messages encrypted update outcomes', () => {
     expect(JSON.stringify(result)).not.toMatch(/private-ciphertext|private-error|ciphertext/);
   });
 
+  it('reads a decoded edit through get_message without changing its identity', async () => {
+    const { message, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: {
+      ...retainedMessage,
+      attributes: { at: 1792058400000, encodingFormat: 'text/plain', body: { text: 'Texto editado' } },
+      meta: { ...retainedMessage.meta, update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' } },
+    } }));
+    const { result } = await message({ messageId: 'message-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ message: {
+      id: 'message-1', text: 'Texto editado',
+      update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' },
+    } });
+  });
+
+  it('keeps decoded metadata separate from unavailable retained content', async () => {
+    const { call, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{
+      ...retainedMessage,
+      attributes: { at: 1792058400000, encodingFormat: 'application/octet-stream' },
+      meta: { ...retainedMessage.meta, update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' } },
+    }] }));
+    const { result } = await call({});
+    expect(result.structuredContent.data).toMatchObject({ items: [{
+      contentUnavailable: true,
+      update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' },
+    }] });
+    expect(JSON.stringify(result)).not.toContain('contentUnavailableReason');
+  });
+
   it.each(['missing_original_secret', 'decryption_failed', 'invalid_target'])('explains unavailable updates with %s', async reason => {
     const { call, fetcher } = await messageTool();
     fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{

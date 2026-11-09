@@ -143,7 +143,7 @@ describe('text send receipt MCP boundary', () => {
     const startedAt = Date.now();
     const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: '5511999999999', text } });
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent.data).toEqual({ accepted: true, messageId: 'sent-1', conversationId: '5511999999999', jid: '5511999999999' });
+    expect(result.structuredContent.data).toEqual({ connectionId, accepted: true, messageId: 'sent-1', conversationId: '5511999999999', jid: '5511999999999', outcome: 'accepted', deliveryStatus: 'unavailable', readStatus: 'unavailable' });
     expect(result._meta?.sendReceipt).toEqual({ text, to: '5511999999999', connectionId, connectionName: 'Personal', state: 'accepted', sentAt: expect.any(String) });
     const sentAt = Date.parse(result._meta!.sendReceipt!.sentAt!);
     expect(sentAt).toBeGreaterThanOrEqual(startedAt);
@@ -805,4 +805,122 @@ describe('list_messages retained conversation search', () => {
     expect(response.result.isError).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
   });
+});
+
+describe('list_messages encrypted update outcomes', () => {
+  it('returns decoded edits with their target and discards private update fields', async () => {
+    const { call, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{
+      ...retainedMessage,
+      id: 'edit-1',
+      attributes: { at: 1792058400000, encodingFormat: 'text/plain', body: { text: 'Reunião às onze' } },
+      meta: { ...retainedMessage.meta, update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1', ciphertext: 'private-ciphertext', error: 'private-error' } },
+      relationships: { ...retainedMessage.relationships, target: { data: { type: 'message', id: 'original-1' } } },
+    }] }));
+    const { result } = await call({});
+    expect(result.structuredContent.data).toMatchObject({ items: [{
+      id: 'edit-1', text: 'Reunião às onze', type: 'text/plain',
+      update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' },
+    }] });
+    expect(result.structuredContent.data).not.toMatchObject({ items: [{ contentUnavailable: true }] });
+    expect(JSON.stringify(result)).not.toMatch(/private-ciphertext|private-error|ciphertext/);
+  });
+
+  it('reads a decoded edit through get_message without changing its identity', async () => {
+    const { message, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: {
+      ...retainedMessage,
+      attributes: { at: 1792058400000, encodingFormat: 'text/plain', body: { text: 'Texto editado' } },
+      meta: { ...retainedMessage.meta, update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' } },
+    } }));
+    const { result } = await message({ messageId: 'message-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ message: {
+      id: 'message-1', text: 'Texto editado',
+      update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' },
+    } });
+  });
+
+  it('keeps decoded metadata separate from unavailable retained content', async () => {
+    const { call, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{
+      ...retainedMessage,
+      attributes: { at: 1792058400000, encodingFormat: 'application/octet-stream' },
+      meta: { ...retainedMessage.meta, update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' } },
+    }] }));
+    const { result } = await call({});
+    expect(result.structuredContent.data).toMatchObject({ items: [{
+      contentUnavailable: true,
+      update: { kind: 'message_edit', state: 'decoded', targetId: 'original-1' },
+    }] });
+    expect(result.structuredContent.data).toMatchObject({items:[{contentUnavailableReason:'not_retained_or_unknown'}]});
+  });
+
+  it.each(['missing_original_secret', 'decryption_failed', 'invalid_target'])('explains unavailable updates with %s', async reason => {
+    const { call, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{
+      ...retainedMessage,
+      attributes: { at: 1792058400000, encodingFormat: 'application/octet-stream' },
+      meta: { ...retainedMessage.meta, update: { kind: 'message_edit', state: 'unavailable', reason, targetId: 'original-1', rawError: 'private-error' } },
+    }] }));
+    const { result } = await call({});
+    expect(result.structuredContent.data).toMatchObject({ items: [{
+      contentUnavailable: true, contentUnavailableReason: reason,
+      update: { kind: 'message_edit', state: 'unavailable', reason, targetId: 'original-1' },
+    }] });
+    expect(JSON.stringify(result)).not.toContain('private-error');
+  });
+
+  it('identifies unsupported updates instead of treating them as empty text', async () => {
+    const { call, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{
+      ...retainedMessage,
+      attributes: { at: 1792058400000, encodingFormat: 'application/octet-stream' },
+      meta: { ...retainedMessage.meta, update: { kind: 'poll_edit', state: 'unsupported', reason: 'unsupported_subtype', targetId: 'poll-1' } },
+    }] }));
+    const { result } = await call({});
+    expect(result.structuredContent.data).toMatchObject({ items: [{
+      type: 'application/vnd.whatsapp.update',
+      update: { kind: 'poll_edit', state: 'unsupported', reason: 'unsupported_subtype', targetId: 'poll-1' },
+    }] });
+    expect(result.structuredContent.data).not.toMatchObject({ items: [{ contentUnavailable: true }] });
+  });
+
+  it.each([
+    { kind: 'private-error', state: 'unavailable', reason: 'decryption_failed' },
+    { kind: 'message_edit', state: 'unavailable', reason: 'private-error' },
+    { kind: 'message_edit', state: 'decoded' },
+    { kind: 'message_edit', state: 'private-error' },
+    { kind: 'message_edit', state: 'unavailable', reason: 'decryption_failed', targetId: { ciphertext: 'private-error' } },
+  ])('ignores malformed update metadata and preserves legacy unavailable behavior', async update => {
+    const { call, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: [{
+      ...retainedMessage,
+      attributes: { at: 1792058400000, encodingFormat: 'application/octet-stream' },
+      meta: { ...retainedMessage.meta, update },
+    }] }));
+    const { result } = await call({});
+    expect(result.structuredContent.data).toMatchObject({ items: [{ contentUnavailable: true }] });
+    expect(JSON.stringify(result)).not.toMatch(/private-error|ciphertext|"update"/);
+  });
+});
+
+it.each(['missing_original_secret', 'decryption_failed', 'invalid_target'])('keeps the %s diagnosis in get_message errors after integration', async reason => {
+  const { message, fetcher } = await messageTool();
+  fetcher.mockResolvedValue(Response.json({jsonapi:{version:'1.1'},data:{...retainedMessage,
+    attributes:{encodingFormat:'application/octet-stream'},
+    meta:{...retainedMessage.meta,update:{kind:'message_edit',state:'unavailable',reason,targetId:'original-1',rawError:'private-diagnosis'}}}}));
+  const { result } = await message({messageId:'message-1'});
+  expect(result.structuredContent.data).toMatchObject({contentUnavailable:true,contentUnavailableReason:reason,messageType:'application/octet-stream',error:{code:'message_content_unavailable'}});
+  expect(JSON.stringify(result)).not.toContain('private-diagnosis');
+});
+
+it('returns unsupported update metadata through get_message without inventing missing text', async () => {
+  const { message, fetcher } = await messageTool();
+  fetcher.mockResolvedValue(Response.json({jsonapi:{version:'1.1'},data:{...retainedMessage,
+    attributes:{encodingFormat:'application/octet-stream'},
+    meta:{...retainedMessage.meta,update:{kind:'poll_edit',state:'unsupported',reason:'unsupported_subtype',targetId:'poll-1'}}}}));
+  const { result } = await message({messageId:'message-1'});
+  expect(result.isError).not.toBe(true);
+  expect(result.structuredContent.data).toMatchObject({message:{type:'application/vnd.whatsapp.update',update:{state:'unsupported',reason:'unsupported_subtype'}}});
 });

@@ -183,7 +183,7 @@ describe('list_messages type mapping', () => {
     ]).listMessages(undefined, 10, '551142000028');
     expect(page.items[0]).toMatchObject({ id: 'A', type: 'text/plain', text: 'oi' });
     expect(page.items[0].contentUnavailable).toBeUndefined();
-    expect(page.items[1]).toMatchObject({ id: 'B', contentUnavailable: true });
+    expect(page.items[1]).toMatchObject({ id: 'B', contentUnavailable: true, contentUnavailableReason: 'not_retained_or_unknown', messageType: 'application/octet-stream' });
     expect(page.items[1].type).toBeUndefined();
     expect(page.items[2]).toMatchObject({ id: 'C', type: 'application/pdf', media: { mimeType: 'application/pdf', url: 'https://s.invalid/a.pdf' } });
     expect(page.items[3]).toMatchObject({ id: 'D', type: 'text/plain', text: 'olá' });

@@ -50,7 +50,7 @@ function conversationIds(item:Record<string,unknown>, chat:string): string[] {
 /** A candidate marker gates the entire fan-out in one transaction, including no-interest sources. */
 export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, connection:{id:string;userId:string}, eventName:string, resources:Record<string,unknown>[]): Promise<void> {
   const drops={invalid:0,unsupported:0,oversized:0};
-  if (eventName !== 'Message') {console.log(JSON.stringify({event:'mcp_events_ingress',...drops,unsupported:resources.length}));return;}
+  if (eventName !== 'Message') {console.log(JSON.stringify({event:'mcp_events_ingress',connectionId:connection.id,...drops,unsupported:resources.length}));return;}
   for (const item of resources) {
     const data=notification(connection.id,item);
     if (typeof data==='string') {drops[data]++;continue;}
@@ -73,10 +73,11 @@ export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, con
       AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = s.user_id AND r.grant_id = s.grant_id AND r.expires_at > ?)`)
       .bind(crypto.randomUUID(),source,sub.id,eventId,body,now,now+HOUR,now+DAY,now,sub.id,source,now,occurred,now));
     await env.DB.batch(statements);
+    console.info(JSON.stringify({event:'mcp_events_selection',connectionId:connection.id,selectedSubscriptions:selected.length,outcome:selected.length?'selected':'no_subscriber'}));
     const deliveries=await env.DB.prepare("SELECT id FROM event_deliveries WHERE source_id = ? AND state = 'pending'").bind(source).all<{id:string}>();
     for (const delivery of deliveries.results) if (!await publishDelivery(env,delivery.id,now)) console.log(JSON.stringify({event:'mcp_events_publication',failures:1}));
   }
-  if (drops.invalid || drops.unsupported || drops.oversized) console.log(JSON.stringify({event:'mcp_events_ingress',...drops}));
+  if (drops.invalid || drops.unsupported || drops.oversized) console.log(JSON.stringify({event:'mcp_events_ingress',connectionId:connection.id,...drops}));
 }
 
 async function publishDelivery(env:Env,id:string,now:number): Promise<boolean> {

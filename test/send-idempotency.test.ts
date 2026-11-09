@@ -54,6 +54,8 @@ describe('send idempotency through MCP with real D1', () => {
     expect(first).toMatchObject({ _meta: { sendReceipt: { state: 'accepted', text: args.text } } });
     expect(repeated).toMatchObject({ _meta: { sendReceipt: { state: 'accepted', text: args.text } } });
     expect(first.structuredContent.data.messageId).toBe('SENT-1');
+    const status = await call('get_send_status', {operation:'send_text', idempotencyKey:'action-1'});
+    expect(status.structuredContent.data).toMatchObject({outcome:'accepted',messageId:'SENT-1',deliveryStatus:'unavailable',readStatus:'unavailable'});
     expect(sent).toBe(1);
   });
 
@@ -110,7 +112,8 @@ describe('send idempotency through MCP with real D1', () => {
     await reachedProvider;
     try {
       const duplicate = await call('send_text', args);
-      expect(duplicate.structuredContent.data.error).toMatchObject({ code: 'send_in_progress', retryable: false });
+      expect(duplicate.structuredContent.data).toMatchObject({outcome:'pending',error:{ code: 'send_in_progress', retryable: false }});
+      expect((await call('get_send_status',{operation:'send_text',idempotencyKey:'concurrent'})).structuredContent.data.outcome).toBe('pending');
       expect(duplicate).toMatchObject({ _meta: { sendReceipt: { state: 'unknown' } } });
       expect(sent).toBe(1);
     } finally { release(); }
@@ -131,6 +134,8 @@ describe('send idempotency through MCP with real D1', () => {
     expect(repeated.structuredContent.data.error).toMatchObject({ code: 'send_result_unknown', status: 409, retryable: false });
     expect(repeated).toMatchObject({ _meta: { sendReceipt: { state: 'unknown' } } });
     expect(sent).toBe(1);
+    const status = await call('get_send_status', { operation: 'send_text', idempotencyKey: 'unknown' });
+    expect(status.structuredContent.data).toMatchObject({ outcome: 'unknown' });
   });
 
   it('fails closed without revealing database details when reservation storage is unavailable', async () => {
@@ -148,7 +153,8 @@ describe('send idempotency through MCP with real D1', () => {
     const args = { to: '5511999999999', text: 'Enviado antes da falha', idempotencyKey: 'save-failed' };
     const first = await call('send_text', args);
     const repeated = await call('send_text', args);
-    expect(first.structuredContent.data.error).toMatchObject({ code: 'send_result_unknown', retryable: false });
+    expect(first.structuredContent.data.messageId).toBe('SENT-1');
+    expect(first.structuredContent.data.accepted).toBe(true);
     expect(repeated.structuredContent.data.error.code).toBe('send_result_unknown');
     expect(JSON.stringify(first)).not.toContain('private-database-detail');
     expect(sent).toBe(1);
@@ -180,6 +186,7 @@ describe('send idempotency through MCP with real D1', () => {
     clock.mockReturnValue(1_800_086_399_999);
     expect((await call('send_text', args)).structuredContent.data.messageId).toBe('SENT-1');
     clock.mockReturnValue(1_800_086_400_000);
+    expect((await call('get_send_status',{operation:'send_text',idempotencyKey:'expires'})).structuredContent.data.outcome).toBe('not_found');
     expect((await call('send_text', args)).structuredContent.data.messageId).toBe('SENT-2');
     expect(sent).toBe(2);
   });
@@ -206,4 +213,61 @@ describe('send idempotency through MCP with real D1', () => {
     expect(sent).toBe(2);
     expect((await local.db.prepare('SELECT COUNT(*) AS count FROM send_operations').first<{ count: number }>())?.count).toBe(0);
   });
+});
+
+it.each([
+  ['send_text', {to:'5511999999999',text:'fixture'}],
+  ['reply_to_message', {to:'5511999999999',text:'fixture',messageId:'SOURCE'}],
+  ['forward_message', {to:'5511999999999',conversationId:'5511888888888',messageId:'SOURCE'}],
+  ['send_media', {to:'5511999999999',mimeType:'image/png',dataBase64:btoa('fixture')}],
+])('preserves an accepted %s ID even when audit storage fails', async (operation, args) => {
+  await local.db.prepare("CREATE TRIGGER fail_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'private audit failure'); END").run();
+  const result = await call(operation, {...args,idempotencyKey:'audit-fixture'});
+  expect(result.structuredContent.data).toMatchObject({accepted:true,messageId:'SENT-1',outcome:'accepted'});
+  expect(result.isError).not.toBe(true);
+  expect(sent).toBe(1);
+});
+
+it('scopes read-only send lookup to the authenticated owner and never dispatches', async () => {
+  await call('send_text',{to:'5511999999999',text:'fixture',idempotencyKey:'lookup-owner'});
+  const before = sent;
+  const accepted = await call('get_send_status',{operation:'send_text',idempotencyKey:'lookup-owner'},user,['mcp:read']);
+  expect(accepted.structuredContent.data).toMatchObject({outcome:'accepted',messageId:'SENT-1'});
+  const other = {id:'other-claim',email:'other@example.test',claims:{}};
+  const owner = await ensureUser(local.db,other);
+  await createConnection(local.db,encryptionKey,{userId:owner.id,friendlyName:'Other',instanceId:'other-instance',token:'other-token'});
+  const foreign = await call('get_send_status',{operation:'send_text',idempotencyKey:'lookup-owner',connectionId},other);
+  expect(foreign.structuredContent.data.error.code).toBe('connection_not_found');
+  const missing = await call('get_send_status',{operation:'send_text',idempotencyKey:'lookup-owner'},other);
+  expect(missing.structuredContent.data.outcome).toBe('not_found');
+  expect(sent).toBe(before);
+});
+
+it('sanitizes corrupt stored send receipts and unavailable lookup storage', async () => {
+  await call('send_text',{to:'5511999999999',text:'fixture',idempotencyKey:'corrupt'});
+  await local.db.prepare("UPDATE send_operations SET result_json = ?").bind(JSON.stringify({accepted:true,messageId:42,token:'private-lookup-value'})).run();
+  const corrupt = await call('get_send_status',{operation:'send_text',idempotencyKey:'corrupt'});
+  expect(corrupt.structuredContent.data.error.code).toBe('send_idempotency_unavailable');
+  expect(JSON.stringify(corrupt)).not.toContain('private-lookup-value');
+  await local.db.prepare('DROP TABLE send_operations').run();
+  const unavailable = await call('get_send_status',{operation:'send_text',idempotencyKey:'corrupt'});
+  expect(unavailable.structuredContent.data.error.code).toBe('send_idempotency_unavailable');
+  expect(sent).toBe(1);
+});
+
+it('logs an opaque key hash and outcome without the key, text or credential', async () => {
+  const log = vi.spyOn(console,'info').mockImplementation(()=>{});
+  await call('send_text',{to:'5511999999999',text:'private-message-fixture',idempotencyKey:'private-key-fixture'});
+  const output = JSON.stringify(log.mock.calls);
+  expect(output).toContain('clientMessageIdHash');
+  expect(output).toContain('providerLatencyMs');
+  expect(output).not.toMatch(/private-message-fixture|private-key-fixture|instance-secret/);
+});
+
+it('looks up the recorded result even when the instance encryption key is unavailable', async () => {
+  await call('send_text',{to:'5511999999999',text:'fixture',idempotencyKey:'without-key'});
+  env.TOKEN_ENCRYPTION_KEY = 'invalid-key';
+  const result = await call('get_send_status',{operation:'send_text',idempotencyKey:'without-key'});
+  expect(result.structuredContent.data).toMatchObject({connectionId,outcome:'accepted',messageId:'SENT-1'});
+  expect(sent).toBe(1);
 });

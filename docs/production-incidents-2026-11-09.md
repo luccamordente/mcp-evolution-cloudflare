@@ -87,3 +87,9 @@ Somente compatibilidade foi publicada: as mudanças mais amplas de envio/histór
 ## Integração de encerramento
 
 O usuário autorizou integrar, versionar, enviar ao GitHub e publicar o trabalho restante. Esta etapa incorpora os dois commits de `fix/secret-encrypted-update` e as mudanças locais de envios, consultas, diagnósticos e logs, preservando a compatibilidade publicada. “Secret” no nome da branch se refere às atualizações de mensagens criptografadas; nenhum commit inclui chaves privadas ou tokens. Os estados “pendente/local” anteriores neste relatório descrevem os respectivos momentos da investigação, não o estado final desta integração. O registro final de release está em `DEPLOY.md`.
+
+### Estado final consolidado
+
+Todos os patches desta sessão, incluindo os dois commits de updates cifrados, foram incorporados ao merge `3d783b4` no `main`. A release passou 592 testes em 40 arquivos, typecheck, galeria e dry-run. O deploy manual `d3e46208` foi seguido pelo automático `c691265b`, ambos com o código combinado; os 34 fontes publicados coincidiram com o `main`. O checkout original ficou sem alterações pendentes. O detalhamento do rollout, reconstrução automática do Container e read-back dos consumidores está em `DEPLOY.md`.
+
+Essa consolidação não transforma causas históricas ainda não reproduzidas em incidentes resolvidos. A retenção de entrada, o atraso de entrega antigo, a recuperação de envelopes já descartados e o suporte de eventos no cliente Composio conservam os limites registrados acima. Nenhum segredo ou token faz parte dos commits.

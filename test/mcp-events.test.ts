@@ -207,11 +207,11 @@ it('requires read scope and rejects invalid event filters, callbacks, secrets an
   for (const params of invalid) expect((await fixture.rpc(account.accessToken,'events/subscribe',params)).body.error).toMatchObject({code:-32602});
 });
 
-it('keeps discovery product-facing and rejects legacy transport requests', async () => {
+it('keeps discovery product-facing and accepts legacy stateless requests', async () => {
   const metadata = await (await fixture.fetch('/.well-known/oauth-protected-resource/mcp')).json() as any;
   expect(metadata.resource_name).toBe('WaPilot');
   const legacy = await fixture.fetch('/mcp',{method:'POST',headers:{authorization:'Bearer '+account.accessToken,'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'old',version:'1'}}})});
-  expect(legacy.status).toBe(400);
+  expect(legacy.status).toBe(200);
 });
 
 it('fails closed with a sanitized error when public Provider grant enumeration is unavailable', async () => {

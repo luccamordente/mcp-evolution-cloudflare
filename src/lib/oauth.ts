@@ -10,7 +10,7 @@ import {
 import type { Env, AuthenticatedUser } from '../types';
 import { authenticateAccessRequest, AuthError } from './auth';
 import { callsWriteTool, createMcpServer, mcpBodyLimit, WRITE_SCOPE } from './mcp';
-import { createMcpHandler } from '@modelcontextprotocol/server';
+import { serveMcpHttp } from './mcp-http';
 import { logOAuthError } from './oauth-diagnostics';
 import { registerMcpEvents } from './mcp-events';
 import { WAPILOT_LOGO_SVG } from '../ui/wapilot-logo';
@@ -39,12 +39,7 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
         }
         const server = await createMcpServer(env, user);
         if (auth) registerMcpEvents(server, env, user, auth, getOAuthApi(oauthOptions(resourceBaseUrl), env));
-        const handler = createMcpHandler(() => server, {
-          legacy: 'reject',
-          responseMode: 'json',
-          maxRequestBodySize: mcpBodyLimit(env),
-        });
-        return handler.fetch(request, auth ? {
+        return serveMcpHttp(request, server, mcpBodyLimit(env), auth ? {
           authInfo: {
             token: auth.token,
             clientId: auth.clientId ?? 'oauth-client',

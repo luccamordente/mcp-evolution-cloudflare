@@ -1,8 +1,8 @@
 # Arquitetura
 
-O endpoint público é `POST /mcp`. O Worker cria um servidor MCP e transporte por troca HTTP a cada request. A configuração usada é `legacy: 'reject'` e `responseMode: 'json'`; não existem sessões de transporte, `Mcp-Session-Id`, SSE, WebSocket, `/sse` ou `createLegacyMcpHandler`.
+O endpoint público é `POST /mcp`. O Worker cria um servidor MCP e transporte por troca HTTP a cada request. A entrada moderna usa `legacy: 'reject'` e `responseMode: 'json'`; o adaptador `src/lib/mcp-http.ts` também atende envelopes 2025 por transporte stateless com `enableJsonResponse: true`; não existem sessões de transporte, `Mcp-Session-Id`, SSE, WebSocket, `/sse` ou `createLegacyMcpHandler`.
 
-O protocolo implementado é MCP `2026-07-28`. O SDK v2.3.1 mantém uma constante histórica de compatibilidade para a era 2025, então o Worker publica explicitamente a revisão 2026 no health check e usa a entrada moderna do `createMcpHandler`. Requests MCP devem conter a versão e os cabeçalhos de roteamento exigidos pela revisão (`MCP-Protocol-Version`, `Mcp-Method` e `Mcp-Name`).
+O protocolo implementado é MCP `2026-07-28`. O SDK v2.3.1 mantém uma constante histórica de compatibilidade para a era 2025, então o Worker publica explicitamente a revisão 2026 no health check e usa a entrada moderna do `createMcpHandler`. Requests MCP 2026 devem conter a versão e os cabeçalhos de roteamento exigidos pela revisão (`MCP-Protocol-Version`, `Mcp-Method` e `Mcp-Name`).
 
 O OAuth Provider do Cloudflare é usado no mesmo Worker. Ele responde descoberta, registro compatível, Authorization Code + PKCE S256, refresh e revogação. O recurso canônico é `https://app.wapilot.com.br/mcp`; o hostname `workers.dev` permanece provisório durante a transição. A rota `/authorize` fica sob uma aplicação Cloudflare Access separada, com One-time PIN e allowlist de `luccamordente@gmail.com` e `heitorsalazar@gmail.com`. O Access autentica o navegador; o OAuth Provider emite o token MCP. A assertion do Access nunca é aceita como token MCP.
 
@@ -154,3 +154,13 @@ Cada entrega tem no máximo seis tentativas acumuladas, incluindo tentativas int
 O Cron limpa primeiro e recupera depois, a cada minuto: posse vencida, criação sem publicação, publicação perdida e job recebido cedo e reconhecido antes do prazo. Republica até 100 IDs devidos por execução, priorizando publicações ausentes/mais antigas, e tenta novamente publicações sem consumo após um minuto. Não altera corpo, `eventId`, contagem ou prazos originais. A DLQ tem consumidor próprio sem nova DLQ e sem retries de broker: reconhece IDs, aplica os limites e libera somente a publicação de entregas ainda pendentes. Não faz POST nem reativa estados terminais; o Cron recupera mesmo se o processamento da DLQ falhar. O broker oferece [entrega pelo menos uma vez](https://developers.cloudflare.com/queues/reference/delivery-guarantees/): aceite HTTP cujo registro local falhe pode repetir os mesmos bytes e `eventId`. Não há garantia de exatamente uma vez.
 
 Logs estruturados contêm somente contadores agregados: descartes `invalid`/`unsupported`/`oversized`, transições/retries, falhas de infraestrutura e drenagem de DLQ. `mcp_events_maintenance` informa backlog, retries acumulados nos registros ainda retidos, falhas, recuperações de publicação/posse, atraso de limpeza e atraso do agendamento. Não registra IDs, corpos, URLs de callback ou credenciais. A validade no uso e a limpeza independem do número de entregas do broker e de qualquer consulta periódica à API de mensagens.
+
+## Compatibilidade HTTP de clientes
+
+| Revisão | Transporte aceito |
+| --- | --- |
+| 2024-11-05 HTTP+SSE | Não; não há endpoint `/sse` nem GET stream. |
+| 2025-03-26, 2025-06-18, 2025-11-25 | Streamable HTTP stateless com POST e resposta JSON, sem envelope exclusivo de 2026. |
+| 2026-07-28 | POST stateless JSON, com os headers e metadados obrigatórios da revisão. |
+
+O adaptador usa a classificação do SDK; uma declaração moderna malformada continua no caminho moderno e não é rebaixada. Clientes 2025 enviam `Accept: application/json, text/event-stream`. OAuth, posse de conexão e escopos são iguais nos dois caminhos. `GET` e `DELETE` recebem 405; não é criado `Mcp-Session-Id`. Os logs guardam revisão allowlisted, transporte, nomes dos headers ausentes, status e duração, sem headers de autorização, corpo ou nome arbitrário fornecido pelo cliente.

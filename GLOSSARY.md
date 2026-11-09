@@ -24,6 +24,30 @@ _Avoid_: transcript, resumo do áudio
 Mensagem recebida ou enviada cujo conteúdo é uma nota de voz ou um arquivo de áudio anexado.
 _Avoid_: nota de voz como sinônimo de toda mensagem de áudio
 
+**Mensagem completa**:
+Representação de uma mensagem com seu texto integral e os metadados disponíveis, incluindo informações sobre anexos.
+_Avoid_: prévia, arquivo de mídia como sinônimo de mensagem completa
+
+## Monitoramento de mensagens
+
+**Assinatura de mensagens**:
+Monitoramento solicitado por um cliente em nome de um usuário para mensagens novas recebidas em uma conexão e, opcionalmente, em uma conversa.
+_Avoid_: conexão, autorização OAuth como sinônimo de assinatura
+
+**Objetivo de acompanhamento**:
+Condição definida pelo usuário que determina o propósito e, quando aplicável, o término do monitoramento de mensagens.
+
+**Notificação de mensagem**:
+Aviso destinado a um cliente sobre uma mensagem nova recebida que corresponde à sua assinatura de mensagens.
+_Avoid_: webhook bruto, histórico de mensagens
+
+**Prévia de mensagem**:
+Trecho inicial do texto de uma mensagem, destinado a permitir uma avaliação inicial sem necessariamente incluir seu conteúdo integral.
+_Avoid_: mensagem completa, resumo como sinônimo de prévia
+
+**Entrega de notificação**:
+Envio de uma notificação de mensagem a um cliente específico. Uma mesma mensagem pode originar entregas para diferentes assinaturas.
+
 ## Conexões
 
 **Conexão padrão**:

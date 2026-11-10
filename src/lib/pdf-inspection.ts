@@ -3,7 +3,7 @@ import type { EvolutionGoClient } from './evolution';
 import type { PdfNativeContext } from './pdfium-runtime';
 import { PdfProcessingError, PDF_TIMEOUT_MS, checkPdfDeadline } from './pdf-processing';
 import { DocumentReadingError } from './document-reading';
-import { approvedMediaOrigins } from './media-origins';
+import { withPdfDownload } from './pdf-policy';
 
 export type PdfInspectionRequest = { cursor?: string; limit: number; bookmarkCursor?: number };
 const TEXT_CHUNK = 4000;
@@ -99,21 +99,12 @@ export async function inspectPdf(bytes: Uint8Array, options: PdfInspectionReques
 }
 
 export async function inspectMessageDocument(client: EvolutionGoClient, env: Pick<Env, 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, options: PdfInspectionRequest, parentSignal: AbortSignal) {
-  const deadline = new AbortController();
-  const expiresAt = Date.now() + PDF_TIMEOUT_MS;
-  const timer = setTimeout(() => deadline.abort(), PDF_TIMEOUT_MS);
-  const signal = AbortSignal.any([parentSignal, deadline.signal]);
   try {
-    checkPdfDeadline(signal, expiresAt);
-    const blob = await client.getMessageDocument(messageId, approvedMediaOrigins(env.DOCUMENT_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL), Math.min(Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024), 8 * 1024 * 1024), signal);
-    checkPdfDeadline(signal, expiresAt);
-    const result = await inspectPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt);
-    checkPdfDeadline(signal, expiresAt);
-    return result;
+    return await withPdfDownload(client, env, messageId, parentSignal,
+      kind => new PdfProcessingError(kind === 'cancel' ? 'request_cancelled' : 'wapilot_timeout', kind === 'cancel' ? 499 : 504, kind === 'cancel' ? 'WaPilot PDF inspection was cancelled.' : 'WaPilot PDF inspection exceeded 60 seconds. Request fewer pages.'),
+      async (blob, signal, expiresAt) => inspectPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt));
   } catch (error) {
-    if (parentSignal.aborted) throw new PdfProcessingError('request_cancelled', 499, 'WaPilot PDF inspection was cancelled.');
-    if (deadline.signal.aborted) throw new PdfProcessingError('wapilot_timeout', 504, 'WaPilot PDF inspection exceeded 60 seconds. Request fewer pages.');
     if (error instanceof PdfProcessingError || error instanceof DocumentReadingError) throw error;
     throw new PdfProcessingError('pdf_page_unavailable', 422, 'WaPilot could not inspect this PDF. Use visual reading if available.');
-  } finally { clearTimeout(timer); }
+  }
 }

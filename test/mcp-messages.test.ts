@@ -616,7 +616,13 @@ describe('transcribe_message_audio HTTP MCP output', () => {
     const listed = await http.rpc<{ tools: Array<{ name: string }> }>('tools/list');
     expect(listed.result.tools.find(tool => tool.name === 'transcribe_message_audio')).toMatchObject({ annotations: { readOnlyHint: true, idempotentHint: false }, inputSchema: { required: ['messageId'], additionalProperties: false } });
     const local = await messageTool(1, ['mcp:read', 'mcp:write']);
-    expect((await local.rpc<{ tools: Array<{ name: string }> }>('tools/list')).result.tools.some(tool => tool.name === 'transcribe_message_audio')).toBe(false);
+    const localCatalog = await local.rpc<{ tools: Array<{ name: string }> }>('tools/list');
+    const localInstructions = await local.rpc<{ instructions: string }>('server/discover');
+    for (const name of ['transcribe_message_audio', 'read_message_document', 'get_message_document', 'inspect_message_document', 'read_message_document_pages']) {
+      expect(localCatalog.result.tools.some(tool => tool.name === name)).toBe(false);
+      expect(localInstructions.result.instructions).not.toContain(name);
+    }
+    expect(localInstructions.result.instructions).toContain('get_message_image');
     expect(http.fetcher).not.toHaveBeenCalled();
     expect(http.run).not.toHaveBeenCalled();
   });

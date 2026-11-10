@@ -1,9 +1,8 @@
 import type { Env } from '../types';
 import type { EvolutionGoClient } from './evolution';
-import { approvedMediaOrigins } from './media-origins';
+import { downloadPdf } from './pdf-policy';
 
 export const DOCUMENT_READING_TIMEOUT_MS = 60_000;
-const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
 
 export class DocumentReadingError extends Error {
   constructor(
@@ -21,7 +20,7 @@ export async function readMessageDocument(client: EvolutionGoClient, env: Pick<E
   let onAbort: (() => void) | undefined;
   try {
     signal.throwIfAborted();
-    const blob = await client.getMessageDocument(messageId, approvedMediaOrigins(env.DOCUMENT_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL), Math.min(Number(env.MAX_MEDIA_BYTES ?? MAX_DOCUMENT_BYTES), MAX_DOCUMENT_BYTES), signal);
+    const blob = await downloadPdf(client, env, messageId, signal);
     signal.throwIfAborted();
     const aborted = new Promise<never>((_, reject) => {
       onAbort = () => reject(signal.reason);

@@ -214,3 +214,24 @@ O deploy manual ativou `d3e46208-1636-476d-af8a-16e522ab3f2c` às 20:25:27 UTC, 
 O read-back da revisão automática conferiu os 34 fontes de aplicação idênticos ao `main`, incluindo `src/lib/message-update.ts` e `get_send_status`. Bindings, variáveis/Secrets, exports, assets, compatibilidade e observabilidade ficaram iguais à base. Os dois consumidores mantiveram IDs e configurações originais (principal: batch 10, espera 1s, 3 retries; DLQ: batch 10, espera 1s, 0 retries). O comando manual voltou a terminar com o aviso de permissões na reaplicação dos consumidores; o código já estava ativo e a leitura confirmou que os consumidores não foram alterados. Nenhuma migration foi aplicada.
 
 Verificação pública: health e metadata OAuth 200; MCP sem bearer 401. A listagem autenticada de conexões passou. A validação de motivos cifrados e consulta de envios usa os testes locais de comportamento; não foram gerados novos envios WhatsApp, callbacks ou envelopes cifrados reais para este rollout. Composio precisa de sync manual para anunciar a nova ferramenta de consulta; suporte a assinaturas de eventos permanece uma validação separada.
+
+
+### Renderização visual de PDF
+
+A renderização usa `@hyzyla/pdfium` 3.0.0 e seu WASM incluído no bundle, mais `fast-png` 8.0.0 para PNG. Não requer novo binding, serviço, storage ou credencial. A importação WASM é estática para o Workers; não deve ser trocada por download/compilação dinâmica. Use a allowlist `DOCUMENT_STORAGE_ORIGINS` já existente. O dry-run inicial desta integração mediu aproximadamente 3.0 MiB gzip de Worker com WASM; confirme limites do plano e tamanho final antes de publicar. O dry-run não comprova aceitação de tamanho no plano atual nem latência/memória sob documentos adversariais. Nenhuma publicação é necessária para a prova local workerd.
+### PDF original no MCP HTTP
+
+`get_message_document` usa os mesmos `DOCUMENT_STORAGE_ORIGINS`, limite de mídia e credenciais já usados pela leitura textual. Não exige novo binding ou infraestrutura. Clientes precisam aceitar recursos MCP binários incorporados de até 11.184.812 bytes em Base64 mais envelope, e aguardar pelo menos 90 segundos. A presença da ferramenta no catálogo não garante acesso ao arquivo pelo agente: valide a transferência e leitura temporária no host desejado antes de declarar compatibilidade. O teste local documentado em `DEVELOPMENT.md` não valida uma revisão publicada. Nenhum deploy foi necessário para a prova local.
+
+### Inspeção de PDFs
+
+`inspect_message_document` compartilha a dependência WASM e a configuração de documentos da leitura de páginas; não cria bindings, persistência ou inferência. Valide o bundle completo com dry-run: o adapter precisa manter os exports nativos PDFium de texto, rótulos e bookmarks. O trabalho por chamada é limitado a 5 páginas/trechos de 4.000 caracteres e 100 bookmarks com travessia máxima de 2.000. Cliente: espere 90 segundos e preserve os cursores e identificadores retornados. O prazo de 60 segundos coopera entre etapas, sem prometer interromper uma operação WASM síncrona em andamento.
+
+
+### Publicação da leitura progressiva de PDF — #27
+
+Deploy autorizado em 2026-11-07 às 03:01 UTC (6 de novembro no horário local), a partir de `integration/issue-27-pdf`, código `9711218`. Revisão publicada: `f41463aa-c534-465d-98b8-4b6e96af7865`, confirmada com 100% do tráfego; anterior: `12b93c0e-97b9-4093-bfdc-58096d8d782c`. O comando usou Wrangler local 4.150.0, perfil `wapilot`, conta proprietária do Worker `e972fc5484db86f0468fa2cf78f61870` e ambiente principal explícito `--env ''`. Nenhum push ou migration foi necessário.
+
+O read-back confirmou bindings e variáveis idênticos à revisão anterior, incluindo `AI` e `DOCUMENT_STORAGE_ORIGINS`; segredos foram preservados. O bundle publicado mediu 8.294,17 KiB bruto / 3.076,36 KiB gzip e startup de 98 ms. O dry-run passou; o código havia passado nos 415 testes antes desta publicação, sem mudanças posteriores no código.
+
+Verificações remotas: `/healthz` respondeu 200 com MCP `2026-07-28`; `POST /mcp` sem bearer respondeu 401 com desafio OAuth e `resource_metadata`; a metadata do recurso respondeu 200. Uma chamada autenticada de `connection_status` pelo conector WaPilot funcionou. Essas verificações não executaram leitura de PDFs privados nem inferência. Atualize o catálogo do cliente para descobrir `get_message_document`, `inspect_message_document` e `read_message_document_pages`, mantendo pelo menos 90 segundos de timeout. A validação dos PDFs no host de produção continua aberta conforme [PDF-VALIDATION.md](PDF-VALIDATION.md).

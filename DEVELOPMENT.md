@@ -120,3 +120,23 @@ A configuração `local` contém D1/KV sintéticos e filas próprias com `remote
 ### Validação em ambientes com `/tmp` sem execução
 
 As fixtures de hooks Git e CLI precisam executar arquivos temporários. Se `/tmp` estiver montado com `noexec`, defina `TMPDIR` para um diretório privado e executável fora do checkout (por exemplo, um diretório de cache do usuário). Ele também deve ficar fora de um pacote com `type: module`, pois algumas fixtures são scripts CommonJS sem extensão. Execute `npm run check` normalmente com esse ambiente; não é necessário alterar ou pular os testes.
+
+
+### Renderização de páginas de PDF
+
+`read_message_document_pages` entrega uma página como imagem nativa no MCP HTTP, sem alterar `read_message_document` ou o stdio. `test/pdf-pages.test.ts` executa PDFium WASM real no workerd sobre `test/fixtures/document-pages.pdf`, conferindo dimensões e regiões coloridas conhecidas. `test/mcp-messages.test.ts` verifica a mesma capacidade pelo handler HTTP real, incluindo autorização, schema, identidade e imagem PNG. A fixture é sintética e não sensível. Esses testes comprovam renderização e transporte locais, não suporte universal de hosts ou compreensão de qualquer documento.
+### Obtenção temporária do PDF original
+
+`get_message_document` devolve o PDF como recurso binário incorporado MCP, somente no catálogo HTTP. Não depende de `AI.toMarkdown`, não habilita bindings stdio nem persiste mídia. O teste em `test/mcp-messages.test.ts` atravessa o handler HTTP real, decodifica o recurso, confere igualdade com `test/fixtures/document-original.pdf`, grava um arquivo temporário e remove-o. A fixture é sintética, produzida com ReportLab 4.4.10, sem dados privados.
+
+Prova local em 2026-11-06: cliente de teste Node 24.13.0/Vitest 5.0.4, handler MCP JSON, PDF sintético de uma página, recurso incorporado recebido e gravado temporariamente; Poppler `pdftotext` leu `Temporary reader fixture: 7294` do arquivo recebido. A verificação com Poppler foi executada como complemento local, sem acrescentar dependência de sistema à suíte. Isso comprova os bytes no cliente de teste; não comprova que ChatGPT ou outro host encaminhe recursos PDF ao filesystem do agente. Esse aceite de compatibilidade real permanece aberto, sem deploy, mensagens privadas ou inferência paga.
+
+### Inspeção de PDF por página
+
+`inspect_message_document` devolve mapa/texto limitado e continuação, usando o PDFium real sem `AI.toMarkdown`. `test/mcp-messages.test.ts` atravessa o handler HTTP e comprova conexão, schema, texto por página, continuação de texto e sumário, rótulos e ausência de alegação de cobertura visual. `test/pdf-inspection.test.ts` repete a extração real de texto/rótulos/bookmarks no workerd, incluindo scan e página mista. As fixtures `document-inspection.pdf` e `document-outline.pdf` são sintéticas e regeneráveis com `python3 test/fixtures/generate-document-inspection.py` (ReportLab), sem serviços externos. O sumário da segunda contém 105 entradas para exercitar continuação. Os testes localizam trechos em páginas reais e preservam a diferença entre texto disponível e conteúdo visual; não avaliam a compreensão do modelo.
+
+`test/pdf-detail-worker.test.ts` verifica o recorte real diretamente no workerd com bitmap de 2400 × 2400 pixels, conferindo marcadores coloridos. `test/pdf-detail.test.ts` complementa o processamento nativo e a suíte MCP verifica contrato e rejeição de coordenadas inválidas antes de acesso remoto. Esses testes não garantem fidelidade universal de PDFs ou comportamento de redução de imagem em hosts externos.
+As prévias/lotes PDF (#31) são verificados pelo handler MCP real em `test/mcp-messages.test.ts`: ordem, continuação explícita, validação antes do acesso remoto e entrega parcial entre páginas válidas. A fixture `document-limits.pdf` contém uma página de dimensões excessivas entre duas válidas. `generate-document-matrix.py` regenera as fixtures sintéticas com ReportLab/Pillow, sem dependências Python em produção.
+
+
+O fluxo de escolha e cobertura (#33) é anunciado por `server/discover` e pelo catálogo HTTP, com regressão em `test/mcp-messages.test.ts`. Consulte [a matriz de validação](docs/PDF-VALIDATION.md) antes de atribuir compatibilidade a um host. As provas não usam PDFs privados, envio de mensagens ou inferência remota paga.

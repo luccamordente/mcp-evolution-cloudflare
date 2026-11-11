@@ -16,6 +16,14 @@ Cada worktree precisa do próprio índice. Depois de criá-lo, reinicie a conex�
 
 ## Desenvolvimento local
 
+### Contexto de tarefas ClickUp para agentes
+
+O projeto configura o MCP remoto do Composio em `.codex/config.toml` para o
+Codex. A autenticação é individual por host; não há credenciais no repositório.
+Consulte [o guia de conexão e verificação](docs/agents/clickup.md) para autorizar
+Composio/ClickUp e confirmar a leitura da tarefa. Essa integração é de
+desenvolvimento; GitHub Issues continua sendo o tracker deste repositório.
+
 O sender de callbacks usa o binding `CALLBACK_SENDER` no HTTP e uma imagem Node em Container local. `npm run dev:local` precisa de Docker disponível para essa imagem; o perfil stdio exclui Containers e Durable Objects e mantém `remoteBindings: false`. Não há rota pública para chamar o sender. A chave de desenvolvimento já existente deriva sua autenticação interna; não copie segredos de produção para executar testes.
 
 `npm run test:sender-container` executa Worker e Durable Object reais no workerd/Miniflare e inicia a imagem Node pelo engine Docker local. Exige Docker, OpenSSL e a sub-rede de teste `93.184.216.0/24` livre; não rode junto com o teste de rede do pacote `sender`. O harness constrói as imagens locais, baixa o sidecar oficial fixado, gera uma CA temporária e usa o receptor DNS/TLS de `sender/test/receiver.mjs`. Um wrapper exclusivamente de teste conecta o sidecar à rede descartável antes de iniciar seu binário original, permitindo que ele descubra a faixa da fixture; não altera iptables, sysctl ou rotas do host, nem o sender de produção. As fixtures e os Containers são removidos ao terminar. O teste inclui concorrência, rejeições DNS/TLS, redirects, SIGTERM com chamada em andamento, um minuto real de inatividade e retomada. A prova local não substitui a homologação do egress na Cloudflare.

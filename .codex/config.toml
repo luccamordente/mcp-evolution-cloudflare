@@ -1,0 +1,5 @@
+# Project development integration; credentials stay in Codex's OAuth store.
+[mcp_servers.composio]
+url = "https://connect.composio.dev/mcp"
+startup_timeout_sec = 30
+tool_timeout_sec = 120

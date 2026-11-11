@@ -235,3 +235,15 @@ Antes de um corte autorizado, execute esta sequência:
 A allowlist no Worker não impõe resolução DNS, limites de egress ou política de redirects ao processo Go. Aprove somente origens confiáveis, incluindo seus redirects e assets de metadados, e confirme a política no backend antes de ampliar esse acesso. URLs de botões são destinos apresentados ao destinatário e não entram nessa allowlist de downloads.
 
 As lacunas de evento nativo, templates, Pix, áudio sem PTT, notas de vídeo, coordenadas zero e opções ignoradas do carrossel estão na matriz. Não declare esses formatos disponíveis a partir de um teste de outra variante. Erros depois do despacho continuam com resultado desconhecido e sem retry automático; aceite não comprova entrega, leitura ou renderização.
+
+### Resultado da publicação em 11 de novembro de 2026
+
+A publicação autorizada do commit `698f6a4` ativou a revisão `d26781ee-b263-4fa8-a7d8-7c212830d42d`, com 100% do tráfego às 15:37:52 UTC. O read-back confirmou a migration `0010` e os dois triggers de bloqueio entre os namespaces de envio. Bindings, variáveis, Secrets, configuração de compatibilidade e metadata da imagem Container foram preservados. O comando usou `--env '' --keep-vars --containers-rollout none`.
+
+O Wrangler terminou com erro ao tentar reaplicar os consumidores existentes de Queue, porque a credencial da sessão não tem essa permissão. O upload e a ativação do Worker já haviam concluído. Nenhuma segunda publicação foi iniciada para contornar esse erro. A comparação de versões confirma os bindings preservados, mas não substitui uma leitura atual da configuração dos consumidores.
+
+Os probes públicos retornaram 200 em `/healthz` e na metadata OAuth, e 401 com `resource_metadata` em `/mcp` sem bearer. O catálogo autenticado retornou 15 ferramentas e 18 variantes de `send_message`, sem as quatro ferramentas antigas de envio.
+
+Os catálogos em cache dos clientes WaPilot e Composio ainda anunciam nomes antigos. A sessão não dispõe de controle de atualização do catálogo WaPilot nem da chave de projeto exigida pelo endpoint de sync da Composio. O sync desses clientes permanece pendente. Os envios de homologação usaram o novo catálogo diretamente pelo proxy MCP autenticado da conexão existente, sem recriar a autorização.
+
+Seis amostras autorizadas foram enviadas uma vez cada, com chaves de idempotência distintas, nas variantes texto, lista, enquete, botões, imagem e documento PDF. Todas receberam aceite e apareceram no histórico retido de origem e destino. O histórico de origem registra a mesma mensagem citada nas seis amostras. No destino, texto, imagem e PDF preservam o ID citado, enquanto os registros interativos não expõem esse campo. A renderização dos formatos e das citações em dispositivos não foi verificada. Esses resultados não comprovam eventos nativos, leitura, nem compatibilidade universal dos clientes WhatsApp.

@@ -178,7 +178,7 @@ O suporte eventual de cada item abaixo requer uma implementação verificada ant
 
 | Item | Estado atual e dependência |
 | --- | --- |
-| Evento nativo | Não há rota de envio de evento no `main` conferido. Exige contrato, construção nativa, serialização e testes do backend. |
+| Evento nativo | Não há rota de envio de evento no `main` conferido. Exige contrato, construção nativa, segredo de mensagem, serialização e testes do backend. O recebimento de RSVP também requer mudanças. Veja a [investigação de eventos nativos](NATIVE-WHATSAPP-EVENTS.md). |
 | Template de negócio | `/send/template` existe, mas o handler rejeita a operação. Exige outro canal ou implementação compatível. |
 | Pix | Os campos existem no tipo de botão, mas o serviço rejeita esse envio porque há descarte silencioso no protocolo usado. |
 | Anexo de áudio comum | A rota `audio` atual produz nota de voz. Exige suporte distinto para áudio sem PTT. |
@@ -196,6 +196,8 @@ O suporte eventual de cada item abaixo requer uma implementação verificada ant
 | Múltiplos contatos | O contrato atual envia um único vCard. Uma coleção de contatos requer suporte próprio do backend. |
 | Comércio e outros formatos WhatsApp | Catálogos, produtos, pedidos e formatos de canais específicos exigem inventário e contratos próprios. O inventário acima não representa todos os tipos internos de `waE2E`. |
 | Reações, edição, remoção, leitura e presença | Há rotas de gestão de mensagens no provedor. Não são variantes de criação de uma nova mensagem neste contrato. |
+
+Um arquivo `.ics` enviado por `document` continua sendo um anexo, mesmo quando o destinatário o identifica como `text/calendar`. Esse caminho não cria `EventMessage`, cartão de evento ou RSVP nativo. A conversão futura para evento deve ser uma ação explícita, com campos validados, sem mudar automaticamente o significado de documentos pelo MIME ou pela extensão.
 
 ## Aceitação
 

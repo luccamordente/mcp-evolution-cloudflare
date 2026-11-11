@@ -156,3 +156,14 @@ O fluxo de escolha e cobertura (#33) é anunciado por `server/discover` e pelo c
 Os testes regulares de `test/send-message.test.ts` percorrem descoberta e chamada de ferramenta pelo MCP, com D1 real e provedor simulado. Cobrem variantes válidas, campos incompatíveis, citação, autorização, allowlist de download e o bloqueio entre chaves antigas e novas. As suítes de idempotência, stdio e compatibilidade preservam concorrência, resultados desconhecidos e isolamento. O script conectado acrescenta a observação da estrutura nativa produzida; ele não substitui homologação em dispositivos.
 
 Android, iOS e WhatsApp Web têm uma conferência separada para renderização, citações, seleção de listas e botões, votação, reprodução de mídia e publicação no Status. Cada envio real exige destinatário, conteúdo e autorização próprios. Evento e RSVP só entram nessa homologação quando o backend implementar envio nativo. Consulte [a matriz de suporte e dependências](docs/SEND-MESSAGE.md#inventário-do-provedor-e-suporte-futuro).
+
+### Connected native history acceptance
+
+`npx vitest run test/native-history.test.ts` checks typed history parsing and
+relationship safety with synthetic provider documents. To run H-A8 against the
+real Go router, set `WAPILOT_HISTORY_ACCEPTANCE_URL` to the isolated local fixture
+server and `WAPILOT_HISTORY_ACCEPTANCE_TOKEN` to its synthetic instance token.
+The connected case uses real local D1, the shared MCP handler, the consumer
+normalizer and authenticated Go HTTP reads. It requires five structured-only
+`synthetic-*` messages and 500 poll votes and event responses, across multiple
+bounded pages. An unset URL skips this case and does not establish H-A8.

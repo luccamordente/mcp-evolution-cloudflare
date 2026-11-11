@@ -1283,3 +1283,28 @@ it('returns unsupported update metadata through get_message without inventing mi
   expect(result.isError).not.toBe(true);
   expect(result.structuredContent.data).toMatchObject({message:{type:'application/vnd.whatsapp.update',update:{state:'unsupported',reason:'unsupported_subtype'}}});
 });
+
+describe('native history diagnostics', () => {
+  it.each(['unsupported_action', 'native_media_unavailable', 'duplicate_poll_options'])('reports partial native content for %s', async reason => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/vnd.whatsapp.interactive', body: { interactive: { kind: 'native', text: 'Retained part' } } }, meta: { content: { version: 1, state: 'partial', reason, rawMessage: 'private' } } } }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1' } });
+    expect(result.isError).not.toBe(true);
+    expect(result).toMatchObject({ structuredContent: { data: { message: { contentPartial: true, contentDiagnostic: { state: 'partial', reason } } } } });
+    expect(JSON.stringify(result)).not.toContain('private');
+  });
+  it.each(['missing_original_secret', 'decryption_failed'])('preserves safe unavailable diagnosis for %s', async reason => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/vnd.whatsapp.event-response', body: {} }, meta: { content: { version: 1, state: 'unavailable', reason, targetId: 'event' } } } }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1' } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { contentUnavailable: true, contentUnavailableReason: reason, contentDiagnostic: { version: 1, state: 'unavailable', reason, targetId: 'event' } } } });
+  });
+  it('omits unknown provider diagnostic reasons', async () => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, meta: { content: { version: 1, state: 'partial', reason: 'private-provider-input' } } } }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1' } });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.stringify(result)).not.toContain('private-provider-input');
+    expect(result).toMatchObject({ structuredContent: { data: { message: { contentPartial: true, contentDiagnostic: { version: 1, state: 'partial' } } } } });
+  });
+});

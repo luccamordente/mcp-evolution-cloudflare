@@ -3,18 +3,11 @@ import { encode } from 'fast-png';
 import { Buffer } from 'node:buffer';
 import type { Env } from '../types';
 import type { EvolutionGoClient } from './evolution';
-import { approvedMediaOrigins } from './media-origins';
 
 export const PDF_PRESETS = { preview: 640, reading: 1600, detail: 2400 } as const;
-export const PDF_TIMEOUT_MS = 60_000;
+export { PDF_TIMEOUT_MS, PdfProcessingError, checkPdfDeadline } from './pdf-policy';
+import { PDF_TIMEOUT_MS, PdfProcessingError, checkPdfDeadline, withPdfDownload } from './pdf-policy';
 export const MAX_PDF_OUTPUT_BYTES = 8 * 1024 * 1024 - 64 * 1024; // Reserve room for metadata and the MCP envelope.
-export class PdfProcessingError extends Error {
-  constructor(public readonly code: 'pdf_invalid' | 'pdf_limit' | 'pdf_page_unavailable' | 'request_cancelled' | 'wapilot_timeout', public readonly status: number, message: string) { super(message); }
-}
-export function checkPdfDeadline(signal: AbortSignal, expiresAt: number) {
-  signal.throwIfAborted();
-  if (Date.now() >= expiresAt) throw new PdfProcessingError('wapilot_timeout', 504, 'WaPilot PDF processing exceeded 60 seconds. Request fewer pages.');
-}
 
 export type PdfRequest = { pages: number[]; preset: keyof typeof PDF_PRESETS; crop?: import('./pdf-detail').PdfCrop };
 
@@ -92,20 +85,7 @@ export async function processPdf(bytes: Uint8Array, options: PdfRequest, signal:
 }
 
 export async function readDocumentPages(client: EvolutionGoClient, env: Pick<Env, 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, options: PdfRequest, parentSignal: AbortSignal) {
-  const expiresAt = Date.now() + PDF_TIMEOUT_MS;
-  const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), PDF_TIMEOUT_MS);
-  const signal = AbortSignal.any([parentSignal, deadline.signal]);
-  try {
-    checkPdfDeadline(signal, expiresAt);
-    const blob = await client.getMessageDocument(messageId, approvedMediaOrigins(env.DOCUMENT_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL), Math.min(Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024), 8 * 1024 * 1024), signal);
-    checkPdfDeadline(signal, expiresAt);
-    const result = await processPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt);
-    checkPdfDeadline(signal, expiresAt);
-    return result;
-  } catch (error) {
-    if (parentSignal.aborted) throw new PdfProcessingError('request_cancelled', 499, 'WaPilot PDF reading was cancelled.');
-    if (deadline.signal.aborted) throw new PdfProcessingError('wapilot_timeout', 504, 'WaPilot PDF reading exceeded 60 seconds. Request fewer pages.');
-    throw error;
-  } finally { clearTimeout(timer); }
+  return withPdfDownload(client, env, messageId, parentSignal,
+    kind => new PdfProcessingError(kind === 'cancel' ? 'request_cancelled' : 'wapilot_timeout', kind === 'cancel' ? 499 : 504, kind === 'cancel' ? 'WaPilot PDF reading was cancelled.' : 'WaPilot PDF reading exceeded 60 seconds. Request fewer pages.'),
+    async (blob, signal, expiresAt) => processPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt));
 }

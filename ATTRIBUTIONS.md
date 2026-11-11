@@ -30,3 +30,5 @@ A galeria reutiliza a tipografia do dashboard WaPilot sem chamadas externas: os 
 
 - DM Sans — The DM Sans Project Authors, SIL Open Font License 1.1. Arquivo de `@fontsource-variable/dm-sans` 5.3.0, `dm-sans-latin-standard-normal.woff2`. [Licença integral](third_party/dm-sans-LICENSE.txt).
 - Manrope — The Manrope Project Authors, SIL Open Font License 1.1. Arquivo de `@fontsource-variable/manrope` 5.3.0, `manrope-latin-wght-normal.woff2`. [Licença integral](third_party/manrope-LICENSE.txt).
+
+PDFium usa licença BSD de três cláusulas e mantém os avisos de terceiros aplicáveis da distribuição upstream.

@@ -193,7 +193,7 @@ describe('image gallery MCP boundary', () => {
     vi.spyOn(EvolutionGoClient.prototype, 'listMessages').mockRejectedValue(new EvolutionApiError(504, 'WaPilot timeout test', { private: 'private-payload' }, timeoutSource));
     const { result } = await call({});
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: `${timeoutSource}_timeout`, status: 504, message: 'WaPilot timeout test' } } } });
-    expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent.data);
+    expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent);
     expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private-payload|instance-secret|global-secret/);
     expect(auditBindings.some(values => values.some(value => typeof value === 'string' && value.includes(`${timeoutSource}_timeout`)))).toBe(true);
   });

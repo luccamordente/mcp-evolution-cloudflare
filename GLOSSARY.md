@@ -85,3 +85,15 @@ Grant cujo prazo terminou. Não aparece na lista de autorizações ativas, mas p
 
 **Atenção operacional**:
 Sinal derivado usado para priorizar uma conta ou conexão quando o Evolution Go informa indisponibilidade, desconexão ou falha de leitura do estado live.
+
+
+## Leitura de documentos
+
+**Posição física da página**:
+Índice da página dentro do PDF, começando em 1. É o identificador usado para leitura e recorte, independentemente do número impresso ou do rótulo.
+
+**Rótulo da página**:
+Numeração lógica declarada pelo PDF, quando presente. Pode usar algarismos romanos, prefixos ou outra sequência e não comprova a numeração visível na folha.
+
+**Cobertura textual**:
+Trecho de texto extraído de uma página; não comprova que imagens, scans, gráficos ou todo o conteúdo visual tenham sido examinados.

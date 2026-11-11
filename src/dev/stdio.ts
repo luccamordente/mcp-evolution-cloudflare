@@ -112,7 +112,7 @@ try {
   if (!closing) {
     await (pendingCleanup = cleanSendMetadata(db));
     if (!closing) {
-      const env: Env = { DB: db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: baseUrl, MAX_MEDIA_BYTES: '8388608', IMAGE_STORAGE_ORIGINS: config.IMAGE_STORAGE_ORIGINS };
+      const env: Env = { DB: db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: baseUrl, MAX_MEDIA_BYTES: '8388608', IMAGE_STORAGE_ORIGINS: config.IMAGE_STORAGE_ORIGINS, SEND_MEDIA_ORIGINS: config.SEND_MEDIA_ORIGINS };
       const transport = new StdioServerTransport(input, process.stdout, { maxBufferSize: mcpBodyLimit(env) });
       server = serveStdio(() => createMcpServer(env, identity, ['mcp:read', 'mcp:write']), { transport, onerror: () => console.error('WaPilot: erro no protocolo MCP local.') });
       const transportClosed = transport.onclose;

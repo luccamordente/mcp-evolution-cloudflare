@@ -87,7 +87,7 @@ describe('Evolution Go route contracts', () => {
       seen = { url: String(request), init: init as RequestInit };
       return Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'msg-1', attributes: { at: 1792104420000, encodingFormat: 'text/plain', body: { text: 'Olá' } }, relationships: { author: { data: { type: 'chat', id: '5511999999999' } } } } });
     } });
-    const result = await client.sendText('5511999999999', 'Olá', 'quoted-1', '5511888888888');
+    const result = await client.sendMessage({ kind: 'text', to: '5511999999999', text: 'Olá', replyTo: { messageId: 'quoted-1', participant: '5511888888888' } });
     expect(result).toMatchObject({ accepted: true, messageId: 'msg-1', conversationId: '5511999999999' });
     expect(seen?.url).toBe('https://evolution.invalid/send/text');
     expect(JSON.parse(String(seen?.init.body))).toEqual({ data: { type: 'message', attributes: { encodingFormat: 'text/plain', body: { text: 'Olá' } }, relationships: { recipient: { data: { type: 'chat', id: '5511999999999' } }, quoted: { data: { type: 'message', id: 'quoted-1', meta: { participant: '5511888888888' } } } } } });
@@ -102,7 +102,7 @@ describe('Evolution Go route contracts', () => {
       return Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-media', attributes: { at: 1792104420000, encodingFormat: 'application/pdf' } } });
     } });
 
-    await client.sendMedia('5511999999999', { mimeType: 'application/pdf', fileName: 'arquivo.pdf', data: Uint8Array.from([1]).buffer });
+    await client.sendMessage({ kind: 'document', to: '5511999999999', mimeType: 'application/pdf', fileName: 'arquivo.pdf', source: { kind: 'base64', dataBase64: 'AQ==' } });
     expect(JSON.parse(body)).toMatchObject({ data: { type: 'message', attributes: { encodingFormat: 'application/pdf', body: { media: { url: 'AQ==' } } }, relationships: { recipient: { data: { type: 'chat', id: '5511999999999' } } } } });
     expect(JSON.parse(body)).not.toHaveProperty('ptt');
   });
@@ -116,7 +116,7 @@ describe('Evolution Go route contracts', () => {
         meta: { flags: 65, instanceToken: 'private-token' },
       } });
     } });
-    const result = await client.sendMedia('5511999999999', { mimeType: ' VIDEO/MP4 ; codecs=avc1', gifPlayback: true, data: Uint8Array.from([1]).buffer });
+    const result = await client.sendMessage({ kind: 'video', to: '5511999999999', mimeType: ' VIDEO/MP4 ; codecs=avc1', gifPlayback: true, source: { kind: 'base64', dataBase64: 'AQ==' } });
     expect(body).toMatchObject({ data: { attributes: { encodingFormat: 'video/mp4', gifPlayback: true, body: { media: { url: 'AQ==' } } } } });
     expect(result.media).toEqual({ mimeType: 'video/mp4', fileName: 'loop.mp4', size: 1024, gifPlayback: true });
     expect(JSON.stringify(result)).not.toMatch(/private/);
@@ -126,7 +126,7 @@ describe('Evolution Go route contracts', () => {
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'i', instanceToken: 'secret', fetcher: async () => Response.json({ jsonapi: { version: '1.1' }, data: {
       type: 'message', id: 'GIF1', attributes: { encodingFormat: 'video/mp4', body: { medias: [{ fileSize }] } }, meta: { flags: 64 },
     } }) });
-    const result = await client.sendMedia('5511999999999', { mimeType: 'image/gif', data: Uint8Array.from([1]).buffer });
+    const result = await client.sendMessage({ kind: 'gif', to: '5511999999999', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: 'AQ==' } });
     expect(result.media).toEqual({ mimeType: 'video/mp4', gifPlayback: true });
   });
 

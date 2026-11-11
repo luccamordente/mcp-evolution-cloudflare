@@ -235,3 +235,36 @@ Deploy autorizado em 2026-11-07 às 03:01 UTC (6 de novembro no horário local),
 O read-back confirmou bindings e variáveis idênticos à revisão anterior, incluindo `AI` e `DOCUMENT_STORAGE_ORIGINS`; segredos foram preservados. O bundle publicado mediu 8.294,17 KiB bruto / 3.076,36 KiB gzip e startup de 98 ms. O dry-run passou; o código havia passado nos 415 testes antes desta publicação, sem mudanças posteriores no código.
 
 Verificações remotas: `/healthz` respondeu 200 com MCP `2026-07-28`; `POST /mcp` sem bearer respondeu 401 com desafio OAuth e `resource_metadata`; a metadata do recurso respondeu 200. Uma chamada autenticada de `connection_status` pelo conector WaPilot funcionou. Essas verificações não executaram leitura de PDFs privados nem inferência. Atualize o catálogo do cliente para descobrir `get_message_document`, `inspect_message_document` e `read_message_document_pages`, mantendo pelo menos 90 segundos de timeout. A validação dos PDFs no host de produção continua aberta conforme [PDF-VALIDATION.md](PDF-VALIDATION.md).
+
+## Publicação da ferramenta unificada de envio
+
+Esta mudança prepara `send_message`, os schemas por `message.kind`, o adaptador de envio e a migration `0010_unified_send_fence.sql`. Não publica Worker, aplica migration remota, altera infraestrutura ou envia mensagens reais. Os registros anteriores deste documento são históricos e não comprovam o estado atual do deployment.
+
+A troca de catálogo remove `send_text`, `reply_to_message`, `send_media` e `forward_message`. Os nomes antigos continuam aceitos somente pelo argumento `operation` de `get_send_status`, para consulta dos registros anteriores até sua expiração original de 24 horas. Clientes precisam atualizar as chamadas para o novo envelope, sem transformar uma ação de resultado desconhecido em uma nova chave.
+
+Antes de um corte autorizado, execute esta sequência:
+
+1. Confirme o commit e a versão do backend em uso, o Worker com tráfego, a automação de builds e as migrations já aplicadas. Compare os formatos pretendidos com a [matriz de suporte](SEND-MESSAGE.md#inventário-do-provedor-e-suporte-futuro).
+2. Execute `npm run check`, `npm run test:acceptance:send` e `npx wrangler deploy --dry-run`. A aceitação conectada usa somente instância e dados sintéticos locais, com a fronteira WhatsApp substituída. O dry-run não comprova o schema remoto ou o comportamento em dispositivos.
+3. Confira a lista remota de migrations pendentes. Aplique `0010_unified_send_fence.sql` antes de publicar o novo Worker ou migrar clientes. Os triggers impedem, em ambos os sentidos, a reserva de uma chave ativa entre as operações antigas e `send_message`, sem copiar conteúdo ou reiniciar validade. A migration não remove registros.
+4. Publique o bundle revisado somente com autorização de publicação. Preserve OAuth, Access, D1, KV, filas, Cron e imagem do sender conforme o read-back atual. Não publique os perfis `local` ou `stdio`.
+5. Atualize os catálogos WaPilot e Composio e confirme que só `send_message` é anunciada como ferramenta de envio. Confira as variantes, os escopos e a disponibilidade da consulta de operações antigas. A presença de um nome antigo em cache não autoriza repetir uma escrita por outro nome.
+6. Confira `/healthz`, `/.well-known/oauth-protected-resource/mcp` e o `401` com metadata OAuth em `/mcp` sem bearer. Com cliente autenticado, confira isolamento da conexão e a consulta de um registro sintético autorizado. Homologue envio/renderização em Android, iOS e WhatsApp Web separadamente, somente com destinatário, conteúdo e autorização definidos.
+
+`SEND_MEDIA_ORIGINS` é uma variável opcional com origens HTTPS exatas, separadas por vírgula. Ela autoriza os downloads do provedor usados por figurinha, URLs de prévia em `link.text`, cabeçalhos de botões e mídia de carrossel. Vazia, ela bloqueia essas fontes remotas; anexos Base64 não exigem essa variável. Não inclua a origem da API, curingas, credenciais ou caminhos. Não copie URLs privadas de arquivos para a configuração ou documentação.
+
+A allowlist no Worker não impõe resolução DNS, limites de egress ou política de redirects ao processo Go. Aprove somente origens confiáveis, incluindo seus redirects e assets de metadados, e confirme a política no backend antes de ampliar esse acesso. URLs de botões são destinos apresentados ao destinatário e não entram nessa allowlist de downloads.
+
+As lacunas de evento nativo, templates, Pix, áudio sem PTT, notas de vídeo, coordenadas zero e opções ignoradas do carrossel estão na matriz. Não declare esses formatos disponíveis a partir de um teste de outra variante. Erros depois do despacho continuam com resultado desconhecido e sem retry automático; aceite não comprova entrega, leitura ou renderização.
+
+### Resultado da publicação em 11 de novembro de 2026
+
+A publicação autorizada do commit `698f6a4` ativou a revisão `d26781ee-b263-4fa8-a7d8-7c212830d42d`, com 100% do tráfego às 15:37:52 UTC. O read-back confirmou a migration `0010` e os dois triggers de bloqueio entre os namespaces de envio. Bindings, variáveis, Secrets, configuração de compatibilidade e metadata da imagem Container foram preservados. O comando usou `--env '' --keep-vars --containers-rollout none`.
+
+O Wrangler terminou com erro ao tentar reaplicar os consumidores existentes de Queue, porque a credencial da sessão não tem essa permissão. O upload e a ativação do Worker já haviam concluído. Nenhuma segunda publicação foi iniciada para contornar esse erro. A comparação de versões confirma os bindings preservados, mas não substitui uma leitura atual da configuração dos consumidores.
+
+Os probes públicos retornaram 200 em `/healthz` e na metadata OAuth, e 401 com `resource_metadata` em `/mcp` sem bearer. O catálogo autenticado retornou 15 ferramentas e 18 variantes de `send_message`, sem as quatro ferramentas antigas de envio.
+
+Os catálogos em cache dos clientes WaPilot e Composio ainda anunciam nomes antigos. A sessão não dispõe de controle de atualização do catálogo WaPilot nem da chave de projeto exigida pelo endpoint de sync da Composio. O sync desses clientes permanece pendente. Os envios de homologação usaram o novo catálogo diretamente pelo proxy MCP autenticado da conexão existente, sem recriar a autorização.
+
+Seis amostras autorizadas foram enviadas uma vez cada, com chaves de idempotência distintas, nas variantes texto, lista, enquete, botões, imagem e documento PDF. Todas receberam aceite e apareceram no histórico retido de origem e destino. O histórico de origem registra a mesma mensagem citada nas seis amostras. No destino, texto, imagem e PDF preservam o ID citado, enquanto os registros interativos não expõem esse campo. A renderização dos formatos e das citações em dispositivos não foi verificada. Esses resultados não comprovam eventos nativos, leitura, nem compatibilidade universal dos clientes WhatsApp.

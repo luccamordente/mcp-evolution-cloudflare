@@ -1,6 +1,6 @@
 # Ferramentas MCP
 
-Este documento explica a intenção de uso das ferramentas. O catálogo enviado ao modelo é definido em `src/lib/mcp.ts`; mantenha as duas fontes alinhadas.
+Este documento explica a intenção de uso das ferramentas. O catálogo enviado ao modelo é definido em `src/lib/mcp.ts`. O schema de envio está em `src/lib/send-message.ts`; mantenha as fontes alinhadas. O [contrato de `send_message`](SEND-MESSAGE.md) contém as variantes, os parâmetros e as dependências do provedor.
 
 Nas respostas formatadas pelo WaPilot, o bloco textual serializa o mesmo objeto de `structuredContent`, incluindo o envelope `{ "data": ... }`, tanto em sucesso quanto em erro. Clientes que interpretam esse JSON devem acessar `data`; os campos de `structuredContent.data` permanecem os mesmos. Imagens e recursos binários continuam em blocos MCP nativos separados, sem duplicação no JSON.
 
@@ -23,11 +23,8 @@ O entrypoint de desenvolvimento `dev:stdio` reutiliza este catálogo, exceto `tr
 | `get_message_document` | Obter o PDF original quando o cliente consegue receber um recurso binário e processar um arquivo temporário | Exigir ferramentas locais que o cliente não possui | Somente HTTP; recurso MCP binário, até 8 MiB de entrada ou o limite menor configurado; o cliente remove os arquivos temporários. |
 | `inspect_message_document` | Localizar páginas, rótulos, marcadores e trechos de texto no PDF | Concluir que uma página sem texto está em branco ou que texto cobre a aparência inteira | Somente HTTP; até 5 páginas e 4.000 caracteres por trecho, com cursores explícitos para continuação. |
 | `read_message_document_pages` | Examinar imagens de páginas físicas ou regiões do PDF | Tratar previews como cobertura completa ou recuperar detalhes ausentes no arquivo original | Somente HTTP; até 3 páginas, PNG nativo, presets preview/reading/detail, crop normalizado de uma página e cobertura entregue/falha explícita. |
-| `show_image_gallery` | Atender pedidos para ver, mostrar ou abrir fotos/imagens recebidas e enviadas, inclusive de uma conversa específica | Analisar conteúdo visual (use `get_message_image`), recuperar arquivos não retidos, enviar anexos (use `send_media`), baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
-| `send_text` | Enviar uma nova mensagem de texto | Responder citando uma mensagem existente | Resultado estruturado do envio; é uma ação externa e deve ter destino e texto finais. |
-| `forward_message` | Encaminhar uma mensagem retida pelo provedor | Recuperar um envio ausente ou encaminhar somente a legenda de um anexo indisponível | Retorna o ID do novo envio; exige `messageId`, conversa de origem e destino; indisponibilidade é explícita, sem fallback local. |
-| `reply_to_message` | Responder citando uma mensagem conhecida | Enviar uma mensagem nova sem referência | Resultado estruturado; requer destino, texto e `messageId` da mensagem citada. |
-| `send_media` | Enviar imagem, GIF animado, documento, áudio ou vídeo em base64 | Enviar apenas texto ou conteúdo ainda indisponível | Resultado estruturado; GIF vira vídeo silencioso com reprodução em loop; aceita legenda, nome de arquivo e referência opcional; respeita o limite de mídia configurado. |
+| `show_image_gallery` | Atender pedidos para ver, mostrar ou abrir fotos/imagens recebidas e enviadas, inclusive de uma conversa específica | Analisar conteúdo visual (use `get_message_image`), recuperar arquivos não retidos, enviar anexos (use `send_message`), baixar mídia ou assumir histórico completo | Somente leitura; 12 mensagens de imagem por padrão, máximo 20; conversa e texto opcionais; links ficam somente no componente. |
+| `send_message` | Enviar texto, resposta citada, mídia, enquete, lista, conteúdo interativo, encaminhamento ou Status | Usar campos de outra variante, prometer um formato ainda não suportado ou reenviar resultado desconhecido | Uma única ferramenta com `message.kind`; variantes e limites em [SEND-MESSAGE.md](SEND-MESSAGE.md). |
 
 ## Ordem de decisão
 
@@ -35,16 +32,18 @@ O entrypoint de desenvolvimento `dev:stdio` reutiliza este catálogo, exceto `tr
 2. Se a conexão estiver ausente ou ambígua, chame `list_connections` e escolha um identificador válido.
 3. Use `search_contacts` ou `list_groups` para resolver um destinatário desconhecido.
 4. Use `list_messages` somente para a história retida no provedor; um resultado vazio é inconclusivo.
-5. Use `send_text` para uma nova mensagem, `reply_to_message` para uma citação e `send_media` para anexos.
+5. Use `send_message`, escolha `message.kind` e informe `replyTo` nas variantes que aceitam citação. Para encaminhar, use `kind: "forward"` com os identificadores retidos da origem.
 6. Antes de uma ação de envio, confirme o destinatário e o conteúdo quando a autorização do usuário não for explícita.
 
 ## Envios com chave de idempotência
 
-`send_text`, `reply_to_message`, `forward_message` e `send_media` aceitam `idempotencyKey` opcional. Use uma chave opaca para cada ação autorizada, especialmente ao reagir a uma notificação de mensagem, e preserve essa mesma chave e os mesmos argumentos ao consultar novamente seu resultado. Não coloque texto da mensagem, arquivos ou credenciais na chave. O campo remove espaços nas extremidades e aceita de 1 a 200 caracteres; espaços isolados e outros tipos são rejeitados.
+`send_message` aceita `idempotencyKey` opcional no envelope, fora de `message`. Use uma chave opaca para cada ação autorizada, especialmente ao reagir a uma notificação de mensagem, e preserve essa mesma chave e os mesmos argumentos ao consultar novamente seu resultado. Não coloque texto da mensagem, arquivos ou credenciais na chave. O campo remove espaços nas extremidades e aceita de 1 a 200 caracteres; espaços isolados e outros tipos são rejeitados.
 
-A proteção dura **24 horas desde a primeira reserva**, dentro do usuário, conexão resolvida e ferramenta. Uma repetição concluída devolve o resultado mínimo anterior, incluindo o ID da mensagem, sem novo envio. Argumentos diferentes com a mesma chave recebem `idempotency_conflict`; uma operação ainda pendente recebe `send_in_progress`. A mídia é comparada pelos bytes, sem diferenças por espaços ou padding do Base64 ou capitalização do MIME. Omitir ou fornecer a conexão padrão explicitamente usa o mesmo escopo; trocar a conexão padrão seleciona outro escopo.
+A proteção dura **24 horas desde a primeira reserva**, dentro do usuário, conexão resolvida e ferramenta. Uma repetição concluída devolve o resultado mínimo anterior, incluindo o ID da mensagem, sem novo envio. Argumentos diferentes com a mesma chave recebem `idempotency_conflict`; uma operação ainda pendente recebe `send_in_progress`. A mídia é comparada pelos bytes, sem diferenças por espaços ou padding do Base64 ou capitalização do MIME. O hash inclui a variante, o destino, a citação e as opções; trocar a variante com a mesma chave produz conflito. Omitir ou fornecer a conexão padrão explicitamente usa o mesmo escopo; trocar a conexão padrão seleciona outro escopo.
 
-Timeouts e falhas com resultado desconhecido não liberam a chave: repetições recebem `send_result_unknown`, sem reenvio automático. Não troque a chave para contornar esse estado. Se o D1 não puder reservar a ação com segurança, `send_idempotency_unavailable` impede o envio. Os quatro erros têm `retryable: false`. Depois de 24 horas, a chave deixa de proteger contra repetição; isso não é uma garantia global de entrega exatamente uma vez nem deduplicação do provedor.
+Timeouts e falhas com resultado desconhecido não liberam a chave: repetições recebem `send_result_unknown`, sem reenvio automático. Não troque a chave para contornar esse estado. Se o D1 não puder reservar a ação com segurança, `send_idempotency_unavailable` impede o envio. Esses erros têm `retryable: false`. Depois de 24 horas, a chave deixa de proteger contra repetição; isso não é uma garantia global de entrega exatamente uma vez nem deduplicação do provedor.
+
+A operação de novas ações é `send_message`. Os nomes antigos não são ferramentas chamáveis. `get_send_status` ainda aceita as quatro operações antigas somente para consultar registros anteriores até a expiração original. A migration `0010_unified_send_fence.sql` impede reservas duplicadas entre os namespaces antigo e novo, inclusive quando revisões de Worker se sobrepõem. `send_legacy_action_exists` exige consultar a operação original, sem trocar a chave ou enviar novamente.
 
 O registro de idempotência guarda somente chave, escopo, hash, estado, validade e identificadores do resultado, sem texto ou arquivos. A expiração é conferida no uso, e a limpeza remove os registros vencidos: Cron a cada minuto no HTTP; startup e ciclo de um minuto enquanto o stdio está aberto. Se o stdio estiver parado, a exclusão física retoma na próxima abertura. Chamadas sem chave mantêm o comportamento anterior e não são repetidas automaticamente.
 
@@ -75,10 +74,10 @@ Use `get_message` quando uma prévia de notificação não contiver texto sufici
 - `cursor`: cursor opaco retornado pela página anterior; omita na primeira página.
 - `limit`: quantidade máxima de itens da página.
 - `messageId`: identificador da mensagem a ser consultada integralmente, citada, encaminhada, lida visualmente, transcrita ou com PDF a ser lido.
-- `dataBase64`: conteúdo do anexo codificado em Base64, sem prefixo de URL de dados.
-- `replyTo`: identificador opcional da mensagem que será citada junto com o anexo.
+- `message.source.dataBase64`: conteúdo do anexo codificado em Base64, sem prefixo de URL de dados, dentro de `source: { kind: "base64", dataBase64 }`.
+- `message.replyTo`: objeto opcional `{ messageId, participant? }` para citar uma mensagem na mesma conversa, nas variantes que aceitam resposta.
 - `idempotencyKey`: chave opaca opcional de uma ação de envio; reutilize-a com os mesmos argumentos por até 24 horas.
-- `gifPlayback`: opção de `send_media` para reproduzir um MP4 em loop como GIF; `true` exige `image/gif` ou `video/mp4`. Um GIF de entrada é convertido automaticamente, mesmo sem essa opção.
+- `message.gifPlayback`: opção da variante `video` para reproduzir MP4 em loop. A variante `gif` já solicita loop e aceita `image/gif` ou `video/mp4`.
 
 Todas as respostas bem-sucedidas usam `structuredContent.data` e podem conter objetos, listas, strings, números, booleanos ou `null`. Erros de execução usam `isError: true`, repetem um envelope sanitizado em `content[0].text` e em `structuredContent.data.error`, com os campos:
 
@@ -103,10 +102,10 @@ Administração de conexões, logout, exclusão de mensagens ou grupos e gestão
 
 ## Envio de GIFs
 
-`send_media` aceita os bytes de um GIF com `mimeType: "image/gif"`, sem exigir conversão pelo cliente. O WaPilot converte um ciclo da animação para MP4 silencioso e solicita reprodução em loop. Legenda e `replyTo` seguem o mesmo contrato dos demais anexos. Para um MP4 já preparado, use `mimeType: "video/mp4"` e `gifPlayback: true`. Um MP4 comum, sem essa opção, continua sendo vídeo comum.
+`send_message` com `message.kind: "gif"` aceita os bytes de um GIF com `mimeType: "image/gif"`, sem exigir conversão pelo cliente. O WaPilot converte um ciclo da animação para MP4 silencioso e solicita reprodução em loop. Legenda e `replyTo` seguem o mesmo contrato dos demais anexos. Para um MP4 já preparado, use a variante `gif` com `mimeType: "video/mp4"`, ou `video` com `gifPlayback: true`. A variante `video` sem essa opção conserva vídeo comum.
 
 ```json
-{ "to": "5511999999999", "mimeType": "image/gif", "dataBase64": "<bytes-do-GIF-em-Base64>", "caption": "Uma animação" }
+{ "message": { "kind": "gif", "to": "5511999999999", "mimeType": "image/gif", "source": { "kind": "base64", "dataBase64": "<bytes-do-GIF-em-Base64>" }, "caption": "Uma animação" } }
 ```
 
 O limite de entrada do Worker continua sendo `MAX_MEDIA_BYTES`, com padrão de 8 MiB. O backend limita GIFs a 8 MiB de entrada e saída, 2048 pixels por dimensão, 300 quadros, 30 segundos por ciclo e 32 milhões de pixels decodificados. A conversão tem prazo de 20 segundos e admite duas conversões simultâneas. Esses valores são uma política de recursos do WaPilot, não limites universais do WhatsApp. Entradas acima dos limites falham por inteiro, sem cortar a animação. O prazo total de envio continua sendo 60 segundos; envios não são repetidos automaticamente.
@@ -192,7 +191,7 @@ Uma mensagem listada pode ter somente metadados de envio no D1, sem áudio retid
 
 ## Galeria de imagens MCP Apps
 
-Use `show_image_gallery` quando o usuário pedir para ver, mostrar, explorar ou abrir fotos/imagens do WhatsApp. A ferramenta pode ser chamada diretamente, sem consultar `list_messages` antes. `list_messages` pesquisa mensagens; `send_media` envia anexos.
+Use `show_image_gallery` quando o usuário pedir para ver, mostrar, explorar ou abrir fotos/imagens do WhatsApp. A ferramenta pode ser chamada diretamente, sem consultar `list_messages` antes. `list_messages` pesquisa mensagens; `send_message` envia anexos pela variante correspondente.
 
 Os parâmetros são `connectionId` opcional, `conversationId` e `text` com os mesmos significados e limites de `list_messages`, e `limit` inteiro de 1 a 20 (padrão 12). O filtro `text` pesquisa texto das mensagens, não o conteúdo visual das imagens: buscar um assunto não equivale a reconhecer objetos nas fotos. Parâmetros desconhecidos, inclusive URLs fornecidas pelo cliente, são rejeitados. Por exemplo:
 
@@ -210,11 +209,11 @@ O botão **Atualizar** consulta novamente pelo host autorizado e mantém o UUID 
 
 `content` e `structuredContent.data` contêm somente contagens e a orientação de fallback. A galeria exibe imagens ao usuário, mas não fornece pixels ao modelo para análise visual. Um resultado vazio não prova ausência de imagens, e um arquivo indisponível não prova exclusão. URLs assinadas, legendas e dados destinados ao componente ficam em `_meta.gallery`; nenhuma credencial de serviço ou mensagem bruta é enviada à UI. `list_messages` mantém seu contrato anterior. Clientes sem MCP Apps recebem o resumo textual, sem acesso aos links privados desta ferramenta. A galeria requer um host compatível com MCP Apps; a presença do servidor no catálogo MCP não garante a renderização da UI.
 
-## Comprovante de envio de texto
+## Comprovante de envio
 
-`send_text` e `reply_to_message` mantêm o limite de 10.000 caracteres, a autorização de escrita e a resolução da conexão explícita/padrão, com chave de idempotência opcional. Chamadas sem chave representam tentativas independentes; repetir a mesma ação com a mesma chave pode reutilizar o resultado anterior. Depois da tentativa ou da reutilização, um host MCP Apps pode exibir `ui://wapilot/send-receipt-v3.html`: somente uma bolha de texto, verde WaPilot escurecido com texto branco e sem borda. Ela se ajusta ao conteúdo curto e tem no máximo dois terços da largura anterior; não mostra título, destinatário, conexão ou marcador de resposta. Não há confirmação adicional antes do envio, busca de nomes de contatos, ferramenta de reenvio ou consultas de histórico para construir o comprovante.
+`send_message` conserva a autorização de escrita, a resolução da conexão explícita ou padrão e a chave de idempotência opcional. As variantes textuais mantêm até 10.000 caracteres; as demais produzem um resumo da tentativa no mesmo comprovante. Chamadas sem chave representam tentativas independentes; repetir a mesma ação com a mesma chave pode reutilizar o resultado anterior. Depois da tentativa ou da reutilização, um host MCP Apps pode exibir `ui://wapilot/send-receipt-v3.html`: somente uma bolha de texto, verde WaPilot escurecido com texto branco e sem borda. Ela se ajusta ao conteúdo curto e tem no máximo dois terços da largura anterior; não mostra título, destinatário, conexão ou marcador de resposta. Não há confirmação adicional antes do envio, busca de nomes de contatos, ferramenta de reenvio ou consultas de histórico para construir o comprovante.
 
-As respostas com `reply_to_message` reutilizam o mesmo comprovante e acrescentam “Em resposta a uma mensagem” somente no fallback textual. A referência citada e o participante opcional seguem no envio, mas o comprovante mostra somente o novo texto: não consulta nem inventa conteúdo ou autoria da mensagem original. Citações de bloco no novo texto continuam sendo formatadas.
+As variantes com `message.replyTo` reutilizam o mesmo comprovante e acrescentam "Em resposta a uma mensagem" somente no fallback textual. A referência citada e o participante opcional seguem no envio, mas o comprovante mostra somente o novo texto: não consulta nem inventa conteúdo ou autoria da mensagem original. Citações de bloco no novo texto continuam sendo formatadas.
 
 O resultado distingue três observações:
 
@@ -318,7 +317,7 @@ O WaPilot faz até seis tentativas dentro dessa hora, com intervalos de 1, 2, 4,
 
 ## Diagnóstico de envios e conteúdo
 
-Os quatro envios retornam o `connectionId` resolvido e `outcome: accepted` ao receber um ID válido. Guarde essa conexão para consultar o resultado mesmo se a conexão padrão mudar. `deliveryStatus` e `readStatus` são `unavailable`: o WaPilot não agrega recibos do provedor e não afirma entrega nem leitura. Falhas após despacho retornam `outcome: unknown`; repetição de uma reserva pendente retorna `pending`. A mesma chave impede novo despacho dentro de 24 horas. Sem chave não há deduplicação entre chamadas. Uma queda do cliente, proxy ou runtime ainda pode impedir a resposta; consulte `get_send_status` com a chave, ferramenta e conexão originais, sem reenviar.
+`send_message` retorna o `connectionId` resolvido e `outcome: accepted` ao receber um ID válido. Guarde essa conexão para consultar o resultado mesmo se a conexão padrão mudar. `deliveryStatus` e `readStatus` são `unavailable`: o WaPilot não agrega recibos do provedor e não afirma entrega nem leitura. Falhas após despacho retornam `outcome: unknown`; repetição de uma reserva pendente retorna `pending`. A mesma chave impede novo despacho dentro de 24 horas. Sem chave não há deduplicação entre chamadas. Uma queda do cliente, proxy ou runtime ainda pode impedir a resposta; consulte `get_send_status` com a chave, ferramenta e conexão originais, sem reenviar.
 
 `get_send_status` não chama o envio nem descriptografa o token da instância: resolve a conexão no escopo do usuário e consulta somente o registro operacional. `not_found` inclui chaves expiradas e não comprova ausência da mensagem. Uma reserva `pending` também pode ser de um request interrompido. Se o provedor devolveu aceite mas o D1 falhou, a primeira resposta preserva o ID recebido; a consulta posterior pode continuar `unknown` e bloqueia novo envio.
 

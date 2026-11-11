@@ -9,11 +9,10 @@ import {
   connectionInput,
   dataOutput,
   listMessagesInput,
-  replyToMessageInput,
-  sendMediaInput,
-  sendTextInput,
   toJsonValue
 } from '../src/lib/mcp';
+import { sendMessageInput } from '../src/lib/send-message';
+import { SendMessageInputError } from '../src/lib/send-message';
 import { EvolutionApiError } from '../src/lib/evolution';
 
 describe('MCP tool output schema', () => {
@@ -29,11 +28,11 @@ describe('MCP tool output schema', () => {
   });
 
   it('does not mark authentication or request errors as retryable', () => {
-    expect(classifyMcpError(new EvolutionApiError(401, 'not authorized'), 'send_text')).toMatchObject({
-      code: 'evolution_http_error', status: 401, retryable: false, operation: 'send_text',
+    expect(classifyMcpError(new EvolutionApiError(401, 'not authorized'), 'send_message')).toMatchObject({
+      code: 'evolution_http_error', status: 401, retryable: false, operation: 'send_message',
     });
-    expect(classifyMcpError(new Error('dataBase64 is invalid'), 'send_media')).toMatchObject({
-      code: 'invalid_base64', status: 400, retryable: false, operation: 'send_media',
+    expect(classifyMcpError(new SendMessageInputError('invalid_base64', 400, 'WaPilot attachment requires valid Base64.'), 'send_message')).toMatchObject({
+      code: 'invalid_base64', status: 400, retryable: false, operation: 'send_message',
     });
   });
 
@@ -89,7 +88,7 @@ describe('MCP tool output schema', () => {
   });
 
   it('documents every registered tool without exposing an implementation provider', () => {
-    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message', 'get_message_image', 'transcribe_message_audio', 'read_message_document', 'show_image_gallery', 'send_text', 'reply_to_message', 'send_media', 'forward_message'] as const;
+    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message', 'get_message_image', 'transcribe_message_audio', 'read_message_document', 'show_image_gallery', 'send_message'] as const;
     for (const name of expected) {
       expect(TOOL_DESCRIPTIONS[name].length).toBeGreaterThan(40);
       expect(TOOL_DESCRIPTIONS[name]).not.toMatch(/evolution|upstream|downstream/i);
@@ -115,29 +114,26 @@ describe('MCP tool output schema', () => {
     expect(TOOL_ANNOTATIONS.send).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: false });
   });
 
-  it('accepts GIF playback only for GIF or MP4 media', () => {
-    const input = { to: '5511999999999', dataBase64: 'AQ==', gifPlayback: true };
-    for (const mimeType of ['image/gif', 'video/mp4', ' VIDEO/MP4 ; codecs=avc1']) {
-      expect(sendMediaInput.safeParse({ ...input, mimeType }).success).toBe(true);
+  it('accepts playback intent on videos and models GIFs as their own variant', () => {
+    const source = { kind: 'base64', dataBase64: 'AQ==' };
+    for (const mimeType of ['video/mp4', ' VIDEO/MP4 ; codecs=avc1']) {
+      expect(sendMessageInput.safeParse({ message: { kind: 'video', to: '5511999999999', source, mimeType, gifPlayback: true } }).success).toBe(true);
     }
-    for (const mimeType of ['image/png', 'audio/ogg', 'application/pdf']) {
-      expect(sendMediaInput.safeParse({ ...input, mimeType }).success).toBe(false);
-      expect(sendMediaInput.safeParse({ ...input, mimeType, gifPlayback: false }).success).toBe(true);
+    for (const mimeType of ['image/gif', 'video/mp4']) {
+      expect(sendMessageInput.safeParse({ message: { kind: 'gif', to: '5511999999999', source, mimeType } }).success).toBe(true);
     }
-    expect(sendMediaInput.parse({ to: input.to, dataBase64: input.dataBase64, mimeType: 'image/gif' })).not.toHaveProperty('gifPlayback');
+    expect(sendMessageInput.safeParse({ message: { kind: 'image', to: '5511999999999', source, mimeType: 'image/png', gifPlayback: true } }).success).toBe(false);
+    expect(sendMessageInput.safeParse({ message: { kind: 'video', to: '5511999999999', source, mimeType: 'image/png' } }).success).toBe(false);
   });
 
-  it('describes the semantic meaning of message tool fields', () => {
-    const schemas = [sendTextInput, replyToMessageInput, sendMediaInput, listMessagesInput];
-    for (const schema of schemas) {
-      const json = z.toJSONSchema(schema) as { properties?: Record<string, { description?: string }> };
-      for (const [name, property] of Object.entries(json.properties ?? {})) {
-        if (name === 'connectionId' || name === 'cursor' || name === 'limit') expect(property.description).toBeTruthy();
-      }
-    }
-    const sendMediaJson = z.toJSONSchema(sendMediaInput) as { properties?: Record<string, { description?: string }> };
-    expect(sendMediaJson.properties?.dataBase64?.description).toContain('Base64');
-    const replyJson = z.toJSONSchema(replyToMessageInput) as { properties?: Record<string, { description?: string }> };
-    expect(replyJson.properties?.messageId?.description).toContain('quoted');
+  it('publishes typed variants and describes message source and quote fields', () => {
+    const schema = z.toJSONSchema(sendMessageInput);
+    expect(schema.type).toBe('object');
+    expect(schema.properties).toHaveProperty('message');
+    expect(schema.properties).toHaveProperty('connectionId');
+    expect(JSON.stringify(schema)).toContain('Base64');
+    expect(JSON.stringify(schema)).toContain('quoted');
+    expect(sendMessageInput.parse({ message: { kind: 'text', to: '5511999999999', text: 'Olá', replyTo: { messageId: 'SOURCE' } } }).message).toMatchObject({ replyTo: { messageId: 'SOURCE' } });
+    expect(sendMessageInput.safeParse({ message: { kind: 'status_text', to: '5511999999999', text: 'Olá' } }).success).toBe(false);
   });
 });

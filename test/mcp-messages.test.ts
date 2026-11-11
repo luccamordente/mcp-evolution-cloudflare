@@ -442,7 +442,7 @@ describe('production PDF capabilities preserved with GIF sending', () => {
     const http = await messageTool();
     const { result } = await http.rpc<{ tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }>('tools/list');
     expect(result.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['read_message_document', 'inspect_message_document', 'read_message_document_pages', 'get_message_document']));
-    expect(result.tools.find(tool => tool.name === 'send_media')?.inputSchema.properties).toHaveProperty('gifPlayback');
+    expect(result.tools.find(tool => tool.name === 'send_message')?.inputSchema.properties).toHaveProperty('message');
     const local = await messageTool(1, ['mcp:read', 'mcp:write']);
     const names = (await local.rpc<{ tools: Array<{ name: string }> }>('tools/list')).result.tools.map(tool => tool.name);
     for (const name of ['inspect_message_document', 'read_message_document_pages', 'get_message_document']) expect(names).not.toContain(name);
@@ -474,7 +474,7 @@ describe('production PDF capabilities preserved with GIF sending', () => {
 
 
 describe('text send receipt MCP boundary', () => {
-  it.each(['send_text', 'reply_to_message'])('discovers a static, read-only presentation for %s without credentials or network access', async name => {
+  it.each(['send_message'])('discovers a static, read-only presentation for %s without credentials or network access', async name => {
     const { rpc, fetcher } = await messageTool();
     const { result } = await rpc<{ tools: Array<{ name: string; _meta?: { ui: { resourceUri: string; visibility: string[] } }; annotations: { readOnlyHint: boolean } }> }>('tools/list');
     const tool = result.tools.find(item => item.name === name)!;
@@ -494,7 +494,7 @@ describe('text send receipt MCP boundary', () => {
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-1', meta: { chat: '5511999999999' } } }));
     const text = '  Olá 👋\n*Negrito* _Itálico_ ~Tachado~\n```literal *código*```\n`literal _inline_`\n- Item\n* Outro item\n1. Primeiro\n> Citação\n<script>alert(1)</script>  ';
     const startedAt = Date.now();
-    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: '5511999999999', text } });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text } } });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data).toEqual({ connectionId, accepted: true, messageId: 'sent-1', conversationId: '5511999999999', jid: '5511999999999', outcome: 'accepted', deliveryStatus: 'unavailable', readStatus: 'unavailable' });
     expect(result._meta?.sendReceipt).toEqual({ text, to: '5511999999999', connectionId, connectionName: 'Personal', state: 'accepted', sentAt: expect.any(String) });
@@ -517,7 +517,7 @@ describe('text send receipt MCP boundary', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).data.attributes.body.text).toBe(text);
     expect(JSON.stringify(auditBindings)).not.toMatch(/Literal|script|instance-secret/);
-    const second = await rpc('tools/call', { name: 'send_text', arguments: { to: 'other-chat', text: 'Outro texto', connectionId: workConnectionId } });
+    const second = await rpc('tools/call', { name: 'send_message', arguments: { connectionId: workConnectionId, message: { kind: 'text', to: 'other-chat', text: 'Outro texto' } } });
     expect(second.result._meta?.sendReceipt).toMatchObject({ text: 'Outro texto', to: 'other-chat', connectionId: workConnectionId });
     expect(result._meta?.sendReceipt?.text).toBe(text);
     expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('apikey')).toBe('work-instance-secret');
@@ -527,14 +527,14 @@ describe('text send receipt MCP boundary', () => {
     const { rpc, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'reply-sent' } }));
     const text = '  Minha resposta 👋\n> Uma citação no novo texto  ';
-    const { result } = await rpc('tools/call', { name: 'reply_to_message', arguments: { connectionId: selectedConnectionId, to: 'destino', text, messageId: 'original-id', participant: 'autor@s.whatsapp.net' } });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: { connectionId: selectedConnectionId, message: { kind: 'text', to: 'destino', text, replyTo: { messageId: 'original-id', participant: 'autor@s.whatsapp.net' } } } });
     expect(result).toMatchObject({ structuredContent: { data: { accepted: true, messageId: 'reply-sent' } }, _meta: { sendReceipt: { state: 'accepted', text, to: 'destino', connectionName: 'Personal', connectionId: selectedConnectionId ?? connectionId, isReply: true } } });
     expect(result.content.map(item => item.text).join('\n')).toContain('Em resposta a uma mensagem');
     expect(result.content.map(item => item.text).join('\n')).toContain(text);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).data).toMatchObject({ attributes: { body: { text } }, relationships: { recipient: { data: { id: 'destino' } }, quoted: { data: { type: 'message', id: 'original-id', meta: { participant: 'autor@s.whatsapp.net' } } } } });
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe(selectedConnectionId ? 'work-instance-secret' : 'instance-secret');
-    const fresh = await rpc('tools/call', { name: 'send_text', arguments: { to: 'outro-destino', text: 'Mensagem independente' } });
+    const fresh = await rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: 'outro-destino', text: 'Mensagem independente' } } });
     expect(fresh.result._meta?.sendReceipt).toMatchObject({ text: 'Mensagem independente', to: 'outro-destino', state: 'accepted' });
     expect(fresh.result._meta?.sendReceipt).not.toHaveProperty('isReply');
     expect(result._meta?.sendReceipt).toMatchObject({ text, isReply: true });
@@ -545,7 +545,7 @@ describe('text send receipt MCP boundary', () => {
     fetcher.mockResolvedValue(kind === 'timeout'
       ? Response.json({ errors: [{ detail: 'private-provider-error' }] }, { status: 504 })
       : Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'reply-sent' } }));
-    const { result } = await rpc('tools/call', { name: 'reply_to_message', arguments: { connectionId: kind === 'foreign' ? foreignConnectionId : undefined, to: 'destino', text: 'Minha resposta', messageId: 'original-id' } });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: { connectionId: kind === 'foreign' ? foreignConnectionId : undefined, message: { kind: 'text', to: 'destino', text: 'Minha resposta', replyTo: { messageId: 'original-id' } } } });
     const state = kind === 'audit' ? 'accepted' : kind === 'timeout' ? 'unknown' : 'failed';
     expect(result._meta?.sendReceipt).toMatchObject({ state, isReply: true, text: 'Minha resposta', to: 'destino' });
     expect(result.isError === true).toBe(kind !== 'audit');
@@ -560,7 +560,7 @@ describe('text send receipt MCP boundary', () => {
     { scopes: ['mcp:read'], code: 'insufficient_scope' },
   ])('confirms rejection before any write while preserving authorization error codes: %j', async ({ defaultCount, args, scopes, code }) => {
     const { rpc, fetcher } = await messageTool(defaultCount ?? 1, undefined, { scopes });
-    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Não enviar', ...args } });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: { ...args, message: { kind: 'text', to: 'destino', text: 'Não enviar' } } });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code, retryable: false } } }, _meta: { sendReceipt: { state: 'failed', text: 'Não enviar', to: 'destino' } } });
     expect(result._meta?.sendReceipt?.connectionName).toBeUndefined();
     expect(result.content.map(item => item.text).join('\n')).toContain('Falha confirmada');
@@ -573,7 +573,7 @@ describe('text send receipt MCP boundary', () => {
       if (!status) throw new Error('private-network-error');
       return Response.json(kind === 'invalid-success' ? { jsonapi: { version: '1.1' }, data: {} } : { jsonapi: { version: '1.1' }, errors: [{ detail: 'private-provider-body https://private.example' }] }, { status: Number(status) });
     });
-    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Meu texto' } });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: 'destino', text: 'Meu texto' } } });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { retryable: false } } }, _meta: { sendReceipt: { state: 'unknown', connectionName: 'Personal' } } });
     expect(result.content.map(item => item.text).join('\n')).toContain('Não foi possível confirmar o envio');
     expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private-|Evolution|instance-secret|global-secret/);
@@ -586,7 +586,7 @@ describe('text send receipt MCP boundary', () => {
     fetcher.mockImplementation(async (_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new Error('private-abort')), { once: true });
     }));
-    const pending = rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Talvez enviada' } });
+    const pending = rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: 'destino', text: 'Talvez enviada' } } });
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(8001);
     const { result } = await pending;
@@ -597,16 +597,16 @@ describe('text send receipt MCP boundary', () => {
   it('preserves observed acceptance despite later audit failure', async () => {
     const { rpc, fetcher, auditBindings } = await messageTool(1, undefined, { auditFails: true });
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-before-failure' } }));
-    const { result } = await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Conteúdo privado' } });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: 'destino', text: 'Conteúdo privado' } } });
     expect(result.isError).not.toBe(true);
     expect(result).toMatchObject({ structuredContent: { data: { accepted: true, messageId: 'sent-before-failure' } }, _meta: { sendReceipt: { state: 'accepted' } } });
     expect(JSON.stringify(auditBindings)).not.toMatch(/private-|Conteúdo privado|instance-secret/);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps trusted local write permissions separate from client arguments', async () => {
+  it('keeps trusted local read permissions separate from HTTP write scopes', async () => {
     const { rpc, fetcher } = await messageTool(1, ['mcp:read'], { scopes: ['mcp:write'] });
-    expect((await rpc('tools/call', { name: 'send_text', arguments: { to: 'destino', text: 'Não enviar', scopes: ['mcp:write'] } })).result).toMatchObject({ isError: true, _meta: { sendReceipt: { state: 'failed' } } });
+    expect((await rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: 'destino', text: 'Não enviar' } } })).result).toMatchObject({ isError: true, _meta: { sendReceipt: { state: 'failed' } } });
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

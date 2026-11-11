@@ -10,7 +10,7 @@ const storedAcceptance = z.object({
 });
 
 export class SendOperationError extends Error {
-  constructor(public readonly code: 'idempotency_conflict' | 'send_in_progress' | 'send_result_unknown' | 'send_idempotency_unavailable', message: string) { super(message); }
+  constructor(public readonly code: 'idempotency_conflict' | 'send_in_progress' | 'send_result_unknown' | 'send_idempotency_unavailable' | 'send_legacy_action_exists', message: string) { super(message); }
 }
 
 export async function idempotentSend(db: D1Database, input: {
@@ -40,6 +40,7 @@ export async function idempotentSend(db: D1Database, input: {
     }
   } catch (error) {
     if (error instanceof SendOperationError) throw error;
+    if (error instanceof Error && error.message.includes('send_legacy_action_exists')) throw new SendOperationError('send_legacy_action_exists', 'WaPilot has an active action with this key from before the send tool upgrade. Look up its original operation. Do not resend or change the key.');
     throw new SendOperationError('send_idempotency_unavailable', 'WaPilot could not reserve this action safely. No send was started.');
   }
   let result: SendMessageResult | undefined;

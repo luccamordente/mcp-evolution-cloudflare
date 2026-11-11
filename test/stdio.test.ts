@@ -91,14 +91,14 @@ it('serves the shared tools and resources with a persistent default connection o
     expect(result.isError).not.toBe(true);
     expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(1);
   }
-  const sent = await first.client.callTool({ name: 'send_text', arguments: { to: '5511999999999', text: 'Local fixture send' } });
+  const sent = await first.client.callTool({ name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text: 'Local fixture send' } } });
   expect(sent.isError).not.toBe(true);
   expect(sent.structuredContent).toMatchObject({ data: { messageId: 'local-send-1' } });
-  const mediaArgs = { to: '5511999999999', mimeType: 'application/pdf', dataBase64: Buffer.alloc(8 * 1024 * 1024).toString('base64') };
-  const media = await first.client.callTool({ name: 'send_media', arguments: mediaArgs });
+  const mediaArgs = { message: { kind: 'document', to: '5511999999999', mimeType: 'application/pdf', source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024).toString('base64') } } };
+  const media = await first.client.callTool({ name: 'send_message', arguments: mediaArgs });
   expect(media.isError).not.toBe(true);
   expect(receivedMediaBytes).toBe(8 * 1024 * 1024);
-  const oversized = await first.client.callTool({ name: 'send_media', arguments: { ...mediaArgs, dataBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') } });
+  const oversized = await first.client.callTool({ name: 'send_message', arguments: { message: { ...mediaArgs.message, source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') } } } });
   expect(oversized.structuredContent).toMatchObject({ data: { error: { code: 'media_too_large' } } });
   expect(first.stderr().includes('fixture-instance-credential')).toBe(false);
   await first.close();
@@ -111,8 +111,8 @@ it('serves the shared tools and resources with a persistent default connection o
   const history = await second.client.callTool({ name: 'list_messages', arguments: {} });
   expect((history.structuredContent as { data: { items: Array<{ id: string }> } }).data.items.map(item => item.id)).toEqual(['fixture-message']);
   for (const tool of [
-    { name: 'reply_to_message', arguments: { to: '5511999999999', text: 'Fixture reply', messageId: 'local-send-1' } },
-    { name: 'forward_message', arguments: { to: '5511999999999', conversationId: '5511999999999', messageId: 'fixture-message' } },
+    { name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text: 'Fixture reply', replyTo: { messageId: 'local-send-1' } } } },
+    { name: 'send_message', arguments: { message: { kind: 'forward', to: '5511999999999', source: { conversationId: '5511999999999', messageId: 'fixture-message' } } } },
   ]) expect((await second.client.callTool(tool)).isError).not.toBe(true);
   await second.close();
   expect(await readFile(resolve(state, 'encryption.key'), 'utf8') === keyBefore).toBe(true);
@@ -121,8 +121,8 @@ it('serves the shared tools and resources with a persistent default connection o
   try {
     const row = await proxy.env.DB.prepare('SELECT encrypted_token as token FROM whatsapp_connections').first<{ token: string }>();
     expect(Boolean(row?.token && !row.token.includes('fixture-instance-credential') && row.token.includes('.'))).toBe(true);
-    const audit = await proxy.env.DB.prepare("SELECT COUNT(*) as count FROM audit_log WHERE operation = 'send_text' AND outcome = 'success'").first<{ count: number }>();
-    expect(audit?.count).toBe(1);
+    const audit = await proxy.env.DB.prepare("SELECT COUNT(*) as count FROM audit_log WHERE operation = 'send_message' AND outcome = 'success'").first<{ count: number }>();
+    expect(audit?.count).toBe(4);
   } finally { await proxy.dispose(); }
   const restartEnv = { PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`, LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential' };
   acceptedToken = 'different-fixture-secret';

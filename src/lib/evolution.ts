@@ -4,6 +4,7 @@ import { galleryImage } from './image-gallery';
 import { AudioTranscriptionError } from './audio-transcription';
 import { DocumentReadingError } from './document-reading';
 import { messageUpdateSchema } from './message-update';
+import type { OutgoingMessage } from './send-message';
 
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
@@ -129,7 +130,7 @@ async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: stri
   const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, signal: parentSignal, ...fetchInit } = init;
   const headers = new Headers(fetchInit.headers);
   headers.set('Accept', JSON_API_MEDIA_TYPE);
-  if (fetchInit.body && !headers.has('Content-Type')) headers.set('Content-Type', JSON_API_MEDIA_TYPE);
+  if (fetchInit.body && !(fetchInit.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', JSON_API_MEDIA_TYPE);
   headers.set('apikey', apiKey);
   const method = (fetchInit.method ?? 'GET').toUpperCase();
   const attempts = method === 'GET' ? 3 : 1;
@@ -723,69 +724,182 @@ export class EvolutionGoClient {
     }
   }
 
-  async sendText(to: string, text: string, replyTo?: string, participant?: string): Promise<SendMessageResult> {
-    const relationships: Record<string, unknown> = {
-      recipient: { data: { type: 'chat', id: to } },
-    };
-    const body: Record<string, unknown> = { text };
-    if (replyTo) relationships.quoted = { data: { type: 'message', id: replyTo, ...(participant ? { meta: { participant } } : {}) } };
-    const payload = await this.request<unknown>('/send/text', {
+  async sendMessage(message: OutgoingMessage): Promise<SendMessageResult> {
+    if (message.kind === 'forward') return this.sendRetainedMessage(message);
+    const recipient = 'to' in message ? message.to : 'status@broadcast';
+    const relationships: Record<string, unknown> = 'to' in message
+      ? { recipient: { data: { type: 'chat', id: message.to } } } : {};
+    if ('replyTo' in message && message.replyTo) {
+      relationships.quoted = { data: { type: 'message', id: message.replyTo.messageId,
+        ...(message.replyTo.participant ? { meta: { participant: message.replyTo.participant } } : {}) } };
+    }
+    const attributes: Record<string, unknown> = {};
+    if ('delayMs' in message && message.delayMs !== undefined) attributes.delay = message.delayMs;
+    if ('formatJid' in message && message.formatJid !== undefined) attributes.formatJid = message.formatJid;
+    if ('mentions' in message && message.mentions) {
+      if (message.mentions.kind === 'all') attributes.mentionAll = true;
+      else attributes.mentionedJid = message.mentions.jids;
+    }
+    let route: string;
+    let encodingFormat: string;
+    let body: Record<string, unknown>;
+    let timeoutMs: number | undefined;
+    switch (message.kind) {
+      case 'text':
+        route = '/send/text';
+        encodingFormat = 'text/plain';
+        body = { text: message.text };
+        if (message.forwardingScore !== undefined) attributes.forwardingScore = message.forwardingScore;
+        break;
+      case 'link':
+        route = '/send/link';
+        encodingFormat = 'text/plain';
+        body = { text: message.text };
+        timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
+        break;
+      case 'image': case 'video': case 'voice_note': case 'document': case 'gif':
+        route = '/send/media';
+        encodingFormat = message.mimeType.split(';')[0].trim().toLowerCase();
+        body = { media: { url: message.source.dataBase64 }, ...('caption' in message && message.caption ? { text: message.caption } : {}) };
+        if ('fileName' in message && message.fileName) attributes.filename = message.fileName;
+        if (message.kind === 'gif') attributes.gifPlayback = true;
+        else if (message.kind === 'video' && message.gifPlayback !== undefined) attributes.gifPlayback = message.gifPlayback;
+        timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
+        break;
+      case 'poll':
+        route = '/send/poll';
+        encodingFormat = 'application/vnd.whatsapp.poll';
+        body = { text: message.question, options: message.options };
+        attributes.maxAnswer = message.maxAnswers;
+        break;
+      case 'list':
+        route = '/send/list';
+        encodingFormat = 'application/vnd.whatsapp.list';
+        body = { title: message.title, description: message.description, buttonText: message.buttonText,
+          footerText: message.footerText, sections: message.sections };
+        break;
+      case 'location':
+        route = '/send/location';
+        encodingFormat = 'application/vnd.whatsapp.location';
+        body = { name: message.name, latitude: message.latitude, longitude: message.longitude, address: message.address };
+        break;
+      case 'contact':
+        route = '/send/contact';
+        encodingFormat = 'text/vcard';
+        body = {};
+        attributes.vcard = { fullName: message.fullName, ...(message.organization ? { organization: message.organization } : {}), phone: message.phone };
+        break;
+      case 'sticker':
+        route = '/send/sticker';
+        encodingFormat = 'image/webp';
+        body = { media: { url: message.url } };
+        timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
+        break;
+      case 'buttons':
+        route = '/send/button';
+        encodingFormat = 'application/vnd.whatsapp.buttons';
+        body = { title: message.title, description: message.description, footer: message.footer,
+          buttons: message.buttons.map(button => {
+            const common = { type: button.kind, displayText: button.label };
+            switch (button.kind) {
+              case 'reply': return { ...common, id: button.id };
+              case 'copy': return { ...common, copyCode: button.code };
+              case 'url': return { ...common, url: button.url };
+              case 'call': return { ...common, phoneNumber: button.phoneNumber };
+            }
+          }) };
+        if (message.header) attributes[message.header.kind === 'image' ? 'imageUrl' : 'videoUrl'] = message.header.url;
+        timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
+        break;
+      case 'carousel': {
+        const jsonStringContent = (value: string) => JSON.stringify(value).slice(1, -1);
+        route = '/send/carousel';
+        encodingFormat = 'application/vnd.whatsapp.carousel';
+        body = {};
+        if (message.footer !== undefined) attributes.footer = message.footer;
+        attributes.cards = message.cards.map(card => ({ ...card, buttons: card.buttons?.map(button => {
+          const common = { type: button.kind.toUpperCase(), displayText: jsonStringContent(button.label) };
+          switch (button.kind) {
+            case 'reply': return { ...common, id: jsonStringContent(button.id) };
+            case 'copy': return { ...common, copyCode: jsonStringContent(button.code) };
+            case 'url': return { ...common, id: jsonStringContent(button.url) };
+            case 'call': return { ...common, id: jsonStringContent(button.phoneNumber) };
+          }
+        }) }));
+        timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
+        break;
+      }
+      case 'status_image': case 'status_video': {
+        const form = new FormData();
+        form.set('type', message.kind === 'status_image' ? 'image' : 'video');
+        form.set('file', new Blob([Buffer.from(message.source.dataBase64, 'base64')], { type: message.mimeType }), 'attachment');
+        if (message.caption !== undefined) form.set('caption', message.caption);
+        if (message.customMessageId) form.set('id', message.customMessageId);
+        const payload = await this.request<unknown>('/send/status/media', { method: 'POST', body: form, timeoutMs: MEDIA_REQUEST_TIMEOUT_MS });
+        return normalizeSendResult(payload, recipient);
+      }
+      case 'status_text':
+        route = '/send/status/text';
+        encodingFormat = 'text/plain';
+        body = { text: message.text };
+        break;
+      default: {
+        const unreachable: never = message;
+        throw new Error(`WaPilot cannot send this message kind: ${unreachable}`);
+      }
+    }
+    const payload = await this.request<unknown>(route, {
       method: 'POST',
-      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: 'text/plain', body }, relationships }),
+      body: jsonApiBody({ type: 'message', ...('customMessageId' in message && message.customMessageId ? { id: message.customMessageId } : {}),
+        attributes: { encodingFormat, ...attributes, body }, relationships }),
+      ...(timeoutMs ? { timeoutMs } : {}),
     });
-    return normalizeSendResult(payload, to);
+    return normalizeSendResult(payload, recipient);
   }
 
-  /** Re-send a retained message to another chat, flagged as forwarded (WhatsApp "Encaminhada"). */
-  async forwardMessage(to: string, source: Message): Promise<SendMessageResult> {
-    const relationships: Record<string, unknown> = { recipient: { data: { type: 'chat', id: to } } };
+  private async sendRetainedMessage(message: Extract<OutgoingMessage, { kind: 'forward' }>): Promise<SendMessageResult> {
+    const { conversationId, messageId } = message.source;
+    let source: Message | undefined;
+    let cursor: string | undefined;
+    for (let pageNo = 0; pageNo < 5 && !source; pageNo++) {
+      const page = await this.listMessages(undefined, 50, conversationId, undefined, cursor);
+      source = page.items.find(item => item.id === messageId);
+      if (!page.hasMore || !page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    if (!source) source = await this.getMessage(messageId);
+    const sourceConversation = source?.conversationId ?? source?.jid;
+    const conversationKey = (value: string) => /^\+?(\d+)(?::\d+)?(?:@s\.whatsapp\.net)?$/.exec(value)?.[1] ?? value;
+    if (!source || !sourceConversation || conversationKey(sourceConversation) !== conversationKey(conversationId)) {
+      throw new EvolutionApiError(404, 'WaPilot could not find that retained message in the selected conversation.');
+    }
     const body: Record<string, unknown> = {};
     if (source.text) body.text = source.text;
-    let path = '/send/text';
+    let route = '/send/text';
     let encodingFormat = 'text/plain';
     let timeoutMs: number | undefined;
     if (!source.media?.url && (source.media || source.medias?.length || (source.type && source.type !== 'text/plain'))) {
-      // Never silently drop the file and forward only the caption.
-      throw new EvolutionApiError(422, 'The file of this message is not retained, so it cannot be forwarded; send it again with send_media');
+      throw new EvolutionApiError(422, 'WaPilot cannot forward this attachment because its file is unavailable.');
     }
     if (source.media?.url) {
-      path = '/send/media';
+      route = '/send/media';
       body.media = { url: source.media.url };
       encodingFormat = (source.media.mimeType ?? source.type ?? 'application/octet-stream').toLowerCase();
       timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
     } else if (!source.text) {
-      throw new EvolutionApiError(422, 'Message has no forwardable text or retained media');
+      throw new EvolutionApiError(422, 'WaPilot could not find retained text or media to forward.');
     }
-    const attributes: Record<string, unknown> = {
-      encodingFormat,
-      body,
-      forwardingScore: 1,
-      ...(source.media?.fileName ? { filename: source.media.fileName } : {}),
-      ...(encodingFormat === 'video/mp4' && (source.media?.gifPlayback || ((source.flags ?? 0) & GIF_PLAYBACK_FLAG) !== 0) ? { gifPlayback: true } : {}),
-    };
-    const payload = await this.request<unknown>(path, {
+    const payload = await this.request<unknown>(route, {
       method: 'POST',
-      body: jsonApiBody({ type: 'message', attributes, relationships }),
+      body: jsonApiBody({ type: 'message', attributes: { encodingFormat, body, forwardingScore: 1,
+        ...(source.media?.fileName ? { filename: source.media.fileName } : {}),
+        ...(encodingFormat === 'video/mp4' && (source.media?.gifPlayback || ((source.flags ?? 0) & GIF_PLAYBACK_FLAG) !== 0) ? { gifPlayback: true } : {}) },
+        relationships: { recipient: { data: { type: 'chat', id: message.to } } } }),
       ...(timeoutMs ? { timeoutMs } : {}),
     });
-    return normalizeSendResult(payload, to);
+    return normalizeSendResult(payload, message.to);
   }
 
-  async sendMedia(to: string, media: { mimeType: string; fileName?: string; data: ArrayBuffer; caption?: string; gifPlayback?: boolean }, replyTo?: string): Promise<SendMessageResult> {
-    const bytes = new Uint8Array(media.data);
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    const relationships: Record<string, unknown> = { recipient: { data: { type: 'chat', id: to } } };
-    const body: Record<string, unknown> = { media: { url: btoa(binary) } };
-    if (media.caption) body.text = media.caption;
-    if (replyTo) relationships.quoted = { data: { type: 'message', id: replyTo } };
-    const payload = await this.request<unknown>('/send/media', {
-      method: 'POST',
-      body: jsonApiBody({ type: 'message', attributes: { encodingFormat: media.mimeType.split(';')[0].trim().toLowerCase(), body, ...(media.fileName ? { filename: media.fileName } : {}), ...(media.gifPlayback !== undefined ? { gifPlayback: media.gifPlayback } : {}) }, relationships }),
-      timeoutMs: MEDIA_REQUEST_TIMEOUT_MS,
-    });
-    return normalizeSendResult(payload, to);
-  }
 }
 
 async function retryDelay(attempt: number): Promise<void> {

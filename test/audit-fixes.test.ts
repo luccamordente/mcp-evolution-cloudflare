@@ -16,7 +16,7 @@ describe('mcp:write scope', () => {
     const req = (body: unknown) => new Request('https://x.invalid/mcp', { method: 'POST', body: JSON.stringify(body) });
     for (const name of WRITE_TOOLS) expect(await callsWriteTool(req({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name } }))).toBe(true);
     expect(await callsWriteTool(req({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_messages' } }))).toBe(false);
-    expect(await callsWriteTool(req([{ method: 'tools/list' }, { method: 'tools/call', params: { name: 'send_text' } }]))).toBe(true);
+    expect(await callsWriteTool(req([{ method: 'tools/list' }, { method: 'tools/call', params: { name: 'send_message' } }]))).toBe(true);
     expect(await callsWriteTool(new Request('https://x.invalid/mcp', { method: 'POST', body: 'not json' }))).toBe(false);
   });
 });

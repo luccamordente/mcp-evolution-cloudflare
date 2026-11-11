@@ -8,8 +8,8 @@ describe('MCP timeout attribution', () => {
       init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     }));
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'private-token', timeoutMs: 10, fetcher });
-    const operation = kind === 'read' ? 'connection_status' : 'send_text';
-    const error = await (kind === 'read' ? client.status() : client.sendText('5511999999999', 'Private text')).catch(error => error);
+    const operation = kind === 'read' ? 'connection_status' : 'send_message';
+    const error = await (kind === 'read' ? client.status() : client.sendMessage({ kind: 'text', to: '5511999999999', text: 'Private text' })).catch(error => error);
     const classified = classifyMcpError(error, operation);
 
     expect(classified).toMatchObject({ code: 'wapilot_timeout', status: 504, retryable: true, operation });
@@ -24,10 +24,10 @@ describe('MCP timeout attribution', () => {
   it.each([408, 504])('identifies a timeout response (HTTP %s) separately from the local deadline', async (status) => {
     const fetcher = vi.fn<typeof fetch>(async () => new Response('sensitive upstream timeout body', { status }));
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'private-token', fetcher });
-    const error = await client.sendText('5511999999999', 'Private text').catch(error => error);
-    const classified = classifyMcpError(error, 'send_text');
+    const error = await client.sendMessage({ kind: 'text', to: '5511999999999', text: 'Private text' }).catch(error => error);
+    const classified = classifyMcpError(error, 'send_message');
 
-    expect(classified).toMatchObject({ code: 'upstream_timeout', status, retryable: true, operation: 'send_text' });
+    expect(classified).toMatchObject({ code: 'upstream_timeout', status, retryable: true, operation: 'send_message' });
     expect(classified.message).toContain(`HTTP ${status}`);
     expect(classified.message).toContain('returned a timeout response');
     expect(classified.message).toContain('WaPilot');

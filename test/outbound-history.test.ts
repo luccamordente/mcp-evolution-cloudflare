@@ -75,10 +75,10 @@ describe('outbound history', () => {
     const { call, requests } = await harness(() => sent('UNAUTHORIZED'), scopes);
     const forged = { trustedLocalScopes: ['mcp:read', 'mcp:write'], scopes: ['mcp:write'], http: { authInfo: { scopes: ['mcp:write'] } } };
     for (const tool of [
-      { name: 'send_text', arguments: { to: '551142000028', text: 'Must not send' } },
-      { name: 'send_media', arguments: { to: '551142000028', mimeType: 'image/png', dataBase64: 'invalid base64' } },
+      { name: 'send_message', arguments: { message: { kind: 'text', to: '551142000028', text: 'Must not send' } } },
+      { name: 'send_message', arguments: { message: { kind: 'image', to: '551142000028', mimeType: 'image/png', source: { kind: 'base64', dataBase64: 'invalid base64' } } } },
     ]) {
-      const result = await call(tool.name, { ...tool.arguments, ...forged }, forged);
+      const result = await call(tool.name, tool.arguments, forged);
       expect(result.isError).toBe(true);
       expect(result.structuredContent.data.error).toMatchObject({ code: 'insufficient_scope', status: 403 });
     }
@@ -87,12 +87,12 @@ describe('outbound history', () => {
 
   it('returns the send ID without making an unretained send available as history or forwarding content', async () => {
     const { call, requests } = await harness((url) => url.pathname.startsWith('/send/') ? sent('SENT1') : url.pathname === '/message/status' ? Response.json({ jsonapi, errors: [{ status: '404' }] }, { status: 404 }) : undefined);
-    const send = await call('send_text', { to: '551142000028', text: 'qa wapilot send 1' });
+    const send = await call('send_message', { message: { kind: 'text', to: '551142000028', text: 'qa wapilot send 1' } });
     expect(send.isError).toBeFalsy();
     expect(send.structuredContent.data.messageId).toBe('SENT1');
     const history = await call('list_messages', {});
     expect(history.structuredContent.data.items).toEqual([]);
-    const forward = await call('forward_message', { to: '553175093234', conversationId: '551142000028', messageId: 'SENT1' });
+    const forward = await call('send_message', { message: { kind: 'forward', to: '553175093234', source: { conversationId: '551142000028', messageId: 'SENT1' } } });
     expect(forward.isError).toBe(true);
     expect(forward.structuredContent.data.error.status).toBe(404);
     expect(requests.filter(r => r.url.pathname.startsWith('/send/'))).toHaveLength(1);
@@ -101,8 +101,8 @@ describe('outbound history', () => {
   it('preserves IDs, quote arguments and media bodies without storing send content', async () => {
     let n = 0;
     const { call, requests } = await harness((url) => url.pathname.startsWith('/send/') ? sent(`S${++n}`) : undefined);
-    const reply = await call('reply_to_message', { to: '551142000028', messageId: 'X', participant: '5511888888888', text: 'qa reply' });
-    const media = await call('send_media', { to: '551142000028', mimeType: 'application/pdf', fileName: 'qa-test.pdf', dataBase64: btoa('%PDF-1.1'), caption: 'doc', replyTo: 'X' });
+    const reply = await call('send_message', { message: { kind: 'text', to: '551142000028', text: 'qa reply', replyTo: { messageId: 'X', participant: '5511888888888' } } });
+    const media = await call('send_message', { message: { kind: 'document', to: '551142000028', mimeType: 'application/pdf', fileName: 'qa-test.pdf', caption: 'doc', source: { kind: 'base64', dataBase64: btoa('%PDF-1.1') }, replyTo: { messageId: 'X' } } });
     expect(reply.structuredContent.data.messageId).toBe('S1');
     expect(media.structuredContent.data.messageId).toBe('S2');
     expect(requests[0].body).toMatchObject({ data: { attributes: { body: { text: 'qa reply' } } } });
@@ -119,7 +119,7 @@ describe('outbound history', () => {
     { encodingFormat: 'application/octet-stream', body: { text: 'cap', filename: 'imagem.png' } },
   ])('does not forward only the caption of an attachment without its file: %j', async attributes => {
     const { call, requests } = await harness(url => url.pathname === '/message/search' ? Response.json({ jsonapi, data: [{ type: 'message', id: 'S1', attributes, meta: { chat: '551142000028' } }] }) : undefined);
-    const forward = await call('forward_message', { to: '553175093234', conversationId: '551142000028', messageId: 'S1' });
+    const forward = await call('send_message', { message: { kind: 'forward', to: '553175093234', source: { conversationId: '551142000028', messageId: 'S1' } } });
     expect(forward.isError).toBe(true);
     expect(forward.structuredContent.data.error.status).toBe(422);
     expect(requests.filter(r => r.url.pathname.startsWith('/send/'))).toHaveLength(0);
@@ -136,7 +136,7 @@ describe('outbound history', () => {
       if (url.pathname === '/send/media') return sent('FWD1');
       return undefined;
     });
-    const forward = await call('forward_message', { to: '553175093234', conversationId: '551142000028', messageId: 'S1' });
+    const forward = await call('send_message', { message: { kind: 'forward', to: '553175093234', source: { conversationId: '551142000028', messageId: 'S1' } } });
     expect(forward.isError).toBeFalsy();
     expect(forward.structuredContent.data.messageId).toBe('FWD1');
     expect(requests.find(r => r.url.pathname === '/send/media')?.body.data.attributes).toMatchObject({
@@ -153,7 +153,7 @@ describe('outbound history', () => {
       if (url.pathname === '/send/text') return sent('FWD1');
       return undefined;
     });
-    const forward = await call('forward_message', { to: '553175093234', conversationId: '551142000028', messageId: 'OLD1' });
+    const forward = await call('send_message', { message: { kind: 'forward', to: '553175093234', source: { conversationId: '551142000028', messageId: 'OLD1' } } });
     expect(forward.isError).toBeFalsy();
     expect(forward.structuredContent.data.messageId).toBe('FWD1');
     expect(requests.map((r) => r.url.pathname)).toEqual(['/message/search', '/message/status', '/send/text']);
@@ -164,10 +164,10 @@ describe('outbound history', () => {
     const { call } = await harness((url) => (url.pathname === '/message/status'
       ? Response.json({ jsonapi, errors: [{ status: '404', detail: 'message was not stored' }] }, { status: 404 })
       : undefined));
-    const forward = await call('forward_message', { to: '553175093234', conversationId: '551142000028', messageId: 'NOPE' });
+    const forward = await call('send_message', { message: { kind: 'forward', to: '553175093234', source: { conversationId: '551142000028', messageId: 'NOPE' } } });
     expect(forward.isError).toBe(true);
     expect(forward.structuredContent.data.error.status).toBe(404);
-    expect(forward.structuredContent.data.error.message).toMatch(/Source message not found/);
+    expect(forward.structuredContent.data.error.message).toContain('WaPilot');
   });
 });
 
@@ -233,17 +233,14 @@ describe('GIF acceptance', () => {
 
   it('sends GIF bytes with caption and quote, returning safe converted metadata without caching content', async () => {
     const { call, requests, outbound, audits } = await harness(() => acceptedGIF());
-    const result = await call('send_media', {
-      to: '551142000028', mimeType: 'image/gif', fileName: 'animation.gif', dataBase64: gifBase64,
-      caption: 'A looping animation', replyTo: 'QUOTED1',
-    });
+    const result = await call('send_message', { message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', fileName: 'animation.gif', caption: 'A looping animation', source: { kind: 'base64', dataBase64: gifBase64 }, replyTo: { messageId: 'QUOTED1' } } });
     expect(result.isError).toBeFalsy();
     expect(requests).toHaveLength(1);
     expect(requests[0].url.pathname).toBe('/send/media');
     expect(requests[0].headers.get('apikey')).toBe('instance-secret');
     expect(requests[0].headers.get('content-type')).toBe('application/vnd.api+json');
     expect(requests[0].body.data).toEqual({
-      type: 'message', attributes: { encodingFormat: 'image/gif', filename: 'animation.gif', body: { text: 'A looping animation', media: { url: gifBase64 } } },
+      type: 'message', attributes: { encodingFormat: 'image/gif', filename: 'animation.gif', gifPlayback: true, body: { text: 'A looping animation', media: { url: gifBase64 } } },
       relationships: { recipient: { data: { type: 'chat', id: '551142000028' } }, quoted: { data: { type: 'message', id: 'QUOTED1' } } },
     });
     expect(result.structuredContent.data).toMatchObject({ accepted: true, messageId: 'GIF1', media: { mimeType: 'video/mp4', fileName: 'animation.mp4', size: 2048, gifPlayback: true } });
@@ -254,7 +251,7 @@ describe('GIF acceptance', () => {
 
   it('accepts an MP4 playback option and normalizes MIME case and parameters', async () => {
     const { call, requests } = await harness(() => acceptedGIF());
-    const result = await call('send_media', { to: '551142000028', mimeType: ' VIDEO/MP4 ; codecs=avc1', gifPlayback: true, dataBase64: btoa('mp4-fixture') });
+    const result = await call('send_message', { message: { kind: 'video', to: '551142000028', mimeType: ' VIDEO/MP4 ; codecs=avc1', gifPlayback: true, source: { kind: 'base64', dataBase64: btoa('mp4-fixture') } } });
     expect(result.isError).toBeFalsy();
     expect(requests[0].body.data.attributes).toMatchObject({ encodingFormat: 'video/mp4', gifPlayback: true });
   });
@@ -268,8 +265,8 @@ describe('GIF acceptance', () => {
       if (url.pathname === '/send/media') return acceptedGIF(++sends === 1 ? 'GIF1' : 'GIF2');
       return undefined;
     });
-    await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
-    const forward = await call('forward_message', { to: '553175093234', conversationId: '551142000028', messageId: 'GIF1' });
+    await call('send_message', { message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: gifBase64 } } });
+    const forward = await call('send_message', { message: { kind: 'forward', to: '553175093234', source: { conversationId: '551142000028', messageId: 'GIF1' } } });
     expect(forward.isError).toBeFalsy();
     expect(requests.map((r) => r.url.pathname)).toEqual(['/send/media', '/message/search', '/message/status', '/send/media']);
     expect(requests[3].body.data.attributes).toEqual({ encodingFormat: 'video/mp4', filename: 'animation.mp4', forwardingScore: 1, gifPlayback: true, body: { text: 'Loop', media: { url: 'https://storage.invalid/retained.mp4' } } });
@@ -279,7 +276,7 @@ describe('GIF acceptance', () => {
 
   it('does not substitute the GIF input size when the converted response omits a size', async () => {
     const { call, outbound } = await harness(() => acceptedGIF('GIF1', null));
-    const result = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    const result = await call('send_message', { message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: gifBase64 } } });
     const media = result.structuredContent.data.media;
     expect(media.mimeType).toBe('video/mp4');
     expect(media).not.toHaveProperty('size');
@@ -288,14 +285,14 @@ describe('GIF acceptance', () => {
 
   it('does not invent conversion metadata when the backend only acknowledges the send', async () => {
     const { call, outbound } = await harness(() => sent('GIF1'));
-    const result = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    const result = await call('send_message', { message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: gifBase64 } } });
     expect(result.structuredContent.data).not.toHaveProperty('media');
     expect(outbound.size).toBe(0);
   });
 
   it('rejects an incompatible playback option before any backend call', async () => {
     const { call, requests, outbound } = await harness(() => acceptedGIF());
-    const result = await call('send_media', { to: '551142000028', mimeType: 'image/png', gifPlayback: true, dataBase64: btoa('png') });
+    const result = await call('send_message', { message: { kind: 'image', to: '551142000028', mimeType: 'image/png', gifPlayback: true, source: { kind: 'base64', dataBase64: btoa('png') } } });
     expect(result.isError).toBe(true);
     expect(requests).toHaveLength(0);
     expect(outbound.size).toBe(0);
@@ -303,23 +300,23 @@ describe('GIF acceptance', () => {
 
   it.each([null, ['mcp:read']])('requires write authorization for GIF sending (%j)', async (scopes) => {
     const { call, requests } = await harness(() => acceptedGIF(), scopes);
-    const result = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    const result = await call('send_message', { message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: gifBase64 } } });
     expect(result.structuredContent.data.error).toMatchObject({ code: 'insufficient_scope', status: 403 });
     expect(requests).toHaveLength(0);
   });
 
   it('rejects another user connection and oversized input before sending', async () => {
     const { call, requests } = await harness(() => acceptedGIF(), undefined, 16);
-    const foreign = await call('send_media', { connectionId: '54b85615-b212-4d2b-91e5-c41dcbec66ef', to: '551142000028', mimeType: 'image/gif', dataBase64: btoa('GIF89a') });
+    const foreign = await call('send_message', { connectionId: '54b85615-b212-4d2b-91e5-c41dcbec66ef', message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: btoa('GIF89a') } } });
     expect(foreign.structuredContent.data.error).toMatchObject({ code: 'connection_not_found' });
-    const large = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    const large = await call('send_message', { message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: gifBase64 } } });
     expect(large.isError).toBe(true);
     expect(requests).toHaveLength(0);
   });
 
   it('does not retry a failed conversion or record a successful send', async () => {
     const { call, requests, outbound, audits } = await harness(() => Response.json({ jsonapi, errors: [{ status: '503', detail: 'WaPilot GIF conversion is unavailable; token=private-token' }] }, { status: 503 }));
-    const result = await call('send_media', { to: '551142000028', mimeType: 'image/gif', dataBase64: gifBase64 });
+    const result = await call('send_message', { message: { kind: 'gif', to: '551142000028', mimeType: 'image/gif', source: { kind: 'base64', dataBase64: gifBase64 } } });
     expect(result.isError).toBe(true);
     expect(result.structuredContent.data.error).toMatchObject({ status: 503 });
     expect(requests).toHaveLength(1);

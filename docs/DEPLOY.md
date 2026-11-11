@@ -214,3 +214,24 @@ O deploy manual ativou `d3e46208-1636-476d-af8a-16e522ab3f2c` às 20:25:27 UTC, 
 O read-back da revisão automática conferiu os 34 fontes de aplicação idênticos ao `main`, incluindo `src/lib/message-update.ts` e `get_send_status`. Bindings, variáveis/Secrets, exports, assets, compatibilidade e observabilidade ficaram iguais à base. Os dois consumidores mantiveram IDs e configurações originais (principal: batch 10, espera 1s, 3 retries; DLQ: batch 10, espera 1s, 0 retries). O comando manual voltou a terminar com o aviso de permissões na reaplicação dos consumidores; o código já estava ativo e a leitura confirmou que os consumidores não foram alterados. Nenhuma migration foi aplicada.
 
 Verificação pública: health e metadata OAuth 200; MCP sem bearer 401. A listagem autenticada de conexões passou. A validação de motivos cifrados e consulta de envios usa os testes locais de comportamento; não foram gerados novos envios WhatsApp, callbacks ou envelopes cifrados reais para este rollout. Composio precisa de sync manual para anunciar a nova ferramenta de consulta; suporte a assinaturas de eventos permanece uma validação separada.
+
+## Publicação da ferramenta unificada de envio
+
+Esta mudança prepara `send_message`, os schemas por `message.kind`, o adaptador de envio e a migration `0010_unified_send_fence.sql`. Não publica Worker, aplica migration remota, altera infraestrutura ou envia mensagens reais. Os registros anteriores deste documento são históricos e não comprovam o estado atual do deployment.
+
+A troca de catálogo remove `send_text`, `reply_to_message`, `send_media` e `forward_message`. Os nomes antigos continuam aceitos somente pelo argumento `operation` de `get_send_status`, para consulta dos registros anteriores até sua expiração original de 24 horas. Clientes precisam atualizar as chamadas para o novo envelope, sem transformar uma ação de resultado desconhecido em uma nova chave.
+
+Antes de um corte autorizado, execute esta sequência:
+
+1. Confirme o commit e a versão do backend em uso, o Worker com tráfego, a automação de builds e as migrations já aplicadas. Compare os formatos pretendidos com a [matriz de suporte](SEND-MESSAGE.md#inventário-do-provedor-e-suporte-futuro).
+2. Execute `npm run check`, `npm run test:acceptance:send` e `npx wrangler deploy --dry-run`. A aceitação conectada usa somente instância e dados sintéticos locais, com a fronteira WhatsApp substituída. O dry-run não comprova o schema remoto ou o comportamento em dispositivos.
+3. Confira a lista remota de migrations pendentes. Aplique `0010_unified_send_fence.sql` antes de publicar o novo Worker ou migrar clientes. Os triggers impedem, em ambos os sentidos, a reserva de uma chave ativa entre as operações antigas e `send_message`, sem copiar conteúdo ou reiniciar validade. A migration não remove registros.
+4. Publique o bundle revisado somente com autorização de publicação. Preserve OAuth, Access, D1, KV, filas, Cron e imagem do sender conforme o read-back atual. Não publique os perfis `local` ou `stdio`.
+5. Atualize os catálogos WaPilot e Composio e confirme que só `send_message` é anunciada como ferramenta de envio. Confira as variantes, os escopos e a disponibilidade da consulta de operações antigas. A presença de um nome antigo em cache não autoriza repetir uma escrita por outro nome.
+6. Confira `/healthz`, `/.well-known/oauth-protected-resource/mcp` e o `401` com metadata OAuth em `/mcp` sem bearer. Com cliente autenticado, confira isolamento da conexão e a consulta de um registro sintético autorizado. Homologue envio/renderização em Android, iOS e WhatsApp Web separadamente, somente com destinatário, conteúdo e autorização definidos.
+
+`SEND_MEDIA_ORIGINS` é uma variável opcional com origens HTTPS exatas, separadas por vírgula. Ela autoriza os downloads do provedor usados por figurinha, URLs de prévia em `link.text`, cabeçalhos de botões e mídia de carrossel. Vazia, ela bloqueia essas fontes remotas; anexos Base64 não exigem essa variável. Não inclua a origem da API, curingas, credenciais ou caminhos. Não copie URLs privadas de arquivos para a configuração ou documentação.
+
+A allowlist no Worker não impõe resolução DNS, limites de egress ou política de redirects ao processo Go. Aprove somente origens confiáveis, incluindo seus redirects e assets de metadados, e confirme a política no backend antes de ampliar esse acesso. URLs de botões são destinos apresentados ao destinatário e não entram nessa allowlist de downloads.
+
+As lacunas de evento nativo, templates, Pix, áudio sem PTT, notas de vídeo, coordenadas zero e opções ignoradas do carrossel estão na matriz. Não declare esses formatos disponíveis a partir de um teste de outra variante. Erros depois do despacho continuam com resultado desconhecido e sem retry automático; aceite não comprova entrega, leitura ou renderização.

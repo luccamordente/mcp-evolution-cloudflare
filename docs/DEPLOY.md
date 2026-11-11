@@ -253,6 +253,8 @@ Antes de um corte autorizado, execute esta sequência:
 
 `SEND_MEDIA_ORIGINS` é uma variável opcional com origens HTTPS exatas, separadas por vírgula. Ela autoriza os downloads do provedor usados por figurinha, URLs de prévia em `link.text`, cabeçalhos de botões e mídia de carrossel. Vazia, ela bloqueia essas fontes remotas; anexos Base64 não exigem essa variável. Não inclua a origem da API, curingas, credenciais ou caminhos. Não copie URLs privadas de arquivos para a configuração ou documentação.
 
+O perfil de produção em `wrangler.jsonc` aprova explicitamente `https://storage.neurau.com.br` em `SEND_MEDIA_ORIGINS`, permitindo reutilizar essa mídia nos cartões do carrossel. As allowlists de leitura não concedem permissão de envio. Essa configuração só passa a valer em produção após uma publicação autorizada; um merge no Git, isoladamente, não confirma sua ativação.
+
 A allowlist no Worker não impõe resolução DNS, limites de egress ou política de redirects ao processo Go. Aprove somente origens confiáveis, incluindo seus redirects e assets de metadados, e confirme a política no backend antes de ampliar esse acesso. URLs de botões são destinos apresentados ao destinatário e não entram nessa allowlist de downloads.
 
 As lacunas de evento nativo, templates, Pix, áudio sem PTT, notas de vídeo, coordenadas zero e opções ignoradas do carrossel estão na matriz. Não declare esses formatos disponíveis a partir de um teste de outra variante. Erros depois do despacho continuam com resultado desconhecido e sem retry automático; aceite não comprova entrega, leitura ou renderização.

@@ -1,3 +1,4 @@
+import type { NativeMessage, ContentDiagnostic } from './lib/native-message';
 import type { CallbackSender } from './lib/sender-container';
 import type { ContentUnavailableReason, MessageUpdate } from './lib/message-update';
 
@@ -114,7 +115,10 @@ export interface MessageMediaItem {
   address?: string;
 }
 
-export interface Message {
+export interface Message extends NativeMessage {
+  contentDiagnostic?: ContentDiagnostic;
+  contentPartial?: boolean;
+  responseLinks?: Partial<Record<'votes' | 'eventResponses', string>>;
   id?: string;
   conversationId?: string;
   jid?: string;
@@ -131,7 +135,7 @@ export interface Message {
   quotedId?: string;
   mentions?: string[];
   contentUnavailable?: boolean;
-  contentUnavailableReason?: ContentUnavailableReason;
+  contentUnavailableReason?: ContentUnavailableReason | ContentDiagnostic['reason'];
   update?: MessageUpdate;
   /** Original provider type; unknown when absent, without guessing media expiry. */
   messageType?: string;

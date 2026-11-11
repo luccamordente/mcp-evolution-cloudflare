@@ -322,3 +322,32 @@ O WaPilot faz até seis tentativas dentro dessa hora, com intervalos de 1, 2, 4,
 `get_send_status` não chama o envio nem descriptografa o token da instância: resolve a conexão no escopo do usuário e consulta somente o registro operacional. `not_found` inclui chaves expiradas e não comprova ausência da mensagem. Uma reserva `pending` também pode ser de um request interrompido. Se o provedor devolveu aceite mas o D1 falhou, a primeira resposta preserva o ID recebido; a consulta posterior pode continuar `unknown` e bloqueia novo envio.
 
 Quando a causa da ausência de conteúdo não é informada, a listagem inclui `messageType` (tipo original ou `unknown`) e `contentUnavailableReason: not_retained_or_unknown`. Diagnósticos específicos de `update.state: unavailable` preservam `missing_original_secret`, `decryption_failed` ou `invalid_target`, inclusive nos erros de `get_message`. Atualizações `unsupported` podem ser lidas como metadados sem fingir que são texto vazio. `get_message` inclui esses campos no erro de conteúdo indisponível. Na ausência de diagnóstico específico, o contrato não informa a causa; não inferimos mídia expirada, formato não suportado ou exclusão. Falha de consulta permanece um erro de fetch separado. Arquivos com metadados mas sem URL continuam tendo seus metadados disponíveis, sem prometer download.
+
+## Native structured message history
+
+`get_message` and `list_messages` preserve validated `interactive`,
+`interactiveResponse`, `poll`, `event` and `eventResponse` fields. A retained
+structured message is readable without text or media. Event times remain Unix
+seconds. Response `timestampMS` values remain milliseconds. The parser removes
+unknown provider fields and never returns raw protocol envelopes or secrets.
+
+Polls and events advertise `responseLinks.votes` or
+`responseLinks.eventResponses`. Use `list_message_responses` with the same
+`connectionId`, `messageId` and advertised `relationship`. It returns at most
+100 resources per call, `meta`, `hasMore` and an opaque `nextCursor`. Repeat with
+that cursor while `hasMore` is true. Each call resolves the connection owner and
+uses its instance credential. The client accepts only the advertised relative
+route for that message and never follows cross-origin links or redirects.
+
+These pages contain observed current state. They do not establish a complete
+participant list or a snapshot. Preserve coverage and diagnostic metadata when
+answering questions. An empty or unavailable result does not prove nobody
+responded. The tool reads history only. It does not create native events or
+send RSVP responses.
+
+Native `contentDiagnostic` preserves only approved version, state, reason and
+optional target identifier. `contentPartial: true` identifies retained subsets,
+including unsupported actions, missing native media and duplicate poll choices.
+Unavailable or invalid native content remains an explicit error with its safe
+diagnostic. Unknown diagnostic reasons are omitted. Ambiguous response rows
+retain their ambiguity diagnostic without asserting a choice or RSVP.

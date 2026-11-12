@@ -203,3 +203,9 @@ Para detalhes, `pdf-detail.ts` usa o contexto nativo com handle explícito de do
 ## Estratégia de leitura progressiva
 
 O catálogo HTTP acrescenta obtenção do original, inspeção paginada e leitura visual com prévias/lotes/detalhe. A interpretação e o acompanhamento das páginas examinadas pertencem ao agente. O servidor resolve novamente a conexão autorizada em cada chamada e não guarda sessões de leitura, documentos ou cache de páginas. O agente escolhe pelas capacidades reais da sessão: original temporário quando utilizável; leitura WaPilot completa ou complemento de páginas/regiões quando necessário. O resultado textual integral anterior permanece separado. Consulte [TOOLS.md](TOOLS.md#escolha-e-cobertura-da-leitura) e as [provas de cliente](PDF-VALIDATION.md).
+
+## Conteúdo nativo e respostas retidas
+
+O adaptador valida as cinco famílias nativas de corpo e os diagnósticos de `meta.content`, separados de `meta.update`. Conteúdo estruturado não exige texto ou mídia. Votos e RSVP são consultados por páginas autenticadas em `list_message_responses`; relações e continuações são validadas contra o alvo, sem seguir links externos nem encaminhar credenciais. As coleções descrevem observações do estado atual, com consistência eventual, sem snapshot ou total completo. D1 não recebe histórico ou participantes.
+
+A variante `event` de `send_message` usa o controle de escrita e idempotência compartilhado. Instantes com fuso são normalizados antes do fingerprint. O provedor guarda o segredo antes do envio; o consumidor não armazena esse segredo nem repete POST em falha. VCards textuais são conteúdo público da mensagem solicitada, enquanto URLs e bytes privados de anexos continuam excluídos da leitura integral.

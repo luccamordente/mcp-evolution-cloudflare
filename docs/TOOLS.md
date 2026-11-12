@@ -322,3 +322,17 @@ O WaPilot faz até seis tentativas dentro dessa hora, com intervalos de 1, 2, 4,
 `get_send_status` não chama o envio nem descriptografa o token da instância: resolve a conexão no escopo do usuário e consulta somente o registro operacional. `not_found` inclui chaves expiradas e não comprova ausência da mensagem. Uma reserva `pending` também pode ser de um request interrompido. Se o provedor devolveu aceite mas o D1 falhou, a primeira resposta preserva o ID recebido; a consulta posterior pode continuar `unknown` e bloqueia novo envio.
 
 Quando a causa da ausência de conteúdo não é informada, a listagem inclui `messageType` (tipo original ou `unknown`) e `contentUnavailableReason: not_retained_or_unknown`. Diagnósticos específicos de `update.state: unavailable` preservam `missing_original_secret`, `decryption_failed` ou `invalid_target`, inclusive nos erros de `get_message`. Atualizações `unsupported` podem ser lidas como metadados sem fingir que são texto vazio. `get_message` inclui esses campos no erro de conteúdo indisponível. Na ausência de diagnóstico específico, o contrato não informa a causa; não inferimos mídia expirada, formato não suportado ou exclusão. Falha de consulta permanece um erro de fetch separado. Arquivos com metadados mas sem URL continuam tendo seus metadados disponíveis, sem prometer download.
+
+## Histórico de mensagens estruturadas
+
+`get_message` e `list_messages` preservam os campos validados `interactive`, `interactiveResponse`, `poll`, `event` e `eventResponse`. Conteúdo estruturado retido é legível sem texto ou mídia. Tempos de evento continuam em segundos Unix, enquanto `timestampMS` de resposta usa milissegundos. O parser remove campos desconhecidos e não devolve envelopes brutos ou segredos.
+
+Enquetes e eventos anunciam `responseLinks.votes` ou `responseLinks.eventResponses`. Use `list_message_responses` com a mesma conexão, `messageId` e `relationship` anunciada. Cada chamada retorna até 100 recursos, `meta`, `hasMore` e `nextCursor` opaco quando houver continuação. A próxima chamada reutiliza esse cursor. Cada página resolve o dono da conexão e usa sua credencial. O cliente aceita apenas a rota relativa anunciada para esse alvo e bloqueia links externos e redirects.
+
+As páginas contêm estado atual observado, sem snapshot ou lista completa de participantes. Preserve cobertura e diagnósticos na resposta ao usuário. Uma coleção vazia ou indisponível não comprova que ninguém respondeu. Esta ferramenta apenas lê; criação de evento usa `send_message` e RSVP de saída continua indisponível.
+
+`contentDiagnostic` preserva somente versão, estado, motivo e alvo autorizados. `contentPartial: true` identifica conteúdo parcial, como ações não suportadas, mídia nativa ausente e opções de enquete duplicadas. Conteúdo indisponível ou inválido mantém erro explícito e diagnóstico sanitizado. Motivos desconhecidos são omitidos. Linhas de resposta ambíguas mantêm o diagnóstico sem afirmar escolha ou presença.
+
+### Contatos e metadados retidos
+
+`get_message` preserva o conteúdo textual de elementos `text/vcard`, incluindo múltiplos cartões. Conteúdo incorporado de anexos e URLs privadas continuam excluídos. A normalização preserva precisão, velocidade e direção de localização quando finitas, além de waveform de áudio quando fornecida como string. Campos ausentes continuam ausentes, e zero continua válido. Isso não comprova qualidade de transcrição ou reprodução.

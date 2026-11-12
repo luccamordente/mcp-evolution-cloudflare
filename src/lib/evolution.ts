@@ -1,3 +1,4 @@
+import { contentDiagnosticSchema, nativeMessageSchema, hasNativeContent, responsePageSchema, type ResponseKind } from './native-message';
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 import { Buffer } from 'node:buffer';
 import { galleryImage } from './image-gallery';
@@ -326,6 +327,19 @@ function normalizeMessage(value: unknown): Message {
     type: stringValue(attributes.encodingFormat),
     messageType: stringValue(attributes.encodingFormat) ?? 'unknown',
   };
+  const diagnostic = contentDiagnosticSchema.safeParse(meta.content);
+  if (diagnostic.success) {
+    message.contentDiagnostic = diagnostic.data;
+    if (diagnostic.data.state === 'partial') message.contentPartial = true;
+  }
+  const native = nativeMessageSchema.safeParse(body);
+  if (native.success) Object.assign(message, native.data);
+  for (const kind of ['votes', 'eventResponses'] as const) {
+    const relation = asRecord(asRecord(item?.relationships)?.[kind]);
+    const related = stringValue(asRecord(relation?.links)?.related);
+    const expected = kind === 'votes' ? `/polls/${encodeURIComponent(message.id ?? '')}/votes` : `/messages/${encodeURIComponent(message.id ?? '')}/event-responses`;
+    if (related === expected) message.responseLinks = { ...message.responseLinks, [kind]: related };
+  }
   if (typeof body.text === 'string') message.text = body.text;
   const media = asRecord(body.media);
   const fileName = stringValue(media?.fileName) ?? stringValue(attributes.filename) ?? stringValue(body.filename);
@@ -344,7 +358,11 @@ function normalizeMessage(value: unknown): Message {
       return {
         encodingFormat: stringValue(rec.encodingFormat),
         url: stringValue(rec.url),
-        content: rec.content,
+        ...(rec.encodingFormat === 'text/vcard' && typeof rec.content === 'string' ? { content: rec.content } : {}),
+        accuracyMeters: typeof rec.accuracyMeters === 'number' && Number.isFinite(rec.accuracyMeters) ? rec.accuracyMeters : undefined,
+        speed: typeof rec.speed === 'number' && Number.isFinite(rec.speed) ? rec.speed : undefined,
+        degrees: typeof rec.degrees === 'number' && Number.isFinite(rec.degrees) ? rec.degrees : undefined,
+        waveform: typeof rec.waveform === 'string' ? rec.waveform : undefined,
         fileName: stringValue(rec.fileName),
         fileSize: typeof rec.fileSize === 'number' ? rec.fileSize : undefined,
         duration: typeof rec.duration === 'number' ? rec.duration : undefined,
@@ -387,13 +405,16 @@ function normalizeMessage(value: unknown): Message {
   // mean "binary media". Report text rows as text and flag empty rows instead
   // of passing a misleading file MIME type through.
   const isGenericFormat = !message.type || message.type === 'application/octet-stream';
-  const missingContent = message.text === undefined && !message.media && !message.medias?.length;
+  const missingContent = message.text === undefined && !message.media && !message.medias?.length && !hasNativeContent(message);
   if (isGenericFormat && message.text !== undefined && !message.media) {
     message.type = 'text/plain';
   } else if (isGenericFormat && missingContent) {
     message.type = message.update?.state === 'unsupported' ? 'application/vnd.whatsapp.update' : undefined;
   }
-  if (message.update?.state === 'unavailable') {
+  if (message.contentDiagnostic && ['unavailable', 'invalid', 'unsupported'].includes(message.contentDiagnostic.state)) {
+    message.contentUnavailable = true;
+    message.contentUnavailableReason = message.contentDiagnostic.reason;
+  } else if (message.update?.state === 'unavailable') {
     message.contentUnavailable = true;
     message.contentUnavailableReason = message.update.reason;
   } else if (missingContent && message.update?.state !== 'unsupported') {
@@ -559,6 +580,30 @@ export class EvolutionGoClient {
       if (error instanceof EvolutionApiError && (error.status === 404 || error.status === 400)) return undefined;
       throw error;
     }
+  }
+
+  async listMessageResponses(messageId: string, kind: ResponseKind, limit = 100, cursor?: string) {
+    const message = await this.getMessage(messageId);
+    const path = message?.responseLinks?.[kind];
+    if (!path) throw new EvolutionApiError(404, 'WaPilot response relationship is unavailable for this message.');
+    const query = new URLSearchParams({ 'page[limit]': String(limit) });
+    const cursorKey = 'page[cursor]';
+    if (cursor) query.set(cursorKey, cursor);
+    const parsed = responsePageSchema.safeParse(await this.request<unknown>(`${path}?${query}`, { redirect: 'manual' }));
+    if (!parsed.success) throw new EvolutionApiError(502, 'WaPilot received an invalid message response page.');
+    const page = parsed.data;
+    if (page.data.length > limit) throw new EvolutionApiError(502, 'WaPilot received an oversized message response page.');
+    if (page.data.some(row => row.type !== (kind === 'votes' ? 'poll-vote' : 'event-response'))) throw new EvolutionApiError(502, 'WaPilot received an unexpected message response type.');
+    if (page.data.some(row => ('pollMessageId' in row.attributes ? row.attributes.pollMessageId : row.attributes.eventMessageId) !== messageId)) throw new EvolutionApiError(502, 'WaPilot received responses for another message.');
+    let nextCursor: string | undefined;
+    if (page.links.next) {
+      const next = new URL(page.links.next, 'https://responses.invalid');
+      if (next.origin !== 'https://responses.invalid' || next.pathname !== path || next.username || next.password || next.hash) throw new EvolutionApiError(502, 'WaPilot received an invalid message response link.');
+      nextCursor = next.searchParams.get(cursorKey) ?? undefined;
+      if (!nextCursor) throw new EvolutionApiError(502, 'WaPilot received a response link without a cursor.');
+    }
+    if (page.meta.hasMore === true && !nextCursor) throw new EvolutionApiError(502, 'WaPilot received an incomplete message response page.');
+    return { items: page.data, meta: page.meta, hasMore: Boolean(nextCursor), ...(nextCursor ? { nextCursor } : {}) };
   }
 
   /** Read audio only from a retained message in this instance; never forward API credentials to storage. */
@@ -765,6 +810,11 @@ export class EvolutionGoClient {
         if (message.kind === 'gif') attributes.gifPlayback = true;
         else if (message.kind === 'video' && message.gifPlayback !== undefined) attributes.gifPlayback = message.gifPlayback;
         timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
+        break;
+      case 'event':
+        route = '/send/event';
+        encodingFormat = 'application/vnd.whatsapp.event';
+        body = { event: { name: message.name, startTime: Date.parse(message.startTime) / 1000, ...(message.description !== undefined ? { description: message.description } : {}), ...(message.endTime ? { endTime: Date.parse(message.endTime) / 1000 } : {}), ...(message.location ? { location: message.location } : {}) } };
         break;
       case 'poll':
         route = '/send/poll';

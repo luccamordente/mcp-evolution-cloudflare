@@ -25,6 +25,7 @@ Os campos desta tabela são próprios da variante. Campos opcionais usam `?`. As
 | `voice_note` | `mimeType`, `source` | `to` |
 | `document` | `mimeType`, `source`, `fileName?`, `caption?` | `to` |
 | `gif` | `mimeType`, `source`, `fileName?`, `caption?` | `to` |
+| `event` | `name`, `description?`, `startTime`, `endTime?`, `location?` | `to` |
 | `poll` | `question`, `options`, `maxAnswers` com padrão `1` | `to` |
 | `list` | `title`, `description`, `buttonText`, `footerText`, `sections` | `to` |
 | `location` | `name`, `latitude`, `longitude`, `address` | `to` |
@@ -178,7 +179,7 @@ O suporte eventual de cada item abaixo requer uma implementação verificada ant
 
 | Item | Estado atual e dependência |
 | --- | --- |
-| Evento nativo | Não há rota de envio de evento no `main` conferido. Exige contrato, construção nativa, segredo de mensagem, serialização e testes do backend. O recebimento de RSVP também requer mudanças. Veja a [investigação de eventos nativos](NATIVE-WHATSAPP-EVENTS.md). |
+| Operações adicionais de evento | Criação nativa usa `event` e leitura de RSVP usa `list_message_responses`. Edição, cancelamento e RSVP de saída continuam fora do contrato. Veja o [contrato implementado](plans/NATIVE-HISTORY-BACKEND-CONTRACT.md). |
 | Template de negócio | `/send/template` existe, mas o handler rejeita a operação. Exige outro canal ou implementação compatível. |
 | Pix | Os campos existem no tipo de botão, mas o serviço rejeita esse envio porque há descarte silencioso no protocolo usado. |
 | Anexo de áudio comum | A rota `audio` atual produz nota de voz. Exige suporte distinto para áudio sem PTT. |
@@ -205,4 +206,14 @@ Um arquivo `.ics` enviado por `document` continua sendo um anexo, mesmo quando o
 
 Os testes do contrato também verificam descoberta de uma única ferramenta de envio, serialização das variantes, rejeição antes do despacho, autorização, posse da conexão, conflitos entre variantes, concorrência e bloqueio entre chaves antigas e novas. Os testes distinguem aceite confirmado de resultado desconhecido, sem replay automático. A execução e suas limitações ficam no relatório da mudança; este documento não afirma resultado de produção.
 
-A aceitação em dispositivos é separada e depende de autorização para destinatário e conteúdo reais. Para cada variante homologada, a conferência registra Android, iOS e WhatsApp Web, versão do cliente e conexão usada. Verifica aparência nativa, conteúdo, autoria/citação, callback de linhas e botões, votação da enquete, reprodução de mídia e destinatário Status. Evento e RSVP entram nessa lista somente após existir suporte nativo. Uma resposta HTTP bem-sucedida não substitui a observação no dispositivo.
+A aceitação em dispositivos é separada e depende de autorização para destinatário e conteúdo reais. Para cada variante homologada, a conferência registra Android, iOS e WhatsApp Web, versão do cliente e conexão usada. Verifica aparência nativa, conteúdo, autoria/citação, callback de linhas e botões, votação da enquete, reprodução de mídia e destinatário Status. Evento e RSVP de leitura têm contrato nativo, mas sua homologação visual continua separada. Uma resposta HTTP bem-sucedida não substitui a observação no dispositivo.
+
+## Eventos nativos
+
+`message.kind: "event"` cria um cartão de evento pela rota tipada `/send/event`. Recebe `to`, `replyTo?`, `name`, `description?`, `startTime`, `endTime?` e `location?`. Não aceita menções, atraso, ID personalizado, cancelamento ou convidados adicionais na criação. Um `.ics` enviado como documento continua documento.
+
+Os instantes exigem data ISO 8601 com segundos inteiros e fuso explícito. O adaptador emite segundos Unix em `0..253402300799`, sem truncamento; o término deve ser posterior ao início. Offsets equivalentes são normalizados para a mesma ação idempotente. Não há validação de data futura que invalide uma repetição da mesma ação.
+
+Nome e nome do local recebem trim e aceitam 1 a 200 unidades UTF-16. Descrição e endereço opcionais preservam espaços e aceitam 1 a 10.000 e 1 a 1.000 unidades respectivamente. Local exige nome, latitude e longitude finitas nos intervalos geográficos; zero é válido. Número individual é normalizado para JID PN completo; PN, LID e grupo são aceitos. Citação de grupo exige participante completo e a origem precisa estar retida e verificável no provedor.
+
+A idempotência existente protege a chave por 24 horas. Segredo e ID nativo pertencem ao provedor. Timeout ou resultado desconhecido não inicia outro envio, não altera a chave e não usa texto/documento como fallback. Aceite não confirma entrega ou renderização. A leitura de RSVP é uma operação separada; esta variante não envia RSVP, edita ou cancela eventos.

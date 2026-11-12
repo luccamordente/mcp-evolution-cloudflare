@@ -59,6 +59,7 @@ const cases = [
     ['image', 'image/png'], ['video', 'video/mp4'], ['voice_note', 'audio/ogg'], ['document', 'application/pdf'], ['gif', 'image/gif'],
   ].map(([kind, mimeType]) => ({ message: { kind, to: recipient, mimeType, source: base64Source, ...(kind === 'voice_note' ? {} : { caption: 'Amostra' }) }, route: '/send/media', attributes: { encodingFormat: mimeType, body: { ...(kind === 'voice_note' ? {} : { text: 'Amostra' }), media: { url: 'AQ==' } } } })),
   { message: { kind: 'list', to: recipient, title: 'Planos', description: 'Escolha', buttonText: 'Ver planos', footerText: 'WaPilot', sections: [{ title: 'Mensal', rows: [{ rowId: 'basic', title: 'Básico', description: 'R$ 29' }] }], replyTo: { messageId: 'SOURCE' } }, route: '/send/list', attributes: { body: { title: 'Planos', buttonText: 'Ver planos', sections: [{ title: 'Mensal', rows: [{ rowId: 'basic', title: 'Básico', description: 'R$ 29' }] }] } } },
+  { message: { kind: 'event', to: '12025550123@s.whatsapp.net', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' }, route: '/send/event', attributes: { encodingFormat: 'application/vnd.whatsapp.event', body: { event: { name: 'Meeting', startTime: 1795197600 } } } },
   { message: { kind: 'location', to: recipient, name: 'Praça', latitude: -19.9, longitude: -43.9, address: 'Rua A' }, route: '/send/location', attributes: { body: { name: 'Praça', latitude: -19.9, longitude: -43.9, address: 'Rua A' } } },
   { message: { kind: 'contact', to: recipient, fullName: 'Pessoa', organization: 'Empresa', phone: '5511888888888' }, route: '/send/contact', attributes: { vcard: { fullName: 'Pessoa', organization: 'Empresa', phone: '5511888888888' } } },
   { message: { kind: 'buttons', to: recipient, title: 'Agenda', description: 'Escolha', footer: 'WaPilot', buttons: [{ kind: 'reply', label: 'Confirmar', id: 'confirm' }] }, route: '/send/button', attributes: { body: { buttons: [{ type: 'reply', displayText: 'Confirmar', id: 'confirm' }] } } },
@@ -185,5 +186,36 @@ it.each(['https://media。example.test/page', 'https://media.example.test/~user'
   const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'UNEXPECTED' } }));
   const result = await rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'link', to: recipient, text: `Veja ${url}` } } });
   expect(result.result.isError).toBe(true);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+
+it('reuses an event action for equivalent offsets and rejects semantic changes', async () => {
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'EVENT' } }));
+  const message = { kind: 'event', to: '12025550123', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' };
+  const args = { idempotencyKey: 'event-action', message };
+  const first = await rpc('tools/call', { name: 'send_message', arguments: args });
+  expect(first.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'EVENT' } } });
+  const again = await rpc('tools/call', { name: 'send_message', arguments: { ...args, message: { ...message, to: '12025550123@s.whatsapp.net', startTime: '2026-11-20T15:00:00-03:00' } } });
+  expect(again.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'EVENT' } } });
+  const changed = await rpc('tools/call', { name: 'send_message', arguments: { ...args, message: { ...message, name: 'Other' } } });
+  expect(changed.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'idempotency_conflict' } } } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('does not repeat an event with an unknown dispatch result', async () => {
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('synthetic timeout'));
+  const args = { idempotencyKey: 'unknown-event', message: { kind: 'event', to: '12025550123', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' } };
+  await rpc('tools/call', { name: 'send_message', arguments: args });
+  const again = await rpc('tools/call', { name: 'send_message', arguments: args });
+  expect(again.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'send_result_unknown' } } } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+
+it('denies event creation without write scope before dispatch', async () => {
+  const fetcher = vi.spyOn(globalThis, 'fetch');
+  const result = await rpc('tools/call', { name: 'send_message', arguments: { message: { kind: 'event', to: '12025550123', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' } } }, ['mcp:read']);
+  expect(result.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'insufficient_scope' } } } });
   expect(fetcher).not.toHaveBeenCalled();
 });

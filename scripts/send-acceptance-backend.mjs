@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 import { accessSync, constants } from 'node:fs';
 
 const root = resolve(import.meta.dirname, '..');
-const backend = join(root, '.scratch', 'evolution-go');
+const backend = resolve(process.env.WAPILOT_SEND_ACCEPTANCE_BACKEND ?? join(root, '.scratch', 'evolution-go'));
 function goExecutable() {
   if (process.env.WAPILOT_ACCEPTANCE_GO) return process.env.WAPILOT_ACCEPTANCE_GO;
   for (const directory of [...(process.env.PATH ?? '').split(delimiter), '/usr/local/go/bin']) {
@@ -122,7 +122,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (process.exitCode === 0) {
       const result = JSON.parse(await readFile(report, 'utf8'));
       const native = result.testResults.find(test => basename(test.name) === 'send-message-backend.test.ts')?.assertionResults ?? [];
-      if (native.length < 12 || native.some(test => test.status !== 'passed')) throw new Error('Native send acceptance did not execute every required case.');
+      if (native.length < 14 || native.some(test => test.status !== 'passed')) throw new Error('Native send acceptance did not execute every required case.');
       console.log(`Send acceptance passed ${result.numPassedTests} tests, including ${native.length} native Go cases.`);
     }
   } catch (error) {

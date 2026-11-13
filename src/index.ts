@@ -11,6 +11,8 @@ import { connectionsPage } from './ui/connections';
 import { adminPage } from './ui/admin';
 import { buildAdminSnapshot, isAdminOperator, type AdminOAuthReader } from './lib/admin';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
+import { activateInvitedUser, inviteUser, InvitationError } from './lib/invitations';
+import { z } from 'zod';
 
 export type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
 type ProvisionRequest = { instances?: Array<{ ownerEmail?: string; name?: string; instanceId?: string; phoneNumber?: string }> };
@@ -34,6 +36,24 @@ async function requireUiAuth(c: any): Promise<import('./types').AuthenticatedUse
 }
 
 const requireAdminUiAuth = requireUiAuth;
+
+app.post('/admin/invitations', async (c) => {
+  const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Acesso administrativo do WaPilot necessário.' }, 403);
+  const input = z.object({ email: z.string().trim().toLowerCase().email().max(254) }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Informe um e-mail válido para o convite ao WaPilot.' }, 400);
+  try { const [body, status] = await inviteUser(c.env, input.data.email); return c.json(body, status); }
+  catch (error) { return c.json({ error: error instanceof InvitationError ? error.message : 'Não foi possível emitir o convite ao WaPilot.' }, error instanceof InvitationError ? error.status : 503); }
+});
+
+app.post('/admin/invitations/:userId/activate', async (c) => {
+  const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Acesso administrativo do WaPilot necessário.' }, 403);
+  const input = z.object({ clerkUserId: z.string().regex(/^user_[A-Za-z0-9]+$/).max(128) }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Informe o identificador da conta a ativar no WaPilot.' }, 400);
+  try { return c.json(await activateInvitedUser(c.env, c.req.param('userId'), input.data.clerkUserId)); }
+  catch (error) { return c.json({ error: error instanceof InvitationError ? error.message : 'Não foi possível ativar esta conta no WaPilot.' }, error instanceof InvitationError ? error.status : 503); }
+});
 
 app.get('/', (c) => c.redirect('/connections', 302));
 

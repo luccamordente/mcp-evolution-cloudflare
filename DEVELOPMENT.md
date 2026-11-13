@@ -54,6 +54,12 @@ A identidade do bearer chega ao servidor como `ctx.props.user`. As ferramentas q
 
 A busca depende da retenção de mensagens no Evolution Go, incluindo `DATABASE_SAVE_MESSAGES=true`; não garante todo o histórico do WhatsApp, e um resultado vazio é inconclusivo. O fork não oferece listagem de chats. Ajustes de contrato devem ficar concentrados em `src/lib/evolution.ts`, com testes mockados das rotas reais. Para o filtro de conversa, `test/mcp-messages.test.ts` exercita o caminho MCP até o cliente Evolution real com D1 e HTTP simulados; testes de schema e rotas complementam validação e serialização. Esses testes verificam o contrato emitido, sem comprovar a versão ou a retenção da instância de produção.
 
+## Convites administrativos em desenvolvimento
+
+As rotas próprias são `POST /admin/invitations` com `{ email }` e `POST /admin/invitations/:userId/activate` com `{ clerkUserId }`. Ambas exigem sessão de administrador ativo e CSRF; não há gestão de convites no painel de leitura. Conta convidada permanece `disabled` até o read-back do ID Clerk e do e-mail primário verificado. Uma repetição não envia outro e-mail nem reativa desativados. Consulte o contrato em [ARCHITECTURE.md](docs/ARCHITECTURE.md#convites-e-ativação-administrativa) e a reconciliação em [DEPLOY.md](docs/DEPLOY.md#convites-e-ativação-administrativa).
+
+`npx vitest run test/admin-invitations.test.ts` usa o Worker publicado, runtime workerd, D1/KV locais e o SDK real com Backend/JWKS simulados. Inclui respostas portadoras redigidas, conflitos, concorrência, falhas antes/depois do envio, paginação, verificação de identidade e cancelamento durante ativação. Não precisa de credenciais nem envia convites reais. Um fluxo real na aplicação existente depende de autorização específica para credenciais, usuário de teste, configuração e e-mail; esta suíte não substitui sua homologação.
+
 ## MCP local por stdio (Node 22+)
 
 `dev:stdio` é um entrypoint Node exclusivo de desenvolvimento. Ele reutiliza as ferramentas e recursos MCP publicados, sem OAuth, Access, túnel ou login Cloudflare. O Worker publicado continua HTTP com OAuth.

@@ -2,6 +2,8 @@
 
 Consulta em 2026-11-12. Esta nota cobre o contrato atual do Clerk e uma prova local de empacotamento; não descreve uma sessão real nem altera a autenticação do WaPilot.
 
+A [spec de implementação #53](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/53) consolida as decisões e os testes confirmados pelo usuário. O [prompt original de setup Clerk](clerk-setup-prompt.md) foi preservado como referência e também está anexado à spec; ele não foi executado nesta exploração.
+
 ## Workers e Hono
 
 - O SDK `@clerk/backend` aceita um `Request` padrão em `createClerkClient().authenticateRequest()`. A opção `acceptsToken` pode ser fixada em `session_token` (também é o padrão da API direta); `authorizedParties` restringe as origens permitidas, e `jwtKey` permite verificar o JWT localmente, sem consulta ao JWKS por request. O resultado expõe `isAuthenticated`, `status`, `headers`, `tokenType` e `toAuth()`. [Referência oficial de `authenticateRequest()`](https://clerk.com/docs/reference/backend/authenticate-request), [orientação de produção sobre `authorizedParties`](https://clerk.com/docs/guides/development/deployment/production).

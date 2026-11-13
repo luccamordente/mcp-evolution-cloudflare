@@ -10,7 +10,9 @@ Com o CLI `tokensave` instalado e a integração MCP configurada no agente, rode
 node scripts/worktree-setup.mjs
 ```
 
-O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, seguindo o padrão da Lovell. Ele cria ou atualiza o índice local em `.tokensave/` (ignorado pelo Git), inclui `wrangler.jsonc`, HTML, CSS e `.github/` nas buscas e preserva configurações existentes. A ferramenta é opcional: sua ausência ou falha não interrompe o setup.
+O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, com a lista explícita dos inputs locais a copiar da worktree principal: `.env.stdio`, `.env.clerk` e o par `.wrangler/clerk-test/tls/localhost.pem` / `localhost-key.pem`, quando existirem. A cópia usa permissão `0600`, não sobrescreve destinos existentes e não sincroniza alterações posteriores. Mantenha os arquivos de referência na worktree principal; o setup não procura credenciais em outras worktrees. O par TLS é somente o certificado de localhost e sua chave, nunca a chave privada da CA.
+
+Depois da cópia, o comando cria ou atualiza o índice local em `.tokensave/` (ignorado pelo Git), inclui `wrangler.jsonc`, HTML, CSS e `.github/` nas buscas e preserva configurações existentes. A ferramenta é opcional: sua ausência ou falha não interrompe o setup. D1/KV, grants, chaves de cifra/consentimento, configurações geradas e índices não são copiados; cada worktree prepara seus próprios estados.
 
 Cada worktree precisa do próprio índice. Depois de criá-lo, reinicie a conexão MCP do agente se ela ainda estiver usando o índice da worktree principal. Para atualizar um índice existente após mudanças no código, use `tokensave sync`.
 
@@ -76,14 +78,15 @@ somente leitura de estado de duas conexões sintéticas; não provisiona nem env
 mensagens. Todas as outras operações do mock são recusadas.
 
 Com autorização para a instância Clerk development e para os destinatários de
-teste, copie `.env.clerk.example` para `.env.clerk`, com permissão `0600`, e
+teste, se o setup ainda não copiou uma configuração existente, copie
+`.env.clerk.example` para `.env.clerk`, com permissão `0600`, e
 preencha as duas chaves `pk_test_`/`sk_test_` e `CLERK_TEST_ADMIN_EMAIL`. Esse é o
 único arquivo de entrada; o comando não procura credenciais no ambiente do
 processo, em `.dev.vars`, em `.env.stdio` ou em outra worktree. Não use chaves live.
 Arquivo ausente/inválido produz orientação sem imprimir os valores.
 
 ```sh
-cp .env.clerk.example .env.clerk
+cp -n .env.clerk.example .env.clerk
 chmod 600 .env.clerk
 # Preencha o arquivo privado antes do próximo comando.
 npm run dev:clerk -- --prepare
@@ -104,7 +107,8 @@ Ausência dos segredos com persistência existente interrompe a preparação. Mu
 o e-mail exige uma base de teste nova. `.wrangler/local-dev`, `.wrangler/stdio`
 e os ambientes existentes não são sobrescritos.
 
-Prepare um certificado confiável pelo navegador e pelo cliente OAuth. O dono
+Se o setup não copiou um par TLS já preparado na worktree principal, prepare
+um certificado confiável pelo navegador e pelo cliente OAuth. O dono
 da máquina deve instalar e confiar a CA de desenvolvimento; o comando WaPilot
 não instala certificados nem altera a trust store. No macOS, seguindo o
 [mkcert oficial](https://github.com/FiloSottile/mkcert#installation):
@@ -192,7 +196,7 @@ As rotas próprias são `POST /admin/invitations` com `{ email }` e `POST /admin
 
 Copie `.env.stdio.example` para `.env.stdio` (ignorado pelo Git) e informe `EVOLUTION_BASE_URL`, `LOCAL_INSTANCE_ID` e `LOCAL_INSTANCE_TOKEN` de uma instância existente. O ID deve ser o ID canônico retornado pelo estado live. A chave administrativa e a chave de criptografia de produção não são necessárias. A configuração também pode vir do ambiente do processo, que tem precedência sobre o arquivo. `IMAGE_STORAGE_ORIGINS` é opcional e aceita as mesmas origens HTTPS exatas da galeria publicada.
 
-O setup de worktrees copia `.env.stdio` da worktree principal quando o destino ainda não existe, com permissão `0600`. A cópia é independente; alterações posteriores não são sincronizadas e uma configuração existente nunca é substituída. Somente esse arquivo é copiado: D1, chave de criptografia e estado em `.wrangler/stdio` continuam isolados. Sem Git ou fora de um checkout, a cópia é pulada sem interromper o setup. O helper é `scripts/copy-stdio-env.mjs`; nesta instalação, o hook Git local `post-checkout` também o executa para novas worktrees criadas a partir de branches anteriores ao setup atualizado.
+O setup Orca copia `.env.stdio` e os demais inputs listados em `orca.yaml` da worktree principal, como descrito acima; D1, chave de criptografia e estado em `.wrangler/stdio` continuam isolados. Sem Git ou fora de um checkout, a cópia é pulada sem interromper o setup. O nome `scripts/copy-stdio-env.mjs` foi preservado para os callers existentes: ele recebe o destino e a lista de arquivos; sem lista, mantém a cópia exclusiva de `.env.stdio`. Hooks Git locais anteriores também precisam apontar para esse helper no caminho atual; o setup Orca não instala nem altera hooks globais.
 
 Configure o cliente para iniciar o processo filho com o diretório absoluto desta worktree:
 

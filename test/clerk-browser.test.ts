@@ -62,7 +62,7 @@ it('requires the dashboard CSRF token and trusted origin for mutations and alias
   expect(accepted.status).toBe(404);
 });
 
-it('keeps consent explicit under the Clerk session and loads session renewal', async () => {
+it('preserves native form origin while requiring explicit Clerk consent and its browser binding', async () => {
   const account = await fixture.issue({ email: 'luccamordente@gmail.com' });
   const { cookie } = await fixture.session();
   const verifier = 'z'.repeat(43), challenge = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))).toString('base64url');
@@ -72,6 +72,7 @@ it('keeps consent explicit under the Clerk session and loads session renewal', a
   expect(new URL(login.headers.get('location')!, 'https://mcp.invalid').searchParams.get('returnTo')).toBe('/authorize?' + query);
   const consent = await fixture.fetch('/authorize?' + query, { headers: { cookie, accept: 'text/html' } });
   expect(consent.status).toBe(200);
+  expect(consent.headers.get('referrer-policy')).toBe('same-origin');
   const html = await consent.text();
   expect(html).toContain('/auth.js');
   expect(html).toContain('name="handle"');
@@ -79,8 +80,13 @@ it('keeps consent explicit under the Clerk session and loads session renewal', a
   expect(html).toContain('Permitir conexão');
   const handle = html.match(/name="handle" value="([^"]+)"/)![1];
   const binding = consent.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
-  const denied = await fixture.fetch('/authorize', { method: 'POST', redirect: 'manual', headers: { cookie: cookie + '; ' + binding, origin: 'https://attacker.invalid', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ handle, decision: 'allow' }).toString() });
-  expect(denied.status).toBe(403);
+  for (const origin of [undefined, 'null', 'https://attacker.invalid']) {
+    const denied = await fixture.fetch('/authorize', { method: 'POST', redirect: 'manual', headers: { cookie: cookie + '; ' + binding, ...(origin === undefined ? {} : { origin }), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ handle, decision: 'allow' }).toString() });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: 'Esta ação precisa ser iniciada no WaPilot.' });
+  }
+  const unbound = await fixture.fetch('/authorize', { method: 'POST', redirect: 'manual', headers: { cookie, origin: 'https://mcp.invalid', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ handle, decision: 'allow' }).toString() });
+  expect(unbound.status).toBe(400);
   const approve = () => fixture.fetch('/authorize', { method: 'POST', redirect: 'manual', headers: { cookie: cookie + '; ' + binding, origin: 'https://mcp.invalid', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ handle, decision: 'allow' }).toString() });
   const approved = await approve();
   expect(approved.status).toBe(302);

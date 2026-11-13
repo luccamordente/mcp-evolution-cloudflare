@@ -36,8 +36,8 @@ it('copies the configured Clerk inputs through the Orca setup without sharing ru
   const root = await mkdtemp(resolve(tmpdir(), 'wapilot clerk env '));
   const main = resolve(root, 'main');
   const child = resolve(root, 'child worktree');
-  const inputs = ['.env.stdio', '.env.clerk', '.wrangler/clerk-test/tls/localhost.pem', '.wrangler/clerk-test/tls/localhost-key.pem'];
-  const excluded = ['.dev.vars', '.wrangler/clerk-test/secrets.json', '.wrangler/clerk-test/runtime.env', '.wrangler/clerk-test/bindings/state.sqlite', '.wrangler/clerk-test/tls/rootCA-key.pem'];
+  const inputs = ['.env.stdio', '.env.clerk'];
+  const excluded = ['.wrangler/clerk-test/tls/tailscale.pem', '.wrangler/clerk-test/tls/tailscale-key.pem', '.dev.vars', '.wrangler/clerk-test/secrets.json', '.wrangler/clerk-test/runtime.env', '.wrangler/clerk-test/bindings/state.sqlite', '.wrangler/clerk-test/tls/rootCA-key.pem'];
   const git = (...args: string[]) => execFileSync('git', ['-C', main, ...args], { stdio: 'pipe' });
   try {
     execFileSync('git', ['init', main], { stdio: 'pipe' });

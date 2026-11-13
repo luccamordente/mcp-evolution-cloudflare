@@ -10,7 +10,7 @@ Com o CLI `tokensave` instalado e a integração MCP configurada no agente, rode
 node scripts/worktree-setup.mjs
 ```
 
-O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, com a lista explícita dos inputs locais a copiar da worktree principal: `.env.stdio`, `.env.clerk` e o par `.wrangler/clerk-test/tls/localhost.pem` / `localhost-key.pem`, quando existirem. A cópia usa permissão `0600`, não sobrescreve destinos existentes e não sincroniza alterações posteriores. Mantenha os arquivos de referência na worktree principal; o setup não procura credenciais em outras worktrees. O par TLS é somente o certificado de localhost e sua chave, nunca a chave privada da CA.
+O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, com a lista explícita dos inputs locais a copiar da worktree principal: `.env.stdio` e `.env.clerk`, quando existirem. A cópia usa permissão `0600`, não sobrescreve destinos existentes e não sincroniza alterações posteriores. Mantenha os arquivos de referência na worktree principal; o setup não procura credenciais em outras worktrees. Certificados TLS não são copiados: pertencem ao hostname da máquina de cada desenvolvedor.
 
 Depois da cópia, o comando cria ou atualiza o índice local em `.tokensave/` (ignorado pelo Git), inclui `wrangler.jsonc`, HTML, CSS e `.github/` nas buscas e preserva configurações existentes. A ferramenta é opcional: sua ausência ou falha não interrompe o setup. D1/KV, grants, chaves de cifra/consentimento, configurações geradas e índices não são copiados; cada worktree prepara seus próprios estados.
 
@@ -66,10 +66,13 @@ A identidade do bearer chega ao servidor como `ctx.props.user`. As ferramentas q
 
 A busca depende da retenção de mensagens no Evolution Go, incluindo `DATABASE_SAVE_MESSAGES=true`; não garante todo o histórico do WhatsApp, e um resultado vazio é inconclusivo. O fork não oferece listagem de chats. Ajustes de contrato devem ficar concentrados em `src/lib/evolution.ts`, com testes mockados das rotas reais. Para o filtro de conversa, `test/mcp-messages.test.ts` exercita o caminho MCP até o cliente Evolution real com D1 e HTTP simulados; testes de schema e rotas complementam validação e serialização. Esses testes verificam o contrato emitido, sem comprovar a versão ou a retenção da instância de produção.
 
-## Clerk development em HTTPS de loopback
+## Clerk development na tailnet privada
 
-`npm run dev:clerk` usa `src/worker.ts` com autenticação Clerk real, em
-`https://localhost:8795`. O perfil independente `wrangler.clerk-test.jsonc` usa
+`npm run dev:clerk` usa `src/worker.ts` com autenticação Clerk real em
+`https://<máquina>.<tailnet>.ts.net:8443`, acessível somente pela sua tailnet.
+Cada desenvolvedor conecta a própria máquina à própria tailnet; o comando lê
+`Self.DNSName` de `tailscale status --json`, sem hostname compartilhado ou entrada
+de origem em `.env.clerk`. O perfil independente `wrangler.clerk-test.jsonc` usa
 `ENVIRONMENT=clerk-test`: login nunca cria, vincula ou ativa uma conta D1.
 Não herda rotas de produção, AI, filas, Cron, serviços, DO ou Containers; Docker
 não é necessário. D1/KV têm IDs sintéticos e `remote:false`, e o runtime e o proxy
@@ -92,7 +95,8 @@ chmod 600 .env.clerk
 npm run dev:clerk -- --prepare
 ```
 
-`--prepare` aplica migrations apenas no D1 local e cria as fixtures
+`--prepare` funciona sem Tailscale, certificado ou túnel: aplica migrations
+apenas no D1 local e cria as fixtures
 `clerk-test-admin` (e-mail configurado) e `clerk-test-other`, ambas `disabled`, sem
 vínculo Clerk, cada uma com uma conexão fictícia. Os seeds operacionais legados
 sem vínculo são removidos somente desse D1 de teste. Reinícios preservam os IDs,
@@ -107,37 +111,43 @@ Ausência dos segredos com persistência existente interrompe a preparação. Mu
 o e-mail exige uma base de teste nova. `.wrangler/local-dev`, `.wrangler/stdio`
 e os ambientes existentes não são sobrescritos.
 
-Se o setup não copiou um par TLS já preparado na worktree principal, prepare
-um certificado confiável pelo navegador e pelo cliente OAuth. O dono
-da máquina deve instalar e confiar a CA de desenvolvimento; o comando WaPilot
-não instala certificados nem altera a trust store. No macOS, seguindo o
-[mkcert oficial](https://github.com/FiloSottile/mkcert#installation):
+Instale o [Tailscale](https://tailscale.com/download), conecte a máquina à sua
+tailnet e habilite MagicDNS e
+[certificados HTTPS](https://tailscale.com/docs/how-to/set-up-https-certificates)
+nessa rede. O cliente OAuth e o navegador precisam alcançar essa mesma tailnet.
+Depois, rode:
 
 ```sh
-brew install mkcert
-mkcert -install
-mkdir -p .wrangler/clerk-test/tls
-mkcert -key-file .wrangler/clerk-test/tls/localhost-key.pem -cert-file .wrangler/clerk-test/tls/localhost.pem localhost 127.0.0.1 ::1
-chmod 600 .wrangler/clerk-test/tls/localhost-key.pem
-export NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem"
 npm run dev:clerk
 ```
 
-Mantenha a chave privada da CA fora do projeto. Firefox pode exigir `nss` e
-reinicialização conforme o guia mkcert. O cliente OAuth Node precisa receber
-`NODE_EXTRA_CA_CERTS` ao iniciar; outros clientes precisam confiar a mesma CA.
-Nenhuma etapa exige desativar validação TLS. Use a origem exata
-`https://localhost:8795`, inclusive no navegador: `127.0.0.1` não é uma origem
-autorizada alternativa. As portas 8794 e 8795 precisam estar livres.
+O comando obtém o certificado público do hostname da própria máquina com
+`tailscale cert` e guarda o par em
+`.wrangler/clerk-test/tls/tailscale.pem` e `tailscale-key.pem`, com permissão
+`0600`. Confere hostname e validade antes de servir e consulta o cache do Tailscale
+a cada início; reinicie sessões longas antes do vencimento. A chave permanece
+privada na worktree. Não é necessário instalar uma CA local nem alterar a trust
+store; navegador e cliente OAuth validam a cadeia pública normalmente.
 
-O Wrangler fixado 4.150.0 recebe protocolo, porta, certificado e
-`dev.host=localhost:8795` explícitos. A
-[configuração oficial](https://developers.cloudflare.com/workers/wrangler/configuration/#local-development-settings)
-descreve a inferência de host a partir de rotas; esse perfil elimina as rotas e
-fixa o host. O self-check faz uma requisição HTTPS com TLS verificado a
-`/connections/data` e exige `401`: o verificador publicado responde `503` se
-`request.url` divergir da origem configurada. Falha no certificado/origem encerra
-Worker e mock com mensagem sanitizada; não há endpoint público de diagnóstico.
+O Worker escuta HTTPS somente em `127.0.0.1:8795`; o mock continua em
+`127.0.0.1:8794`. O [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
+encaminha TCP privado da porta `8443` para esse Worker, em primeiro plano.
+Preservar TLS até o Wrangler mantém HTTPS também nos redirects e no challenge
+OAuth. As portas locais 8794/8795 e a porta Tailscale 8443 precisam estar livres.
+O comando recusa qualquer configuração anterior de Serve ou Funnel na 8443,
+inclusive de outra sessão, e preserva os serviços de outras portas. Não habilita
+Funnel. Login ausente, HTTPS desabilitado ou conflito produzem orientação
+sanitizada antes de iniciar o endpoint.
+
+O Wrangler fixado 4.150.0 recebe `dev.host` com o hostname e a porta externos e
+`dev.upstream_protocol=https`; `MCP_PUBLIC_URL` recebe a mesma origem HTTPS.
+A [configuração oficial](https://developers.cloudflare.com/workers/wrangler/configuration/#local-development-settings)
+descreve essas opções. A origem vem da configuração local validada, sem confiar
+em `Host` ou `X-Forwarded-*` recebidos do cliente. O self-check acessa
+`/connections/data` pela origem externa com TLS verificado e exige `401`: o
+verificador publicado responde `503` se `request.url` divergir da origem
+configurada. Falha no certificado ou na origem encerra a sessão Serve própria,
+Worker e mock com mensagem sanitizada.
 
 A primeira identidade é preparada fora dos endpoints WaPilot, somente após a
 autorização do #62: localizar ou convidar diretamente no Clerk development,
@@ -167,17 +177,22 @@ sobrescrever vínculo. Login deve mostrar somente a conexão dessa fixture.
 Depois do primeiro administrador, os convites de outro destinatário aprovado
 usam os endpoints próprios e permanecem pendentes até ativação explícita.
 Um cliente OAuth local deve registrar retorno acessível, completar consentimento
-com PKCE e chamar `list_connections`; loopback não comprova conector remoto.
+com PKCE e chamar `list_connections`. Esse perfil exige um cliente na tailnet;
+um conector fora dela não alcança o endpoint privado.
 
-Ctrl+C encerra Worker e mock. Depois de parar, `rm -rf .wrangler/clerk-test`
-limpa somente esse ambiente, incluindo fixtures, grants, chaves e certificado;
-remova `.env.clerk` separadamente quando não for mais necessário. Não remova a CA
-compartilhada por outros projetos como parte dessa limpeza.
+Ctrl+C encerra somente a sessão Serve iniciada pelo comando, o Worker e o mock;
+o Tailscale remove o endpoint dessa sessão sem resetar a configuração existente.
+Depois de parar, `rm -rf .wrangler/clerk-test` limpa somente esse ambiente,
+incluindo fixtures, grants, chaves e certificado. Remova `.env.clerk`
+separadamente quando não for mais necessário.
 
 `test/clerk-local.test.ts` requer OpenSSL e usa uma CA temporária explicitamente
-confiada pelo cliente Node, sem modificar a trust store. Testa a execução HTTPS
-real com um guard de origem exclusivo da fixture, assets/login/API/OAuth,
-isolamento/configuração e cookies Clerk assinados com Backend/JWKS simulados.
+confiada pelo cliente Node, sem modificar a trust store. Um CLI Tailscale de
+fixture encaminha TCP para o Worker HTTPS real e simula configurações anteriores,
+inclusive Funnel em 443. A suíte verifica guard de origem, challenge e metadata
+OAuth HTTPS, assets/login/API, recusa de headers de origem forjados, conflitos,
+certificados inválidos e limpeza só da sessão própria. Também cobre isolamento
+de configuração e cookies Clerk assinados com Backend/JWKS simulados.
 A matriz existente em `test/clerk-browser.test.ts` complementa as negativas.
 Essas provas não enviam e-mails nem homologam Clerk real ou confiança do
 navegador; a aceitação externa permanece no #62.

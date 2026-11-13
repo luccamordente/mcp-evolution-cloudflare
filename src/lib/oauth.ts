@@ -117,7 +117,8 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       const html = consentHtml(description.clientName, description.redirectHost, scopesSupported, transaction.handle, browserSessionScripts(env, 'session', url.pathname + url.search));
       const response = new Response(html, { headers: transaction.headers });
       response.headers.set('Content-Type', 'text/html; charset=utf-8');
-      response.headers.set('Referrer-Policy', 'no-referrer');
+      // Native form POSTs under no-referrer send Origin: null.
+      response.headers.set('Referrer-Policy', 'same-origin');
       response.headers.set('X-Frame-Options', 'DENY');
       return respond(response);
     }

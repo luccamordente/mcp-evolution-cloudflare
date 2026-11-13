@@ -12,13 +12,31 @@ Preflight de **13/11/2026, 16:29–16:34 UTC**, no escopo de desenvolvimento da 
 | D1 | `mcp-evolution`, ID `d25ad771-5b81-4e41-88ed-6f980a32dbf9`; `d1 migrations list DB --remote` encontrou somente `0011_clerk_identity.sql` pendente. Nenhuma migration foi aplicada; não foram lidos usuários ou conexões reais |
 | KV | Binding `OAUTH_KV`, namespace `3a5b420e14594ee4ae821b720a9bf74a`; nenhum conteúdo foi lido |
 | Outros bindings | `AI`, produtor `EVENT_DELIVERIES` para `wapilot-events`, namespace DO `CALLBACK_SENDER`/classe `CallbackSender` e Container `wapilot-callback-sender`; runtime `2026-10-13`, flags `nodejs_compat` e `global_fetch_strictly_public` |
-| Credenciais | Metadata mantém os nomes dos três bindings Access, `CONSENT_SECRET`, `TOKEN_ENCRYPTION_KEY` e chave administrativa do serviço de mensagens. Valores não foram solicitados ou copiados |
+| Credenciais | Metadata mantém os nomes dos três bindings Access, `CONSENT_SECRET`, `TOKEN_ENCRYPTION_KEY` e chave administrativa do serviço de mensagens. Valores desses bindings não foram solicitados ou copiados |
 | GitHub | `origin/main=084d530e8357307c2118954898c97eda642aa765`; sem workflows Actions ou webhooks de repositório retornados pela API. Há check **Workers Builds: mcp-evolution-cloudflare** concluído com sucesso, build `208f72d7-ce7f-4635-919f-33bd83624e65` |
-| Automação ainda não conferida | O check comprova integração Workers Builds, mas não seu branch, comando, filtros ou promoção automática. Nenhum push/merge em `main` deve ser tratado como inofensivo antes de conferir esses gatilhos |
-| Access | Probes anônimos de `/connections` e `/authorize` receberam `302` para o gateway Access, com cache bloqueado. Isso não comprova as políticas, seus audiences, seletores ou escopo das rotas |
+| Automação com leitura recusada | O check comprova integração Workers Builds; a API autenticada pelo perfil correto `wapilot` recusou configuração e triggers (`403`, código `10000`). Branch, comando, filtros e promoção automática continuam sem conferência. Nenhum push/merge em `main` deve ser tratado como inofensivo |
+| Access com leitura incompleta | Probes anônimos de `/connections` e `/authorize` receberam `302` para o gateway Access, com cache bloqueado. Pelo perfil correto, a listagem de apps da conta respondeu `200` com coleção vazia; as leituras de apps da zona e organização foram recusadas (`403`, código `10000`). Não há app/política conferidos nem prova de ausência de proteção |
 | Caminho administrativo | O perfil Wrangler conseguiu ler deployment, versão e migrations sem login WaPilot. O conector Cloudflare recusou a conta proprietária (`403`, conta fora do escopo da conexão); acesso independente ao painel/políticas Access e responsável por corte/retorno ainda precisam de confirmação |
 
 Também foram conferidos `/healthz` e `/.well-known/oauth-protected-resource/mcp` (`200`) e `POST /mcp` sem bearer (`401`, `no-store` e desafio com `resource_metadata`). Esses probes não demonstram a barreira D1, continuidade autenticada ou funcionamento do provedor de mensagens. Não houve indisponibilidade planejada nem mudança de tráfego nesta preparação.
+
+## Leituras suplementares pelo perfil correto
+
+Em **13/11/2026, 16:44–16:46 UTC**, as lacunas foram efetivamente investigadas com a credencial já existente do perfil Wrangler `wapilot`, usada somente em memória, sem imprimir ou persistir portadores. Não houve reconexão, criação de credenciais, consulta de valores de bindings/Secrets, leitura de usuários/grants ou alteração de infraestrutura. O `403` anterior do conector não foi usado como substituto dessas tentativas.
+
+A conta alvo abaixo é `e972fc5484db86f0468fa2cf78f61870`. A listagem de Workers confirmou o tag de sistema `d8437e2f8de346179af30daf82a50885` do Worker correto; a busca de zona por nome confirmou `wapilot.com.br`, zona `725a4f686e54e4322a6da21b18176e3d`, ativa e pertencente à mesma conta.
+
+| GET autenticado pelo perfil `wapilot` | Resultado sanitizado |
+| --- | --- |
+| `/accounts/CONTA/workers/scripts` | `200`; Worker e tag conferidos |
+| `/accounts/CONTA/builds/workers/d8437e2f8de346179af30daf82a50885` | `403`, erro Cloudflare `10000` |
+| `/accounts/CONTA/builds/workers/d8437e2f8de346179af30daf82a50885/triggers` | `403`, erro Cloudflare `10000` |
+| `/accounts/CONTA/access/apps?per_page=1000` | `200`, `count=0`, `total_count=0`; nenhum app utilizável para ler políticas foi retornado |
+| `/zones?name=wapilot.com.br&per_page=50` | `200`, uma zona encontrada, conta conferida |
+| `/zones/725a4f686e54e4322a6da21b18176e3d/access/apps?per_page=1000` | `403`, erro Cloudflare `10000` |
+| `/accounts/CONTA/access/organizations` | `403`, erro Cloudflare `10000` |
+
+A organização da outra conta já disponível no perfil, `2ebbaee1e810ab3429524fa89dd8dac1`, também recusou leitura (`403`, `10000`); não houve expansão para dados de outra aplicação. Não foi feita uma chamada fictícia de `/access/apps/:appId/policies`: a sessão não forneceu um ID confiável do app que protege o domínio. Portanto o estado de políticas e os comandos/gatilhos de publicação continuam pendentes de acesso administrativo adequado, com recusas documentadas, e não por falta de tentativa pelo perfil correto.
 
 ## Reconciliação da referência
 

@@ -16,10 +16,10 @@
   "exports": {},
   "d1_databases": [{ "binding": "DB", "database_name": "wapilot-clerk-test", "database_id": "00000000-0000-0000-0000-000000000060", "migrations_dir": "migrations", "remote": false }],
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000060", "remote": false }],
-  "dev": { "ip": "127.0.0.1", "port": 8795, "host": "localhost:8795", "local_protocol": "https", "enable_containers": false },
+  "dev": { "ip": "127.0.0.1", "port": 8795, "host": "clerk-test.invalid", "local_protocol": "https", "upstream_protocol": "https", "enable_containers": false },
   "vars": {
     "ENVIRONMENT": "clerk-test",
-    "MCP_PUBLIC_URL": "https://localhost:8795",
+    "MCP_PUBLIC_URL": "https://clerk-test.invalid",
     "EVOLUTION_BASE_URL": "http://127.0.0.1:8794",
     "MAX_MEDIA_BYTES": "8388608"
   }

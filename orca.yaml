@@ -1,2 +1,2 @@
 scripts:
-  setup: node "$ORCA_WORKTREE_PATH/scripts/worktree-setup.mjs" .env.stdio .env.clerk .wrangler/clerk-test/tls/localhost.pem .wrangler/clerk-test/tls/localhost-key.pem
+  setup: node "$ORCA_WORKTREE_PATH/scripts/worktree-setup.mjs" .env.stdio .env.clerk

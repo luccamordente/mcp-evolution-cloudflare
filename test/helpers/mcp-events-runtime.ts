@@ -9,19 +9,37 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
     import { OAuthProvider, getOAuthApi } from '@cloudflare/workers-oauth-provider';
     import { oauthOptions } from './src/lib/oauth';
     import productionWorker from './src/worker';
+    import maintenanceWorker from './src/maintenance/deactivate-user';
     import { bootstrapLocalUser, createConnection } from './src/lib/db';
     import { Buffer } from 'node:buffer';
     const base = 'https://mcp.invalid';
-    let providerFailure = false, providerDelay = 0, queueFailure = false, fixtureNow;
+    let providerFailure = false, providerDelay = 0, queueFailure = false, fixtureNow, grantDeleteFailureAfter = -1, grantDeletes = 0, cursorCycle = false, cursorReads = 0;
     const realNow = Date.now;
     Date.now = () => fixtureNow ?? realNow();
     function fixtureEnv(env) {
       env = {...env};
       env.CALLBACK_SENDER = { getByName() { return { fetch(url, init) { return fetch('https://sender.invalid/send', init); } }; } };
       env.EVENT_DELIVERIES = {async send(id) {if (queueFailure) throw new Error('Synthetic publication failure'); const response = await fetch('https://queue.invalid/',{method:'POST',body:JSON.stringify(id)}); if (!response.ok) throw new Error('Synthetic publication failure');}};
-      if (providerFailure || providerDelay) {
+      if (providerFailure || providerDelay || grantDeleteFailureAfter >= 0 || cursorCycle) {
         const kv = env.OAUTH_KV;
-        env.OAUTH_KV = {get:kv.get.bind(kv),put:kv.put.bind(kv),delete:kv.delete.bind(kv),list:async(...args)=>{if (providerDelay) await new Promise(resolve=>setTimeout(resolve,providerDelay)); if (providerFailure) throw new Error('private fixture payload token=do-not-return');return kv.list(...args);}};
+        env.OAUTH_KV = {
+          get:kv.get.bind(kv), put:kv.put.bind(kv),
+          delete:async key=>{
+            if (grantDeleteFailureAfter >= 0 && key.startsWith('grant:') && grantDeletes++ >= grantDeleteFailureAfter) throw new Error('private fixture revoke token=do-not-return');
+            return kv.delete(key);
+          },
+          list:async(...args)=>{
+            if (providerDelay) await new Promise(resolve=>setTimeout(resolve,providerDelay));
+            if (providerFailure) throw new Error('private fixture payload token=do-not-return');
+            if (cursorCycle && args[0]?.cursor === 'repeated') delete args[0].cursor;
+            const page = await kv.list(...args);
+            if (cursorCycle && args[0]?.prefix?.startsWith('grant:')) {
+              if (++cursorReads > 2) throw new Error('Fixture stopped repeated pagination');
+              return {...page,list_complete:false,cursor:'repeated'};
+            }
+            return page;
+          }
+        };
       }
       return env;
     }
@@ -35,6 +53,8 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
       }
       if (url.pathname === '/fixture/provider-failure') {providerFailure = url.searchParams.has('enabled'); return Response.json({ok:true});}
       if (url.pathname === '/fixture/provider-delay') {providerDelay = Number(url.searchParams.get('ms')); return Response.json({ok:true});}
+      if (url.pathname === '/fixture/revoke-failure') {grantDeleteFailureAfter = url.searchParams.has('after') ? Number(url.searchParams.get('after')) : -1;grantDeletes=0;return Response.json({ok:true});}
+      if (url.pathname === '/fixture/cursor-cycle') {if(url.searchParams.has('enabled')) {cursorCycle=true;cursorReads=0;}return Response.json({reads:cursorReads});}
       if (url.pathname === '/fixture/queue-failure') {queueFailure = url.searchParams.has('enabled'); return Response.json({ok:true});}
       if (url.pathname === '/fixture/clock') {fixtureNow = url.searchParams.has('now') ? Number(url.searchParams.get('now')) : undefined; return Response.json({ok:true});}
       if (url.pathname === '/fixture/webhook') {
@@ -69,7 +89,10 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
       if (url.pathname === '/fixture/grants') return Response.json(await api.listUserGrants(url.searchParams.get('user'),{limit:100,...(url.searchParams.get('cursor') ? {cursor:url.searchParams.get('cursor')} : {})}));
       if (url.pathname === '/fixture/revoke') { await api.revokeGrant(url.searchParams.get('grantId'), url.searchParams.get('providerUserId')); return Response.json({ok:true}); }
       return productionWorker.fetch(request,env,ctx);
-    }, queue(batch, env, ctx) { return productionWorker.queue(batch,fixtureEnv(env),ctx); }, scheduled(controller, env, ctx) { return productionWorker.scheduled(controller,fixtureEnv(env),ctx); } };
+    }, queue(batch, env, ctx) { return productionWorker.queue(batch,fixtureEnv(env),ctx); }, scheduled(controller, env, ctx) {
+      if (controller.cron.startsWith('maintenance:disable:')) return maintenanceWorker.scheduled(controller,{...fixtureEnv(env),MAINTENANCE_USER_ID:controller.cron.slice('maintenance:disable:'.length)},ctx);
+      return productionWorker.scheduled(controller,fixtureEnv(env),ctx);
+    } };
   ` }, bundle:true,write:false,format:'esm',platform:'browser',conditions:['workerd'],external:['cloudflare:*','node:*'],logLevel:'silent',
     plugins: [{ name: 'pdfium-module', setup(builder) {
       builder.onResolve({ filter: /pdfium\.wasm$/ }, () => ({ path: './pdfium.wasm', external: true }));
@@ -100,6 +123,7 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
     async clock(now?:number) { await fetch('/fixture/clock'+(now === undefined ? '' : '?now='+now)); },
     async restart() { await runtime.setOptions(options(bundle.outputFiles[0].text+'\n// Restarted fixture '+(++restarts))); db=await runtime.getD1Database('DB'); },
     async scheduled(time:number) { return (await runtime.getWorker()).scheduled({scheduledTime:new Date(time),cron:'* * * * *'}); },
+    async deactivate(userId:string) { return (await runtime.getWorker()).scheduled({scheduledTime:new Date(),cron:'maintenance:disable:'+userId}); },
     async issue(query: Record<string,string> = {}) { return await (await fetch('/fixture/issue?'+new URLSearchParams(query))).json() as {accessToken:string;refreshToken:string;grantId:string;clientId:string;userId:string;connections:string[]}; },
     async rpc(accessToken:string, method:string, params:Record<string,unknown> = {}, extraHeaders:Record<string,string> = {}) {
       const response = await fetch('/mcp',{method:'POST',headers:{authorization:'Bearer '+accessToken,'content-type':'application/json',accept:'application/json','Mcp-Method':method,'MCP-Protocol-Version':'2026-07-28',...extraHeaders},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params:{...params,_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}}}})});

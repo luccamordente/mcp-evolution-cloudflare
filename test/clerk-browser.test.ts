@@ -102,6 +102,24 @@ it('never provisions or renews a QR from the legacy GET parameters', async () =>
   expect(await response.text()).not.toContain('run=1');
 });
 
+it('refuses consent if D1 access is disabled after displaying the page', async () => {
+  const account = await fixture.issue({ email: 'luccamordente@gmail.com' });
+  const { cookie } = await fixture.session();
+  const query = new URLSearchParams({ client_id: account.clientId, redirect_uri: 'https://client.invalid/callback', response_type: 'code', scope: 'mcp:read', resource: 'https://mcp.invalid/mcp', code_challenge: 'a'.repeat(43), code_challenge_method: 'S256' });
+  const consent = await fixture.fetch('/authorize?' + query, { headers: { cookie, accept: 'text/html' } });
+  expect(consent.status).toBe(200);
+  const handle = (await consent.text()).match(/name="handle" value="([^"]+)"/)![1];
+  const binding = consent.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+  const before = await (await fixture.fetch('/connections/authorizations', { headers: { cookie } })).json();
+  await fixture.db.prepare("UPDATE users SET status = 'disabled' WHERE id = 'seed-lucca'").run();
+  try {
+    const denied = await fixture.fetch('/authorize', { method: 'POST', redirect: 'manual', headers: { cookie: cookie + '; ' + binding, origin: 'https://mcp.invalid', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ handle, decision: 'allow' }).toString() });
+    expect(denied.status).toBe(403);
+    expect(denied.headers.has('location')).toBe(false);
+  } finally { await fixture.db.prepare("UPDATE users SET status = 'active' WHERE id = 'seed-lucca'").run(); }
+  expect(await (await fixture.fetch('/connections/authorizations', { headers: { cookie } })).json()).toEqual(before);
+});
+
 it('rejects bearer compatibility, invalid sessions and credentials from the other auth surface', async () => {
   const { token, cookie } = await fixture.session();
   for (const headers of [{ authorization: 'Bearer ' + token }, { 'cf-access-jwt-assertion': token }, { cookie: (await fixture.session('user_lucca', { azp: 'https://attacker.invalid' })).cookie }, { cookie: (await fixture.session('user_lucca', { iss: 'https://other.clerk.accounts.dev' })).cookie }, { cookie: (await fixture.session('user_lucca', { exp: Math.floor(Date.now() / 1000) - 30 })).cookie }]) {
@@ -176,8 +194,40 @@ it('reports authorization infrastructure failure without exposing diagnostics or
   try {
     const response = await unavailable.fetch('/connections/data', { headers: { cookie } });
     expect(response.status).toBe(503);
+    expect([...response.headers.keys()].filter(name => name.startsWith('x-clerk-auth-'))).toEqual([]);
     expect(await response.text()).not.toContain('do-not-return');
     expect(unavailable.logs.join(' ')).not.toContain('do-not-return');
   } finally { await unavailable.runtime.dispose(); }
   expect((await fixture.fetch('/connections/data', { headers: { cookie } })).status).toBe(200);
+});
+
+it('keeps development APIs JSON even when request headers ask for HTML navigation', async () => {
+  const development = await clerkRuntime(undefined, { CLERK_PUBLISHABLE_KEY: 'pk_test_' + Buffer.from('clerk.fixture.invalid$').toString('base64'), CLERK_SECRET_KEY: 'sk_test_synthetic' });
+  try {
+    for (const path of ['/connections/data', '/api/connections', '/connections/activity/foreign', '/connections/authorizations', '/api/authorizations', '/admin/data']) {
+      const response = await development.fetch(path, { redirect: 'manual', headers: { accept: 'text/html', 'sec-fetch-dest': 'document' } });
+      expect(response.status, path).toBe(401);
+      expect(response.headers.get('content-type')).toContain('application/json');
+      expect(response.headers.has('location')).toBe(false);
+    }
+    const consentPost = await development.fetch('/authorize', { method: 'POST', redirect: 'manual', headers: { accept: 'text/html', 'sec-fetch-dest': 'document', origin: 'https://mcp.invalid' } });
+    expect(consentPost.status).toBe(401);
+    expect(consentPost.headers.get('content-type')).toContain('application/json');
+    expect(consentPost.headers.has('location')).toBe(false);
+    const page = await development.fetch('/connections', { redirect: 'manual', headers: { accept: 'text/html' } });
+    expect(page.status).toBe(307);
+    expect(new URL(page.headers.get('location')!).origin).toBe('https://clerk.fixture.invalid');
+  } finally { await development.runtime.dispose(); }
+});
+
+it('keeps SDK diagnostics and rejected token fields out of response headers', async () => {
+  const session = await fixture.session();
+  const parts = session.token.split('.');
+  const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
+  header.kid = 'fixture-private-token-marker';
+  parts[0] = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const response = await fixture.fetch('/connections/data', { headers: { accept: 'application/json', cookie: '__session=' + parts.join('.') + '; __client_uat=1' } });
+  expect(response.status).toBe(401);
+  expect([...response.headers.keys()].filter(name => name.startsWith('x-clerk-auth-'))).toEqual([]);
+  expect(JSON.stringify([...response.headers]) + await response.text()).not.toContain('fixture-private-token-marker');
 });

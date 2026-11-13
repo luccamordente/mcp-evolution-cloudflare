@@ -1,6 +1,6 @@
 # Deploy e configuração
 
-Para identidade, vínculo, desativação recuperável e corte/retorno Clerk, siga o [procedimento operacional atual](CLERK-OPERATIONS.md). A configuração candidata foi apenas validada com `dry_run`; os registros datados de publicação abaixo não comprovam que o login remoto já tenha migrado.
+Para identidade, vínculo, desativação recuperável e corte/retorno Clerk, siga o [procedimento operacional atual](CLERK-OPERATIONS.md). O alvo Clerk development foi aplicado com autorização e conferido em 13/11/2026; isso não configura produção nem comprova migração do login remoto. Os registros datados de publicação abaixo também não comprovam esse corte.
 
 ## Fundação de autorização para a migração Clerk
 
@@ -10,7 +10,7 @@ O retorno deve usar o commit Access já endurecido com essa barreira, preservand
 
 ## Candidata Clerk: configuração e gates de corte
 
-Esta branch usa a aplicação escolhida `app_3M1uSBQzCMOfMfnraVHBpldbNhx`, sem criar outra aplicação nem substituir o OAuth Provider. A leitura feita para preparar o código encontrou somente uma instância de desenvolvimento; isso não configura produção. A configuração, o uso de credenciais reais e os testes de convite/sessão completos dependem de autorização própria. Não publique a candidata como simples substituição do Access antes desses gates.
+Esta branch usa a aplicação escolhida `app_3M1uSBQzCMOfMfnraVHBpldbNhx`, sem criar outra aplicação nem substituir o OAuth Provider. A leitura atual encontrou somente uma instância de desenvolvimento. Seu alvo de autenticação foi aplicado e conferido em `v1_ec69bf3a`; autoexclusão, localização dos e-mails, credenciais locais e homologação real continuam pendentes na [#62](CLERK-DEVELOPMENT-ACCEPTANCE.md). A configuração de produção e os testes de convite/sessão completos mantêm seus gates próprios. Não publique a candidata como simples substituição do Access antes desses gates.
 
 Configure na instância correspondente ao D1: Invite-only (`auth_access_control.sign_up_mode=restricted`), código de e-mail para entrada/verificação, `auth_email.immutable=true`, e exclusão da própria conta desativada. Confira essa restrição no provedor, não apenas pela ausência de controles no HTML. O schema do plugin consultado não expõe o bloqueio de exclusão de conta; use a configuração oficial do Dashboard/CLI para conferência autorizada. Confira também português e marca nos e-mails. O rodapé e avisos development do provedor não foram removidos por CSS.
 

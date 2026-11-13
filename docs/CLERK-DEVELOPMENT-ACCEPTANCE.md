@@ -1,6 +1,6 @@
 # Homologação Clerk development — andamento da #62
 
-**Estado em 13/11/2026: homologação development parcial, com sessão Clerk e OAuth/MCP reais aprovados.** A #60 foi integrada em `228e490`; o perfil Tailscale privado em `54026be`; a correção do formulário de consentimento em `4814bf3`. O primeiro administrador aceitou/verificou o convite e foi vinculado somente ao D1 local. O segundo convite, pelos endpoints WaPilot, foi enviado uma vez e permanece pendente. A #62 continua aberta pela aceitação incorporada, ativação e cenários restantes.
+**Estado em 13/11/2026: homologação development parcial, com sessão Clerk e OAuth/MCP reais aprovados.** A #60 foi integrada em `228e490`; o perfil Tailscale privado em `54026be`; a correção do formulário de consentimento em `4814bf3`. O primeiro administrador aceitou/verificou o convite e foi vinculado somente ao D1 local. O segundo convite, pelos endpoints WaPilot, foi enviado uma vez e aceito; a identidade foi verificada, mas o acesso continua pendente. A #62 permanece aberta pela ativação e cenários restantes.
 
 ## Leitura do ambiente
 
@@ -65,7 +65,9 @@ O cliente OAuth local registrou callback em loopback, usou PKCE S256 e conferiu 
 
 ### Segundo convite do produto
 
-A busca exata encontrou o alias aprovado sem identidade e sem convites nos quatro estados. GPT Terra emitiu uma única chamada a `POST /admin/invitations` com sessão administrativa real e CSRF: `201`, estado pending e resposta com somente identificador local/estado. O read-back confirmou um convite pending no Clerk e a linha D1 `disabled`, sem vínculo, com pendência; as duas conexões continuavam pertencendo às fixtures originais. O endpoint usa o retorno canônico `/accept-invitation`. Aceitação incorporada, identidade verificada desse convidado, negativa enquanto pendente e ativação deliberada ainda precisam de execução. Não houve reenvio automático.
+A busca exata encontrou o alias aprovado sem identidade e sem convites nos quatro estados. GPT Terra emitiu uma única chamada a `POST /admin/invitations` com sessão administrativa real e CSRF: `201`, estado pending e resposta com somente identificador local/estado. O read-back confirmou um convite pending no Clerk e a linha D1 `disabled`, sem vínculo, com pendência; as duas conexões continuavam pertencendo às fixtures originais. O endpoint usa o retorno canônico `/accept-invitation`. Não houve reenvio automático.
+
+O operador aceitou/verificou esse convite na aba Orca e confirmou a mensagem de aguardar ativação. O read-back encontrou uma identidade única do alias, e-mail primário correto/verificado, sem banimento/bloqueio/deprovisionamento e com senha/autoexclusão desligadas. Após a aceitação, D1 continuou `disabled`, sem vínculo, com a mesma pendência; hashes dos registros estáveis das duas fixtures e das conexões permaneceram iguais. GPT Terra confirmou a mensagem em desktop/móvel, API de dados `403` JSON com `no-store` e saída por teclado. A aba ficou preparada para login administrativo, necessário para chamar o endpoint de ativação; nenhum vínculo/estado foi alterado para contornar essa exigência. A ativação ainda não foi executada.
 
 ### Modern Web Guidance
 
@@ -106,13 +108,13 @@ Revisão inicial por GPT Sol com esforço xhigh, comparando a integração com `
 
 ## Spec
 
-Revisão independente por GPT Sol com esforço xhigh: nenhum defeito local acionável nem escopo extra. A #60 atende à preparação local. A #61 permanece aberta pelos gates de publicação, políticas e automação; a #62 permanece aberta pela aceitação/ativação do segundo convidado e matriz restante. A ancestralidade do retorno alternativo não substituiu o runtime Clerk.
+Revisão independente por GPT Sol com esforço xhigh: nenhum defeito local acionável nem escopo extra. A #60 atende à preparação local. A #61 permanece aberta pelos gates de publicação, políticas e automação; a #62 permanece aberta pela ativação do segundo convidado e matriz restante. A ancestralidade do retorno alternativo não substituiu o runtime Clerk.
 
 Resultado das revisões: 0 achados acionáveis em Standards e 0 em Spec; as pendências operacionais de #61 e #62 impedem declarar a spec homologada.
 
 ## Pendente para concluir
 
-1. Aceitar/verificar o segundo convite já enviado, conferir pt-BR no e-mail e na aceitação incorporada, provar pendência sem acesso e ativar deliberadamente a mesma linha pelos endpoints WaPilot após read-back administrativo.
+1. Entrar como administrador e ativar deliberadamente a mesma linha do convidado pelo endpoint WaPilot, após read-back já preparado; conferir acesso da conta ativada e preservar o inventário. Falta confirmar explicitamente com o operador os textos do e-mail/aceitação, sem compartilhar conteúdo portador.
 2. Completar/consolidar os negativos da matriz #59, distinguindo testes HTTP simulados de recusas observadas no provedor real. O cadastro não convidado e os tickets expirados/revogados não foram exercitados no Clerk real; o teste sem ticket não os substitui. Os valores dinâmicos do e-mail real também não foram inspecionados pelo agente.
 3. Preservar as evidências sanitizadas e a comparação do inventário na ativação do convidado. Não usar Funnel nem desativar TLS. Repetir testes/dry-run somente diante de nova correção ou falha.
 
@@ -120,6 +122,6 @@ Resultado das revisões: 0 achados acionáveis em Standards e 0 em Spec; as pend
 
 A configuração permanece **WaPilot / Development / Invite-only**, com alteração de e-mail e autoexclusão desligadas. A sessão Dashboard fornecida ao agente continua somente leitura; os ajustes manuais já concluídos não precisam ser repetidos.
 
-O primeiro destinatário já aceitou/verificou e concluiu a sessão no WaPilot. O próximo passo humano é aceitar o convite do alias aprovado pelo e-mail, na origem privada, com a sessão administrativa encerrada pelo teste de saída. Não emitir outro convite nem compartilhar códigos, tickets ou links portadores. A identidade do convidado deve ser conferida antes da ativação local. O [guia oficial dos templates](https://clerk.com/docs/guides/customizing-clerk/email-sms-templates) descreve prévia, edição e entrega.
+Os dois destinatários já aceitaram/verificaram os convites. O próximo passo humano é entrar na aba Orca como administrador; a conta convidada permanece pendente até a chamada administrativa protegida. Não emitir outro convite nem compartilhar códigos, tickets ou links portadores. A identidade do convidado foi conferida antes de preparar essa ativação local. O [guia oficial dos templates](https://clerk.com/docs/guides/customizing-clerk/email-sms-templates) descreve prévia, edição e entrega.
 
 O arquivo privado de desenvolvimento já foi fornecido com permissão `0600`. A decisão atual usa o HTTPS do Tailscale, em substituição à instalação da CA local; cada desenvolvedor precisa ter seu próprio cliente conectado e sua origem descoberta localmente. A implantação e as identidades de produção continuam fora desta operação.

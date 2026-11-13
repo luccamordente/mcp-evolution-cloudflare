@@ -28,6 +28,7 @@ async function requireAuth(c: any): Promise<{ info: import('@modelcontextprotoco
  * OAuthProvider in src/worker.ts. The deployed Access application also covers
  * /admin so both surfaces receive the same audience and session. */
 async function requireAccessUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
+  c.header('Cache-Control', 'no-store');
   try {
     const user = await authenticateAccessRequest(c.req.raw, c.env);
     if (c.env.ENVIRONMENT === 'local') await bootstrapLocalUser(c.env.DB, user);

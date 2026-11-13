@@ -67,10 +67,19 @@ it('requires an existing active D1 account on the Access browser and consent sur
   try {
     const token = async (email: string) => new SignJWT({ email }).setProtectedHeader({ alg: 'RS256', kid: 'fixture' }).setSubject('legacy-access-sub').setIssuer('https://access.invalid').setAudience('browser').setIssuedAt().setExpirationTime('5m').sign(privateKey);
     const active = await token('luccamordente@gmail.com');
-    expect((await browser.fetch('/connections', { headers: { 'cf-access-jwt-assertion': active } })).status).toBe(200);
+    for (const path of ['/connections', '/connections/data', '/connections/authorizations', '/connections/api/connections', '/admin', '/admin/data']) {
+      const response = await browser.fetch(path, { headers: { 'cf-access-jwt-assertion': active } });
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get('Cache-Control'), path).toBe('no-store');
+    }
+    const missingConnection = await browser.fetch('/connections/activity/missing', { headers: { 'cf-access-jwt-assertion': active } });
+    expect(missingConnection.status).toBe(404);
+    expect(missingConnection.headers.get('Cache-Control')).toBe('no-store');
     await browser.db.prepare("UPDATE users SET status = 'disabled' WHERE id = 'seed-lucca'").run();
     for (const path of ['/connections', '/connections/data', '/api/connections', '/admin', '/admin/data', '/authorize']) {
-      expect((await browser.fetch(path, { headers: { 'cf-access-jwt-assertion': active } })).status).toBe(403);
+      const response = await browser.fetch(path, { headers: { 'cf-access-jwt-assertion': active } });
+      expect(response.status, path).toBe(403);
+      expect(response.headers.get('Cache-Control'), path).toBe('no-store');
     }
     expect((await browser.fetch('/connections', { headers: { 'cf-access-jwt-assertion': await token('missing@example.test') } })).status).toBe(403);
     expect(await browser.db.prepare("SELECT id FROM users WHERE email = 'missing@example.test'").first()).toBeNull();

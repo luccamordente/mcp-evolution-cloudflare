@@ -61,7 +61,15 @@ _Avoid_: token da instância, nome da instância, ID da instância
 ## Administração
 
 **Administrador operacional**:
-Pessoa autorizada a consultar a visão agregada de usuários, conexões e autorizações do serviço. Nesta decisão, Lucca e Heitor exercem esse papel com as mesmas permissões de leitura.
+Pessoa autorizada a consultar a visão agregada de usuários, conexões e autorizações do serviço, emitir convites e ativar o acesso de pessoas convidadas. Lucca e Heitor exercem esse papel com as mesmas permissões; o painel administrativo continua somente leitura.
+
+**Convite de acesso**:
+Aprovação para uma pessoa iniciar seu cadastro no WaPilot, ainda sujeita à ativação administrativa antes de operar os dados do serviço.
+_Avoid_: autorização OAuth, registro de conexão
+
+**Ativação de acesso**:
+Liberação deliberada da identidade aprovada de uma pessoa para operar seus dados no WaPilot.
+_Avoid_: aceitação do convite, pareamento do WhatsApp
 
 **Painel administrativo**:
 Superfície de leitura usada por administradores operacionais para observar o estado agregado do serviço. Não inclui criação de instâncias, revogação de autorizações ou alterações nas conexões.

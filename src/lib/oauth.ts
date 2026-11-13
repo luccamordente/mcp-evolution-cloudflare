@@ -1,5 +1,6 @@
 import {
   AuthorizationError,
+  OAuthError,
   OAuthProvider,
   getOAuthApi,
   insufficientScope,
@@ -8,12 +9,14 @@ import {
   type OAuthProviderOptions,
 } from '@cloudflare/workers-oauth-provider';
 import type { Env, AuthenticatedUser } from '../types';
-import { authenticateAccessRequest, AuthError } from './auth';
+import { authenticateBrowserRequest, appendAuthHeaders, browserOrigin, browserSessionScripts, AuthError } from './auth';
+import { SESSION_CONTROL } from '../ui/auth';
 import { callsWriteTool, createMcpServer, mcpBodyLimit, WRITE_SCOPE } from './mcp';
 import { serveMcpHttp } from './mcp-http';
 import { logOAuthError } from './oauth-diagnostics';
 import { registerMcpEvents } from './mcp-events';
 import { WAPILOT_LOGO_SVG } from '../ui/wapilot-logo';
+import { ensureUser } from './db';
 
 const scopesSupported = ['mcp:read', 'mcp:write', 'offline_access'];
 
@@ -30,14 +33,21 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
       async fetch(request, env, ctx) {
         const props = (ctx as ExecutionContext & { props?: { user?: AuthenticatedUser } }).props;
         const user = props?.user;
-        if (!user) return Response.json({ error: 'OAuth user context missing' }, { status: 500 });
+        if (!user || typeof user.email !== 'string') return Response.json({ error: 'Esta autorização não permite acesso ao WaPilot.' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
         const auth = (ctx as ExecutionContext & { auth?: OAuthResourceAuth }).auth;
+        let server: Awaited<ReturnType<typeof createMcpServer>>;
+        try {
+          if (!auth || auth.userId !== encodeURIComponent(user.email)) throw new AuthError(403, 'Esta autorização não permite acesso ao WaPilot.');
+          server = await createMcpServer(env, user);
+        } catch (error) {
+          const status = error instanceof AuthError ? error.status : 503;
+          return Response.json({ error: status === 403 ? 'Esta conta não tem acesso ao WaPilot.' : 'Não foi possível verificar o acesso ao WaPilot.' }, { status, headers: { 'Cache-Control': 'no-store' } });
+        }
         // Step-up: a send tool called with a read-only token gets a standard 403
         // insufficient_scope challenge naming mcp:write, so clients can re-authorize.
         if (auth && !auth.scope.includes(WRITE_SCOPE) && request.method === 'POST' && await callsWriteTool(request)) {
           return insufficientScope(auth as unknown as OAuthResourceAuth, ['mcp:read', WRITE_SCOPE], 'Sending WhatsApp messages requires the mcp:write scope.');
         }
-        const server = await createMcpServer(env, user);
         if (auth) registerMcpEvents(server, env, user, auth, getOAuthApi(oauthOptions(resourceBaseUrl), env));
         return serveMcpHttp(request, server, mcpBodyLimit(env), auth ? {
           authInfo: {
@@ -57,6 +67,16 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
     },
     authorizeEndpoint: '/authorize',
     tokenEndpoint: '/oauth/token',
+    async tokenExchangeCallback({ env, userId, props }) {
+      try {
+        const user = props?.user;
+        if (!user || typeof user.email !== 'string' || userId !== encodeURIComponent(user.email)) throw new AuthError(403, 'Invalid identity');
+        await ensureUser(env.DB, user);
+      } catch (error) {
+        if (error instanceof AuthError) throw new OAuthError('invalid_grant', { description: 'Esta conta não tem acesso ao WaPilot.' });
+        throw new OAuthError('temporarily_unavailable', { description: 'Não foi possível verificar o acesso ao WaPilot.', statusCode: 503 });
+      }
+    },
     clientRegistrationEndpoint: '/oauth/register',
     onError: logOAuthError,
     scopesSupported,
@@ -81,15 +101,11 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
     return new Response('Not found', { status: 404 });
   }
 
-  let user: AuthenticatedUser;
-  try {
-    user = await authenticateAccessRequest(request, env);
-  } catch (error) {
-    const authError = error instanceof AuthError ? error : new AuthError(500, 'Access authentication failed');
-    // Access should protect this route and present the PIN screen. Returning
-    // JSON here prevents an HTML login page from being mistaken for MCP data.
-    return Response.json({ error: authError.message }, { status: authError.status, headers: { 'Cache-Control': 'no-store' } });
-  }
+  const authentication = await authenticateBrowserRequest(request, env);
+  if (authentication instanceof Response) return authentication;
+  const user = authentication.user;
+  const respond = (response: Response) => appendAuthHeaders(response, authentication.headers);
+  if (request.method === 'POST' && env.ENVIRONMENT !== 'local' && request.headers.get('origin') !== browserOrigin(env)) return respond(Response.json({ error: 'Esta ação precisa ser iniciada no WaPilot.' }, { status: 403 }));
 
   const options = oauthOptions(resource.slice(0, -4));
   const oauth = getOAuthApi(options, env);
@@ -98,16 +114,22 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       const authRequest = await oauth.parseAuthRequest(request);
       const transaction = await oauth.beginConsent(authRequest);
       const description = await oauth.describeConsent(authRequest);
-      const html = consentHtml(description.clientName, description.redirectHost, scopesSupported, transaction.handle);
-      return new Response(html, { headers: { ...Object.fromEntries(transaction.headers), 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+      const html = consentHtml(description.clientName, description.redirectHost, scopesSupported, transaction.handle, browserSessionScripts(env, 'session', url.pathname + url.search));
+      const response = new Response(html, { headers: transaction.headers });
+      response.headers.set('Content-Type', 'text/html; charset=utf-8');
+      response.headers.set('Referrer-Policy', 'no-referrer');
+      response.headers.set('X-Frame-Options', 'DENY');
+      return respond(response);
     }
-    if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, POST' } });
+    if (request.method !== 'POST') return respond(new Response('Método não permitido.', { status: 405, headers: { Allow: 'GET, POST' } }));
     const form = await request.formData();
     const handle = String(form.get('handle') ?? '');
     const decision = String(form.get('decision') ?? 'deny');
     if (decision !== 'allow') {
       const denied = await oauth.denyConsent(request, handle);
-      return new Response(null, { status: 302, headers: { ...Object.fromEntries(denied.headers), Location: denied.redirectTo, 'Cache-Control': 'no-store' } });
+      const response = new Response(null, { status: 302, headers: denied.headers });
+      response.headers.set('Location', denied.redirectTo);
+      return respond(response);
     }
     const approved = await oauth.approveConsent(request, handle, {
       scope: scopesSupported,
@@ -121,16 +143,18 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       props: { user },
       revokeExistingGrants: false,
     });
-    return new Response(null, { status: 302, headers: { ...Object.fromEntries(approved.headers), Location: completed.redirectTo, 'Cache-Control': 'no-store' } });
+    const response = new Response(null, { status: 302, headers: approved.headers });
+    response.headers.set('Location', completed.redirectTo);
+    return respond(response);
   } catch (error) {
     if (error instanceof AuthorizationError && error.redirectTo) {
-      return new Response(null, { status: 302, headers: { Location: error.redirectTo, 'Cache-Control': 'no-store' } });
+      return respond(new Response(null, { status: 302, headers: { Location: error.redirectTo } }));
     }
-    return Response.json({ error: 'Authorization request could not be completed' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+    return respond(Response.json({ error: 'Não foi possível concluir a autorização no WaPilot.' }, { status: 400 }));
   }
 }
 
-function consentHtml(clientName: string, redirectHost: string, scopes: string[], handle: string): string {
+function consentHtml(clientName: string, redirectHost: string, scopes: string[], handle: string, sessionScripts = ''): string {
   const esc = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
   const scopeLabels: Record<string, string> = {
     'mcp:read': 'Consultar seus dados do WhatsApp',
@@ -198,12 +222,12 @@ function consentHtml(clientName: string, redirectHost: string, scopes: string[],
     @media (max-width:460px) { .topbar { padding:0 16px; } .brand { width:126px; } .secure-label { font-size:12px; } .secure-label span:last-child { display:none; } main { width:min(100% - 24px, 520px); padding-top:36px; } h1 { font-size:40px; } .request-panel, .permissions-panel { padding:25px 20px; } }
     @media (prefers-reduced-motion:reduce) { *, *::before, *::after { transition-duration:.01ms !important; } }
   </style>
-</head>
+${sessionScripts}</head>
 <body>
   <div class="app">
     <header class="topbar">
       <div class="brand" aria-label="WaPilot">${WAPILOT_LOGO_SVG}</div>
-      <div class="secure-label"><span class="secure-dot" aria-hidden="true"></span><span>Conexão segura</span></div>
+      ${SESSION_CONTROL}<div class="secure-label"><span class="secure-dot" aria-hidden="true"></span><span>Conexão segura</span></div>
     </header>
     <main>
       <section class="intro" aria-labelledby="consent-title">

@@ -4,36 +4,57 @@ import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { unstable_splitSqlQuery } from 'wrangler';
 
-export async function eventRuntime(sender: (request: Request) => Promise<Response>, migrationThrough = '9999') {
+export async function eventRuntime(sender: (request: Request) => Promise<Response>, migrationThrough = '9999', bindings: Record<string, string> = {}) {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
     import { OAuthProvider, getOAuthApi } from '@cloudflare/workers-oauth-provider';
     import { oauthOptions } from './src/lib/oauth';
     import productionWorker from './src/worker';
-    import { ensureUser, createConnection } from './src/lib/db';
+    import maintenanceWorker from './src/maintenance/deactivate-user';
+    import { bootstrapLocalUser, createConnection } from './src/lib/db';
     import { Buffer } from 'node:buffer';
     const base = 'https://mcp.invalid';
-    let providerFailure = false, providerDelay = 0, queueFailure = false, fixtureNow;
+    let providerFailure = false, providerDelay = 0, queueFailure = false, fixtureNow, grantDeleteFailureAfter = -1, grantDeletes = 0, cursorCycle = false, cursorReads = 0;
     const realNow = Date.now;
     Date.now = () => fixtureNow ?? realNow();
     function fixtureEnv(env) {
       env = {...env};
       env.CALLBACK_SENDER = { getByName() { return { fetch(url, init) { return fetch('https://sender.invalid/send', init); } }; } };
       env.EVENT_DELIVERIES = {async send(id) {if (queueFailure) throw new Error('Synthetic publication failure'); const response = await fetch('https://queue.invalid/',{method:'POST',body:JSON.stringify(id)}); if (!response.ok) throw new Error('Synthetic publication failure');}};
-      if (providerFailure || providerDelay) {
+      if (providerFailure || providerDelay || grantDeleteFailureAfter >= 0 || cursorCycle) {
         const kv = env.OAUTH_KV;
-        env.OAUTH_KV = {get:kv.get.bind(kv),put:kv.put.bind(kv),delete:kv.delete.bind(kv),list:async(...args)=>{if (providerDelay) await new Promise(resolve=>setTimeout(resolve,providerDelay)); if (providerFailure) throw new Error('private fixture payload token=do-not-return');return kv.list(...args);}};
+        env.OAUTH_KV = {
+          get:kv.get.bind(kv), put:kv.put.bind(kv),
+          delete:async key=>{
+            if (grantDeleteFailureAfter >= 0 && key.startsWith('grant:') && grantDeletes++ >= grantDeleteFailureAfter) throw new Error('private fixture revoke token=do-not-return');
+            return kv.delete(key);
+          },
+          list:async(...args)=>{
+            if (providerDelay) await new Promise(resolve=>setTimeout(resolve,providerDelay));
+            if (providerFailure) throw new Error('private fixture payload token=do-not-return');
+            if (cursorCycle && args[0]?.cursor === 'repeated') delete args[0].cursor;
+            const page = await kv.list(...args);
+            if (cursorCycle && args[0]?.prefix?.startsWith('grant:')) {
+              if (++cursorReads > 2) throw new Error('Fixture stopped repeated pagination');
+              return {...page,list_complete:false,cursor:'repeated'};
+            }
+            return page;
+          }
+        };
       }
       return env;
     }
     export default { async fetch(request, env, ctx) {
       env = fixtureEnv(env);
       const url = new URL(request.url);
+      if (request.headers.has('x-fixture-db-failure')) env.DB = { prepare() { throw new Error('private fixture database password=do-not-return'); } };
       if (request.headers.has('x-fixture-provider-failure')) {
         const kv = env.OAUTH_KV;
         env.OAUTH_KV = {get:kv.get.bind(kv),put:kv.put.bind(kv),delete:kv.delete.bind(kv),list:async()=>{throw new Error('private fixture payload token=do-not-return');}};
       }
       if (url.pathname === '/fixture/provider-failure') {providerFailure = url.searchParams.has('enabled'); return Response.json({ok:true});}
       if (url.pathname === '/fixture/provider-delay') {providerDelay = Number(url.searchParams.get('ms')); return Response.json({ok:true});}
+      if (url.pathname === '/fixture/revoke-failure') {grantDeleteFailureAfter = url.searchParams.has('after') ? Number(url.searchParams.get('after')) : -1;grantDeletes=0;return Response.json({ok:true});}
+      if (url.pathname === '/fixture/cursor-cycle') {if(url.searchParams.has('enabled')) {cursorCycle=true;cursorReads=0;}return Response.json({reads:cursorReads});}
       if (url.pathname === '/fixture/queue-failure') {queueFailure = url.searchParams.has('enabled'); return Response.json({ok:true});}
       if (url.pathname === '/fixture/clock') {fixtureNow = url.searchParams.has('now') ? Number(url.searchParams.get('now')) : undefined; return Response.json({ok:true});}
       if (url.pathname === '/fixture/webhook') {
@@ -48,7 +69,7 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
       if (url.pathname === '/fixture/issue') {
         const email = url.searchParams.get('email') || 'fixture-a@example.test';
         const user = { id:'untrusted-claim',email,claims:{} };
-        const owner = await ensureUser(env.DB, user);
+        const owner = await bootstrapLocalUser(env.DB, user);
         let connections = (await env.DB.prepare('SELECT id FROM whatsapp_connections WHERE user_id = ? ORDER BY friendly_name').bind(owner.id).all()).results;
         if (!connections.length) {
           for (const name of ['A', 'B']) await createConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, {userId:owner.id,friendlyName:name,instanceId:email+name,token:'synthetic-instance'});
@@ -59,15 +80,19 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
         const scope = url.searchParams.get('scope') || 'mcp:read';
         const query = new URLSearchParams({client_id:client.clientId,redirect_uri:client.redirectUris[0],response_type:'code',resource:base+'/mcp',scope,code_challenge:challenge,code_challenge_method:'S256'});
         const authRequest = await api.parseAuthRequest(new Request(base+'/authorize?'+query));
-        const completed = await api.completeAuthorization({request:authRequest,userId:encodeURIComponent(email),scope:authRequest.scope,props:{user},revokeExistingGrants:false});
-        const tokenResponse = await new OAuthProvider(oauthOptions(base)).fetch(new Request(base+'/oauth/token',{method:'POST',body:new URLSearchParams({grant_type:'authorization_code',client_id:client.clientId,redirect_uri:client.redirectUris[0],code:new URL(completed.redirectTo).searchParams.get('code'),code_verifier:verifier,resource:base+'/mcp'})}),env,ctx);
+        const completed = await api.completeAuthorization({request:authRequest,userId:url.searchParams.get('providerUserId') || encodeURIComponent(email),scope:authRequest.scope,props:{user},revokeExistingGrants:false});
+        if (url.searchParams.has('codeOnly')) return Response.json({code:new URL(completed.redirectTo).searchParams.get('code'),clientId:client.clientId,verifier,redirectUri:client.redirectUris[0],userId:owner.id});
+        const tokenResponse = await new OAuthProvider({...oauthOptions(base),...(url.searchParams.has('legacy') ? {tokenExchangeCallback:undefined} : {})}).fetch(new Request(base+'/oauth/token',{method:'POST',body:new URLSearchParams({grant_type:'authorization_code',client_id:client.clientId,redirect_uri:client.redirectUris[0],code:new URL(completed.redirectTo).searchParams.get('code'),code_verifier:verifier,resource:base+'/mcp'})}),env,ctx);
         const token = await tokenResponse.json(), summary = await api.unwrapToken(token.access_token);
         return Response.json({accessToken:token.access_token,refreshToken:token.refresh_token,grantId:summary.grantId,clientId:client.clientId,userId:owner.id,connections:connections.map(c=>c.id)});
       }
       if (url.pathname === '/fixture/grants') return Response.json(await api.listUserGrants(url.searchParams.get('user'),{limit:100,...(url.searchParams.get('cursor') ? {cursor:url.searchParams.get('cursor')} : {})}));
       if (url.pathname === '/fixture/revoke') { await api.revokeGrant(url.searchParams.get('grantId'), url.searchParams.get('providerUserId')); return Response.json({ok:true}); }
       return productionWorker.fetch(request,env,ctx);
-    }, queue(batch, env, ctx) { return productionWorker.queue(batch,fixtureEnv(env),ctx); }, scheduled(controller, env, ctx) { return productionWorker.scheduled(controller,fixtureEnv(env),ctx); } };
+    }, queue(batch, env, ctx) { return productionWorker.queue(batch,fixtureEnv(env),ctx); }, scheduled(controller, env, ctx) {
+      if (controller.cron.startsWith('maintenance:disable:')) return maintenanceWorker.scheduled(controller,{...fixtureEnv(env),MAINTENANCE_USER_ID:controller.cron.slice('maintenance:disable:'.length)},ctx);
+      return productionWorker.scheduled(controller,fixtureEnv(env),ctx);
+    } };
   ` }, bundle:true,write:false,format:'esm',platform:'browser',conditions:['workerd'],external:['cloudflare:*','node:*'],logLevel:'silent',
     plugins: [{ name: 'pdfium-module', setup(builder) {
       builder.onResolve({ filter: /pdfium\.wasm$/ }, () => ({ path: './pdfium.wasm', external: true }));
@@ -83,7 +108,7 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
       {type:'CompiledWasm',path:resolve('pdfium.wasm'),contents:wasm},
     ],compatibilityDate:'2026-10-13',compatibilityFlags:['nodejs_compat','global_fetch_strictly_public'],handleStructuredLogs:entry=>{logs.push(entry.message);},
     kvNamespaces:['OAUTH_KV'],d1Databases:{DB:'events-test'},
-    bindings:{ TOKEN_ENCRYPTION_KEY:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',EVOLUTION_BASE_URL:'https://provider.invalid',MCP_PUBLIC_URL:'https://mcp.invalid',ENVIRONMENT:'local',LOCAL_DEV_USER_EMAIL:'fixture-a@example.test' },
+    bindings:{ TOKEN_ENCRYPTION_KEY:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',EVOLUTION_BASE_URL:'https://provider.invalid',MCP_PUBLIC_URL:'https://mcp.invalid',ENVIRONMENT:'local',LOCAL_DEV_USER_EMAIL:'fixture-a@example.test',...bindings },
     outboundService: async request => { if (new URL(request.url).hostname === 'queue.invalid') {published.push(await request.json()); return new Response(null,{status:204});} return sender(new Request(request.url,{method:request.method,headers:Object.fromEntries(request.headers),...(request.method === 'GET' || request.method === 'HEAD' ? {} : {body:await request.text()}),signal:request.signal})); },
   });
   const runtime = new Miniflare(options());
@@ -98,6 +123,7 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
     async clock(now?:number) { await fetch('/fixture/clock'+(now === undefined ? '' : '?now='+now)); },
     async restart() { await runtime.setOptions(options(bundle.outputFiles[0].text+'\n// Restarted fixture '+(++restarts))); db=await runtime.getD1Database('DB'); },
     async scheduled(time:number) { return (await runtime.getWorker()).scheduled({scheduledTime:new Date(time),cron:'* * * * *'}); },
+    async deactivate(userId:string) { return (await runtime.getWorker()).scheduled({scheduledTime:new Date(),cron:'maintenance:disable:'+userId}); },
     async issue(query: Record<string,string> = {}) { return await (await fetch('/fixture/issue?'+new URLSearchParams(query))).json() as {accessToken:string;refreshToken:string;grantId:string;clientId:string;userId:string;connections:string[]}; },
     async rpc(accessToken:string, method:string, params:Record<string,unknown> = {}, extraHeaders:Record<string,string> = {}) {
       const response = await fetch('/mcp',{method:'POST',headers:{authorization:'Bearer '+accessToken,'content-type':'application/json',accept:'application/json','Mcp-Method':method,'MCP-Protocol-Version':'2026-07-28',...extraHeaders},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params:{...params,_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}}}})});

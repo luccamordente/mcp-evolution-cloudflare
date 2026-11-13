@@ -1,7 +1,8 @@
 import { ingestEventDeliveries } from './lib/event-deliveries';
 import { invalidateEventGrant } from './lib/mcp-events';
 import { Hono } from 'hono';
-import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
+import { authenticateBrowserRequest, appendAuthHeaders, browserSessionScripts, safeReturnPath, authResponse, AuthError, browserCsrfCookie, assertBrowserMutation } from './lib/auth';
+import { authPage, SESSION_CONTROL } from './ui/auth';
 import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, repointConnection, revealConnectionToken, setDefaultConnection, updateConnection, validateWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
 import { avatarLookupJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
@@ -10,6 +11,8 @@ import { connectionsPage } from './ui/connections';
 import { adminPage } from './ui/admin';
 import { buildAdminSnapshot, isAdminOperator, type AdminOAuthReader } from './lib/admin';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
+import { activateInvitedUser, inviteUser, InvitationError } from './lib/invitations';
+import { z } from 'zod';
 
 export type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
 type ProvisionRequest = { instances?: Array<{ ownerEmail?: string; name?: string; instanceId?: string; phoneNumber?: string }> };
@@ -19,42 +22,52 @@ export const MCP_PROTOCOL_VERSION = '2026-07-28' as const;
 
 app.get('/healthz', (c) => c.json({ ok: true, service: 'mcp-evolution-cloudflare', protocol: MCP_PROTOCOL_VERSION }));
 
-async function requireAuth(c: any): Promise<{ info: import('@modelcontextprotocol/server').AuthInfo; user: import('./types').AuthenticatedUser } | Response> {
-  try { return await authenticate(c.req.raw, c.env); } catch (error) { return authResponse(error instanceof AuthError ? error : new AuthError(500, 'Authentication failed')); }
-}
-
-/** Browser routes use the dashboard's path-scoped Cloudflare Access
- * application. MCP requests never use this helper; they are protected by
- * OAuthProvider in src/worker.ts. The deployed Access application also covers
- * /admin so both surfaces receive the same audience and session. */
-async function requireAccessUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
-  try {
-    return await authenticateAccessRequest(c.req.raw, c.env);
-  } catch (accessError) {
-    return authResponse(accessError instanceof AuthError ? accessError : new AuthError(500, 'Authentication failed'));
-  }
-}
-
 async function requireUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
-  const access = await requireAccessUiAuth(c);
-  if (!(access instanceof Response)) return access;
-  // Keep bearer access useful for API clients while preferring Access for the
-  // browser. The Access assertion is never accepted at /mcp.
-  if (c.req.header('authorization')) {
-    try { return (await authenticate(c.req.raw, c.env)).user; } catch (oauthError) {
-      return authResponse(oauthError instanceof AuthError ? oauthError : new AuthError(500, 'Authentication failed'));
-    }
-  }
-  return access;
+  c.header('Cache-Control', 'no-store');
+  const result = await authenticateBrowserRequest(c.req.raw, c.env);
+  if (result instanceof Response) return result;
+  try { assertBrowserMutation(c.req.raw, c.env); }
+  catch (error) { return appendAuthHeaders(authResponse(error instanceof AuthError ? error : new AuthError(503, 'Não foi possível verificar a ação no WaPilot.')), result.headers); }
+  for (const [name, value] of result.headers) if (name !== 'set-cookie') c.header(name, value);
+  for (const cookie of result.headers.getSetCookie()) c.header('Set-Cookie', cookie, { append: true });
+  const csrf = browserCsrfCookie(c.req.raw, c.env);
+  if (csrf) c.header('Set-Cookie', csrf, { append: true });
+  return result.user;
 }
 
-/** Administrative browser routes require the Access assertion itself. Unlike
- * the general dashboard helper, they do not accept bearer compatibility. */
-async function requireAdminUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
-  return requireAccessUiAuth(c);
-}
+const requireAdminUiAuth = requireUiAuth;
 
-app.get('/', (c) => c.html(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Evolution Go · MCP</title><body><main><h1>Evolution Go · MCP</h1><p>Interface protegida para cadastro local de conexões WhatsApp.</p><p>Use <code>/mcp</code> com OAuth 2.1/PKCE. A configuração completa exige autenticação Cloudflare Access.</p></main></body></html>`));
+app.post('/admin/invitations', async (c) => {
+  const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Acesso administrativo do WaPilot necessário.' }, 403);
+  const input = z.object({ email: z.string().trim().toLowerCase().email().max(254) }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Informe um e-mail válido para o convite ao WaPilot.' }, 400);
+  try { const [body, status] = await inviteUser(c.env, input.data.email); return c.json(body, status); }
+  catch (error) { return c.json({ error: error instanceof InvitationError ? error.message : 'Não foi possível emitir o convite ao WaPilot.' }, error instanceof InvitationError ? error.status : 503); }
+});
+
+app.post('/admin/invitations/:userId/activate', async (c) => {
+  const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Acesso administrativo do WaPilot necessário.' }, 403);
+  const input = z.object({ clerkUserId: z.string().regex(/^user_[A-Za-z0-9]+$/).max(128) }).strict().safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Informe o identificador da conta a ativar no WaPilot.' }, 400);
+  try { return c.json(await activateInvitedUser(c.env, c.req.param('userId'), input.data.clerkUserId)); }
+  catch (error) { return c.json({ error: error instanceof InvitationError ? error.message : 'Não foi possível ativar esta conta no WaPilot.' }, error instanceof InvitationError ? error.status : 503); }
+});
+
+app.get('/', (c) => c.redirect('/connections', 302));
+
+for (const [path, mode] of [['/sign-in', 'sign-in'], ['/accept-invitation', 'invitation']] as const) {
+  app.get(path, (c) => {
+    c.header('Cache-Control', 'no-store');
+    c.header('Referrer-Policy', 'no-referrer');
+    c.header('X-Frame-Options', 'DENY');
+    try {
+      const returnTo = mode === 'invitation' ? '/connections' : safeReturnPath(c.req.query('returnTo') ?? null, c.env);
+      return c.html(authPage(mode === 'invitation' ? 'Aceite seu convite ao WaPilot' : 'Entre no WaPilot', mode === 'invitation' ? 'Conclua seu cadastro. Depois, um administrador ativará seu acesso.' : 'Use seu e-mail e o código de verificação para continuar.', browserSessionScripts(c.env, mode, returnTo), true));
+    } catch { return authResponse(new AuthError(503, 'O acesso ao WaPilot está indisponível.')); }
+  });
+}
 
 // The OAuth wrapper handles this route in production. Keeping a fail-closed
 // fallback avoids accidentally exposing an unauthenticated Hono route in tests
@@ -65,53 +78,28 @@ app.get('/connections', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
   const user = await ensureUser(c.env.DB, auth);
   if (c.req.query('provision') === '1' && user.email === 'luccamordente@gmail.com') {
-    if (c.req.query('run') === '1') {
-      try {
-        const payload = await provisionEvolution(c.env, c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin, [
-          { ownerEmail: 'luccamordente@gmail.com', name: 'lucca', instanceId: 'ec547289-c781-498b-a904-412d5d133b13' },
-          { ownerEmail: 'heitorsalazar@gmail.com', name: 'heitor', instanceId: 'c770126e-773a-408f-9405-89561d05447c' },
-        ]);
-        return c.html(adminProvisionResultPage(payload));
-      } catch (error) {
-        const cause = error instanceof EvolutionApiError && error.details && typeof error.details === 'object' && 'cause' in error.details ? String((error.details as { cause: unknown }).cause) : undefined;
-        const details = error instanceof EvolutionApiError && error.details && !cause ? JSON.stringify(redactEvolutionSecrets(error.details)) : undefined;
-        return c.html(adminProvisionErrorPage([error instanceof Error ? error.message : 'Provisioning failed', cause, details].filter(Boolean).join(': ')), 502);
-      }
-    }
-    if (c.req.query('renew') === 'lucca') {
-      try {
-        const payload = await provisionEvolution(c.env, c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin, [
-          { ownerEmail: 'luccamordente@gmail.com', name: 'lucca', instanceId: 'ec547289-c781-498b-a904-412d5d133b13' },
-        ], new Set(['ec547289-c781-498b-a904-412d5d133b13']));
-        return c.html(adminProvisionResultPage(payload));
-      } catch (error) {
-        const cause = error instanceof EvolutionApiError && error.details && typeof error.details === 'object' && 'cause' in error.details ? String((error.details as { cause: unknown }).cause) : undefined;
-        const details = error instanceof EvolutionApiError && error.details && !cause ? JSON.stringify(redactEvolutionSecrets(error.details)) : undefined;
-        return c.html(adminProvisionErrorPage([error instanceof Error ? error.message : 'QR renewal failed', cause, details].filter(Boolean).join(': ')), 502);
-      }
-    }
-    return c.html(adminProvisionPage());
+    return c.html(adminProvisionPage(browserSessionScripts(c.env)));
   }
   c.header('Cache-Control', 'no-store');
-  return c.html(connectionsPage(auth));
+  return c.html(connectionsPage(auth, browserSessionScripts(c.env)));
 });
 
 /**
- * Aggregated operational view. Access authentication and the independent
+ * Aggregated operational view. Browser authentication and the independent
  * operator allowlist are both required; the page itself only reads the
  * server-side snapshot and contains no provisioning or revocation controls.
  */
 app.get('/admin', async (c) => {
   const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
-  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Admin access required' }, 403);
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Acesso administrativo do WaPilot necessário.' }, 403);
   c.header('Cache-Control', 'no-store');
-  return c.html(adminPage());
+  return c.html(adminPage(browserSessionScripts(c.env)));
 });
 
 /** The browser performs one request here per initial load or explicit refresh. */
 app.get('/admin/data', async (c) => {
   const auth = await requireAdminUiAuth(c); if (auth instanceof Response) return auth;
-  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Admin access required' }, 403);
+  if (!isAdminOperator(auth.email, c.env)) return c.json({ error: 'Acesso administrativo do WaPilot necessário.' }, 403);
   c.header('Cache-Control', 'no-store');
   const base = (c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin).replace(/\/$/, '');
   try {
@@ -135,9 +123,7 @@ app.get('/admin/data', async (c) => {
   }
 });
 
-// Keep the browser UI under the same path-scoped Access application as the
-// page. Fetching /api from an Access-protected page can redirect to a second
-// Access audience and browsers correctly reject that HTML redirect as CORS.
+// Dashboard data shares the same origin and browser session as the page.
 app.get('/connections/data', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
   const user = await ensureUser(c.env.DB, auth);
@@ -188,9 +174,7 @@ app.get('/api/authorizations', (c) => authorizationApi(c));
 app.delete('/api/authorizations/:id', (c) => authorizationApi(c, c.req.param('id')));
 app.post('/api/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.param('id')));
 
-// The dashboard is protected by the /connections Access application. Keep
-// its authorization requests under that same path so browser fetches do not
-// cross into the separately protected /api Access application.
+// Preserve the dashboard aliases while all paths use the same browser session.
 
 /** Full recent activity for the dashboard's "Ver tudo" (up to 10 audit rows). */
 app.get('/connections/activity/:id', async (c) => {
@@ -201,11 +185,7 @@ app.get('/connections/activity/:id', async (c) => {
   return c.json({ activity: await activityFor(c.env.DB, user.id, connection.id, 10) });
 });
 
-/** Same-Access-app alias for every dashboard /api/* call. The browser UI
- * calls /connections/api/* so its fetches stay under the /connections Access
- * application instead of being redirected by a separate /api application
- * (which surfaces as an opaque CORS "Failed to fetch"). Auth is unchanged:
- * the /api handlers verify Cf-Access-Jwt-Assertion against ACCESS_AUDIENCE. */
+/** Keep existing dashboard URLs, including identical authentication and CSRF. */
 app.all('/connections/api/*', (c) => {
   const url = new URL(c.req.url);
   url.pathname = url.pathname.replace(/^\/connections\/api\//, '/api/');
@@ -380,7 +360,7 @@ export async function removeUserConnection(env: Env, userId: string, connectionI
  * the webhook connection, and returns only the QR payload (never credentials). */
 app.post('/connections/provision', async (c) => {
   const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
-  if (auth.email !== 'luccamordente@gmail.com') return c.json({ error: 'Admin access required' }, 403);
+  if (auth.email !== 'luccamordente@gmail.com') return c.json({ error: 'Acesso administrativo do WaPilot necessário.' }, 403);
   const body = await c.req.json<ProvisionRequest>().catch((): ProvisionRequest => ({}));
   const requested = body.instances ?? [];
   if (!Array.isArray(requested) || requested.length < 1 || requested.length > 2) return c.json({ error: 'Provide one or two instances' }, 400);
@@ -394,13 +374,10 @@ app.post('/connections/provision', async (c) => {
   if (inputs.some((item) => !allowedOwners.has(item.ownerEmail) || !/^[a-z0-9_-]{1,64}$/i.test(item.name) || !/^[a-z0-9_-]{1,64}$/i.test(item.instanceId))) return c.json({ error: 'Each instance requires an allowed owner and an alphanumeric name/instanceId' }, 400);
   if (new Set(inputs.map((item) => item.ownerEmail)).size !== inputs.length || new Set(inputs.map((item) => item.instanceId)).size !== inputs.length) return c.json({ error: 'Owners and instance IDs must be unique in the request' }, 400);
   try { return c.json(await provisionEvolution(c.env, c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin, inputs)); }
-  catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Provisioning failed' }, 502); }
+  catch (error) { return c.json({ error: safeErrorMessage(error, 'Não foi possível preparar os números no WaPilot.') }, 502); }
 });
 
 app.get('/admin/evolution', async (c) => {
-  // Cloudflare Access protects the /connections application, not this legacy
-  // alias. Redirect before authenticating so the browser enters the Access
-  // challenge and then reaches the owner-only provision flow there.
   return c.redirect('/connections?provision=1', 302);
 });
 
@@ -610,21 +587,24 @@ export async function provisionEvolution(env: Env, base: string, inputs: Provisi
   return { instances: results };
 }
 
-function adminProvisionResultPage(payload: { instances: Array<Record<string, unknown>> }): string {
-  const cards = payload.instances.map((item) => {
-    const qr = qrDataUrl(item.qr);
-    const image = qr ? `<img alt="QR code ${escapeHtml(String(item.friendlyName ?? ''))}" width="360" src="${escapeHtml(qr)}"><p><a download="qr-${escapeHtml(String(item.friendlyName ?? 'instance'))}.png" href="${escapeHtml(qr)}">Baixar QR code</a></p>` : '<p>QR code ainda não disponível.</p>';
-    return `<article><h2>${escapeHtml(String(item.friendlyName ?? ''))} · ${escapeHtml(String(item.instanceId ?? ''))}</h2><p>connectionId: ${escapeHtml(String(item.connectionId ?? ''))} · ${item.created ? 'criada agora' : 'já cadastrada'}</p>${image}</article>`;
-  }).join('');
-  return `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>QR codes Evolution</title><body><main><h1>QR codes Evolution</h1><p>As conexões foram processadas no D1.</p>${cards}<p><a href="/connections">Voltar para conexões</a></p></main></body></html>`;
-}
-
-function adminProvisionErrorPage(message: string): string { return `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Falha no provisionamento</title><body><main><h1>Falha no provisionamento</h1><p>${escapeHtml(message)}</p><p><a href="/connections?provision=1">Tentar novamente</a></p></main></body></html>`; }
-
-function adminProvisionPage(): string { return `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Provisionar Evolution</title><body><main><h1>Provisionar WhatsApp</h1><p>Cria as instâncias Lucca e Heitor, cadastra as conexões no D1 e solicita os QR codes.</p><button id="run">Criar/conferir instâncias</button><p><a href="/connections?provision=1&renew=lucca">Gerar novo QR da Lucca</a></p><p id="status"></p><section id="results"></section><script>
+function adminProvisionPage(sessionScripts = ''): string { return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>WaPilot · Provisionamento</title>${sessionScripts}</head><body><main>${SESSION_CONTROL}<h1>Provisionar WhatsApp</h1><p>Confere os números administrativos e cria os registros que faltarem. Para renovar um QR, use a página de conexões.</p><button id="run" type="button">Criar ou conferir números</button><p id="status" role="status"></p><section id="results"></section><p><a href="/connections">Voltar para conexões</a></p><script>
 const status = document.getElementById('status'); const results = document.getElementById('results');
-function findQr(value) { if (!value || typeof value !== 'object') return ''; if (Array.isArray(value)) { for (const item of value) { const found = findQr(item); if (found) return found; } return ''; } for (const [key, child] of Object.entries(value)) { if (/^(base64|qrcode|qr|code)$/i.test(key) && typeof child === 'string' && (child.startsWith('data:image/') || child.length > 100)) return child.startsWith('data:image/') ? child : 'data:image/png;base64,' + child; const found = findQr(child); if (found) return found; } return ''; }
- document.getElementById('run').onclick = () => { window.location.href = '/connections?provision=1&run=1'; };
+document.getElementById('run').addEventListener('click', async () => {
+  status.textContent = 'Conferindo números…';
+  try {
+    const csrf = document.cookie.split(';').map(value => value.trim()).find(value => value.startsWith('__Host-wapilot_csrf='))?.split('=')[1] || '';
+    const response = await fetch('/connections/provision', { method:'POST', headers:{'Content-Type':'application/json','X-WaPilot-CSRF':csrf}, body:JSON.stringify({instances:[{ownerEmail:'luccamordente@gmail.com',name:'lucca',instanceId:'lucca'},{ownerEmail:'heitorsalazar@gmail.com',name:'heitor',instanceId:'heitor'}]}) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Não foi possível concluir a operação.');
+    results.textContent = '';
+    for (const instance of payload.instances || []) {
+      const heading = document.createElement('h2'); heading.textContent = instance.friendlyName || 'Número'; results.append(heading);
+      const qr = instance.qr?.data?.attributes?.qr;
+      if (typeof qr === 'string' && (qr.startsWith('data:image/') || /^[A-Za-z0-9+/=]+$/.test(qr))) { const image = document.createElement('img'); image.alt = 'QR code para conectar o WhatsApp'; image.width = 320; image.src = qr.startsWith('data:image/') ? qr : 'data:image/png;base64,' + qr; results.append(image); }
+    }
+    status.textContent = 'Números conferidos. Gerencie o pareamento na página de conexões.';
+  } catch (error) { status.textContent = error.message || 'Não foi possível concluir a operação.'; }
+});
 </script></main></body></html>`; }
 
 /** Evolution Go webhook ingress. The URL must contain the per-connection secret
@@ -645,6 +625,7 @@ function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (c
 function safeErrorMessage(error: unknown, fallback: string): string {
   if (!(error instanceof Error)) return fallback;
   return error.message
+    .replace(/Evolution(?: Go)?/gi, 'WaPilot')
     .replace(/(authorization|bearer)\s*[:=]?\s*(?:bearer\s+)?[^\s,;]+/gi, '$1=[redacted]')
     .replace(/(token|api[-_ ]?key|password|secret)[=:]?\s*[^\s,;]+/gi, '$1=[redacted]')
     .slice(0, 240) || fallback;
@@ -678,7 +659,7 @@ function redactEvolutionSecrets(value: unknown): unknown {
 }
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
-app.onError((error, c) => { console.error('request failed', { path: c.req.path, message: error.message }); return c.json({ error: 'Internal server error' }, 500); });
+app.onError((_error, c) => { console.error(JSON.stringify({ event: 'request_failed' })); return c.json({ error: 'O WaPilot não conseguiu concluir a operação.' }, 503); });
 
 export { app };
 

@@ -1,84 +1,134 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { createClerkClient } from '@clerk/backend';
 import type { AuthenticatedUser, Env } from '../types';
-import type { AuthInfo } from '@modelcontextprotocol/server';
+import { AuthError } from './auth-error';
+import { bootstrapLocalUser } from './db';
+import { authScripts, authPage } from '../ui/auth';
+import { timingSafeEqual } from 'node:crypto';
+export { AuthError } from './auth-error';
 
-function bearer(request: Request): string | null {
-  const value = request.headers.get('authorization');
-  if (!value) return null;
-  const match = /^Bearer\s+(.+)$/i.exec(value);
-  return match?.[1] ?? null;
-}
-
-function allowedEmails(env: Env): Set<string> {
-  const configured = (env.ALLOWED_EMAILS ?? 'luccamordente@gmail.com,heitorsalazar@gmail.com').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-  return new Set(configured);
-}
-
-/** Access apps may protect different browser paths, each with its own aud. */
-export function accessAudiences(env: Pick<Env, 'ACCESS_AUDIENCE'>): string[] {
-  return (env.ACCESS_AUDIENCE ?? '').split(',').map((value) => value.trim()).filter(Boolean);
-}
-
-function emailFromClaims(payload: JWTPayload): string | undefined {
-  const candidates = [payload.email, payload.preferred_username, payload.upn, payload['https://claims.access.email']];
-  return candidates.find((x): x is string => typeof x === 'string' && x.includes('@'))?.toLowerCase();
-}
-
-export async function authenticate(request: Request, env: Env): Promise<{ info: AuthInfo; user: AuthenticatedUser }> {
-  const token = bearer(request);
-  if (!token) throw new AuthError(401, 'Missing bearer token');
-  const payload = await verifyAccessJwt(token, env);
-  const email = emailFromClaims(payload);
-  if (!email || !allowedEmails(env).has(email)) throw new AuthError(403, 'User is not authorized');
-  const id = typeof payload.sub === 'string' && payload.sub ? payload.sub : email;
-  const expiresAt = typeof payload.exp === 'number' ? payload.exp : undefined;
-  const info: AuthInfo = { token, clientId: typeof payload.azp === 'string' ? payload.azp : 'cloudflare-access', scopes: typeof payload.scope === 'string' ? payload.scope.split(' ').filter(Boolean) : [], expiresAt, extra: { email, claims: payload } };
-  return { info, user: { id, email, name: typeof payload.name === 'string' ? payload.name : undefined, claims: payload as Record<string, unknown> } };
-}
-
-/**
- * Verify the JWT Cloudflare Access adds to requests that pass an Access policy.
- * This is deliberately separate from MCP bearer-token verification: an Access
- * assertion authenticates the browser at /authorize and the connection UI; it
- * is never accepted as an MCP OAuth access token.
- */
-export async function authenticateAccessRequest(request: Request, env: Env): Promise<AuthenticatedUser> {
-  if (env.ENVIRONMENT === 'local') {
-    const email = (env.LOCAL_DEV_USER_EMAIL ?? 'dev@example.test').trim().toLowerCase();
-    if (!email || !email.includes('@')) throw new AuthError(500, 'Local development user is not configured');
-    return { id: `local:${email}`, email, name: 'Local development', claims: { local: true } };
-  }
-  const token = request.headers.get('cf-access-jwt-assertion');
-  if (!token) throw new AuthError(401, 'Cloudflare Access authentication required');
-  const payload = await verifyAccessJwt(token, env);
-  const email = emailFromClaims(payload);
-  if (!email || !allowedEmails(env).has(email)) throw new AuthError(403, 'User is not authorized');
-  const id = typeof payload.sub === 'string' && payload.sub ? payload.sub : email;
-  return { id, email, name: typeof payload.name === 'string' ? payload.name : undefined, claims: payload as Record<string, unknown> };
-}
-
-async function verifyAccessJwt(token: string, env: Env): Promise<JWTPayload> {
-  const audiences = accessAudiences(env);
-  if (!env.ACCESS_JWKS_URL || !env.ACCESS_ISSUER || audiences.length === 0) throw new AuthError(503, 'Cloudflare Access verifier is not configured');
+export function browserOrigin(env: Env): string {
   try {
-    const jwks = createRemoteJWKSet(new URL(env.ACCESS_JWKS_URL));
-    const verified = await jwtVerify(token, jwks, {
-      issuer: env.ACCESS_ISSUER,
-      audience: audiences.length === 1 ? audiences[0] : audiences,
-      algorithms: ['RS256', 'ES256'],
-    });
-    return verified.payload;
-  } catch (error) {
-    throw new AuthError(401, 'Invalid Cloudflare Access token', error instanceof Error ? error.message : undefined);
-  }
+    const url = new URL(env.MCP_PUBLIC_URL ?? '');
+    if (url.protocol !== 'https:' && !(env.ENVIRONMENT === 'local' && url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error();
+    if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error();
+    return url.origin;
+  } catch { throw new AuthError(503, 'O acesso ao WaPilot está indisponível.'); }
 }
 
-export class AuthError extends Error {
-  constructor(public readonly status: number, message: string, public readonly detail?: unknown) { super(message); this.name = 'AuthError'; }
+export function clerkFrontend(env: Env): string {
+  try {
+    const key = env.CLERK_PUBLISHABLE_KEY ?? '';
+    if (!/^pk_(live|test)_[A-Za-z0-9+/=]+$/.test(key)) throw new Error();
+    const value = atob(key.split('_')[2]);
+    if (!value.endsWith('$')) throw new Error();
+    const url = new URL('https://' + value.slice(0, -1));
+    if (url.pathname !== '/' || url.search || url.hash || url.username || url.password || url.port) throw new Error();
+    return url.origin;
+  } catch { throw new AuthError(503, 'O acesso ao WaPilot está indisponível.'); }
+}
+
+export function safeReturnPath(value: string | null, env: Env): string {
+  try {
+    const origin = browserOrigin(env);
+    const url = new URL(value ?? '/connections', origin);
+    if (url.origin !== origin || !['/connections', '/admin', '/authorize'].includes(url.pathname) || url.username || url.password) return '/connections';
+    const allowed = url.pathname === '/authorize' ? ['client_id', 'redirect_uri', 'response_type', 'scope', 'state', 'resource', 'code_challenge', 'code_challenge_method', 'response_mode'] : url.pathname === '/connections' ? ['provision', 'refresh'] : [];
+    for (const key of [...url.searchParams.keys()]) if (!allowed.includes(key)) url.searchParams.delete(key);
+    return url.pathname + url.search;
+  } catch { return '/connections'; }
+}
+
+function pageNavigation(request: Request): boolean {
+  return request.method === 'GET' && ['/connections', '/admin', '/authorize'].includes(new URL(request.url).pathname) && (request.headers.get('accept') ?? '').includes('text/html');
+}
+
+function publicAuthHeaders(headers: Headers): Headers {
+  const result = new Headers(headers);
+  for (const name of [...result.keys()]) if (name.startsWith('x-clerk-auth-')) result.delete(name);
+  return result;
+}
+
+export function appendAuthHeaders(response: Response, headers: Headers): Response {
+  const output = new Response(response.body, response);
+  for (const [name, value] of publicAuthHeaders(headers)) if (name !== 'set-cookie') output.headers.set(name, value);
+  for (const value of headers.getSetCookie()) output.headers.append('Set-Cookie', value);
+  output.headers.set('Cache-Control', 'no-store');
+  return output;
+}
+
+export function browserSessionScripts(env: Env, mode = 'session', returnTo = '/connections'): string {
+  if (env.ENVIRONMENT === 'local') return '';
+  return authScripts(env.CLERK_PUBLISHABLE_KEY ?? '', clerkFrontend(env), mode, safeReturnPath(returnTo, env));
+}
+
+const csrfCookie = '__Host-wapilot_csrf';
+function csrfFromRequest(request: Request): string | undefined {
+  return request.headers.get('cookie')?.split(';').map(value => value.trim()).find(value => value.startsWith(csrfCookie + '='))?.slice(csrfCookie.length + 1);
+}
+
+export function browserCsrfCookie(request: Request, env: Env): string | undefined {
+  if (env.ENVIRONMENT === 'local' || !['GET', 'HEAD'].includes(request.method) || /^[A-Za-z0-9_-]{43}$/.test(csrfFromRequest(request) ?? '')) return;
+  const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${csrfCookie}=${token}; Path=/; Secure; SameSite=Strict`;
+}
+
+export function assertBrowserMutation(request: Request, env: Env): void {
+  if (env.ENVIRONMENT === 'local' || ['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return;
+  const cookie = csrfFromRequest(request) ?? '', header = request.headers.get('x-wapilot-csrf') ?? '';
+  if (request.headers.get('origin') !== browserOrigin(env) || request.headers.get('sec-fetch-site') === 'cross-site' || !/^[A-Za-z0-9_-]{43}$/.test(cookie) || !/^[A-Za-z0-9_-]{43}$/.test(header) || !timingSafeEqual(new TextEncoder().encode(cookie), new TextEncoder().encode(header))) throw new AuthError(403, 'Esta ação precisa ser iniciada no WaPilot.');
+}
+
+export async function authenticateBrowserRequest(request: Request, env: Env): Promise<{ user: AuthenticatedUser; headers: Headers } | Response> {
+  let responseHeaders = new Headers();
+  try {
+    if (env.ENVIRONMENT === 'local') {
+      const email = (env.LOCAL_DEV_USER_EMAIL ?? 'dev@example.test').trim().toLowerCase();
+      if (!email || !email.includes('@')) throw new AuthError(503, 'O acesso local ao WaPilot não está configurado.');
+      const local = { id: 'local:' + email, email, claims: { local: true } };
+      const user = await bootstrapLocalUser(env.DB, local);
+      return { user: { ...user, claims: {} }, headers: new Headers() };
+    }
+    const origin = browserOrigin(env);
+    const issuer = clerkFrontend(env);
+    if (!env.CLERK_SECRET_KEY || new URL(request.url).origin !== origin) throw new AuthError(503, 'O acesso ao WaPilot está indisponível.');
+    const headers = new Headers(request.headers);
+    headers.delete('authorization');
+    const navigating = pageNavigation(request);
+    if (!navigating) { headers.set('accept', 'application/json'); headers.delete('sec-fetch-dest'); }
+    const verificationUrl = new URL(request.url);
+    verificationUrl.searchParams.delete('__clerk_redirect_url');
+    verificationUrl.searchParams.delete('__clerk_ticket');
+    const client = createClerkClient({ secretKey: env.CLERK_SECRET_KEY, publishableKey: env.CLERK_PUBLISHABLE_KEY });
+    const state = await client.authenticateRequest(new Request(verificationUrl, { method: request.method, headers }), { acceptsToken: 'session_token', issuer, authorizedParties: [origin], jwtKey: env.CLERK_JWT_KEY });
+    responseHeaders = publicAuthHeaders(state.headers);
+    if (!navigating) responseHeaders.delete('location');
+    const location = responseHeaders.get('location');
+    if (location) {
+      if (![origin, issuer].includes(new URL(location).origin)) { responseHeaders.delete('location'); throw new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.'); }
+      return appendAuthHeaders(new Response(null, { status: 307 }), responseHeaders);
+    }
+    if (state.status === 'handshake') throw new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.');
+    if (!state.isAuthenticated) {
+      if (/jwk.*(failed|missing|invalid)|secret-key-invalid|unexpected-error/i.test(state.reason ?? '')) throw new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.');
+      if (pageNavigation(request)) {
+        const url = new URL(request.url);
+        return appendAuthHeaders(new Response(null, { status: 302, headers: { Location: '/sign-in?' + new URLSearchParams({ returnTo: safeReturnPath(url.pathname + url.search, env) }) } }), responseHeaders);
+      }
+      return appendAuthHeaders(authResponse(new AuthError(401, 'Entre no WaPilot para continuar.')), responseHeaders);
+    }
+    const auth = state.toAuth();
+    if (!auth?.userId || !('sessionClaims' in auth) || auth.sessionClaims.azp !== origin) throw new AuthError(401, 'Entre no WaPilot para continuar.');
+    const owner = await env.DB.prepare('SELECT id, email, status FROM users WHERE clerk_user_id = ?').bind(auth.userId).first<{ id: string; email: string; status: string }>();
+    if (!owner) throw new AuthError(403, 'Sua conta aguarda ativação por um administrador do WaPilot.');
+    if (owner.status !== 'active') throw new AuthError(403, 'Esta conta não tem acesso ao WaPilot.');
+    return { user: { id: owner.id, email: owner.email, claims: {} }, headers: responseHeaders };
+  } catch (error) {
+    const failure = error instanceof AuthError ? error : new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.');
+    if (failure.status === 403 && pageNavigation(request)) return appendAuthHeaders(new Response(authPage('Acesso ao WaPilot', failure.message, browserSessionScripts(env, 'message')), { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Referrer-Policy': 'no-referrer' } }), responseHeaders);
+    return appendAuthHeaders(authResponse(failure), responseHeaders);
+  }
 }
 
 export function authResponse(error: AuthError): Response {
-  const headers = new Headers({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-  if (error.status === 401) headers.set('WWW-Authenticate', 'Bearer');
-  return new Response(JSON.stringify({ error: error.message }), { status: error.status, headers });
+  return Response.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'no-store' } });
 }

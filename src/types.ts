@@ -10,12 +10,11 @@ export interface Env {
   EVOLUTION_BASE_URL: string;
   EVOLUTION_GLOBAL_API_KEY?: string;
   TOKEN_ENCRYPTION_KEY: string;
-  ACCESS_JWKS_URL?: string;
-  ACCESS_ISSUER?: string;
-  ACCESS_AUDIENCE?: string;
+  CLERK_PUBLISHABLE_KEY?: string;
+  CLERK_SECRET_KEY?: string;
+  CLERK_JWT_KEY?: string;
   LOCAL_DEV_USER_EMAIL?: string;
   CONSENT_SECRET?: string;
-  ALLOWED_EMAILS?: string;
   /** Separate allowlist for the read-only operational admin panel. */
   ADMIN_EMAILS?: string;
   ENVIRONMENT?: string;

@@ -6,6 +6,18 @@ Antes de retirar o Access, publique somente com autorização uma versão que ex
 
 O retorno deve usar o commit Access já endurecido com essa barreira, preservando as colunas e os vínculos Clerk, o KV OAuth e todas as revogações. Não restaure uma versão com autocadastro ou acesso de contas `disabled`. Uma falha D1 durante emissão/refresh responde `503 temporarily_unavailable`; não a trate como revogação de conta. A desativação explícita impede novo uso e produz `invalid_grant` no token endpoint.
 
+## Candidata Clerk: configuração e gates de corte
+
+Esta branch usa a aplicação escolhida `app_3M1uSBQzCMOfMfnraVHBpldbNhx`, sem criar outra aplicação nem substituir o OAuth Provider. A leitura feita para preparar o código encontrou somente uma instância de desenvolvimento; isso não configura produção. A configuração, o uso de credenciais reais e os testes de convite/sessão completos dependem de autorização própria. Não publique a candidata como simples substituição do Access antes desses gates.
+
+Configure na instância correspondente ao D1: Invite-only (`auth_access_control.sign_up_mode=restricted`), código de e-mail para entrada/verificação, `auth_email.immutable=true`, e exclusão da própria conta desativada. Confira essa restrição no provedor, não apenas pela ausência de controles no HTML. O schema do plugin consultado não expõe o bloqueio de exclusão de conta; use a configuração oficial do Dashboard/CLI para conferência autorizada. Confira também português e marca nos e-mails. O rodapé obrigatório e avisos development do provedor não foram removidos por CSS.
+
+`CLERK_PUBLISHABLE_KEY` é pública; `CLERK_SECRET_KEY` permanece em Workers Secret, e `CLERK_JWT_KEY`, quando usada, é a chave pública PEM da mesma instância. `MCP_PUBLIC_URL` deve ser a origem canônica HTTPS. Configuração ausente/incompatível falha fechada; não há fallback para Access. Preserve KV OAuth, recurso/issuer, segredo de consentimento e chave de cifra. Os secrets Access só são retirados junto ao corte explicitamente autorizado; a lista operacional `ADMIN_EMAILS` é independente.
+
+O build gera `public/auth.js` e preserva a licença da localização. `npm run check` confere os dois assets, os tipos e os testes; `npx wrangler deploy --dry-run` empacota sem publicar. O protocolo MCP permanece `2026-07-28`, stateless JSON e exclusivamente bearer do Provider. O commit de retorno Access endurecido é `bd9eeb65e89c7ee12b184dc30a64699613c5dba1`; preserve a migration aditiva e os vínculos/grants/revogações ao retornar.
+
+O `wrangler.jsonc` candidato define `observability.redact_query_string=true` para não incluir tickets ou parâmetros portadores em logs/traces de invocação. Confirme por read-back após uma publicação autorizada; essa edição local não altera o Worker já publicado. Teste login/convite incorporado, idioma, renovação após mais de 60 segundos, retorno de aba fechada, saída, consentimento e grants antigos no ambiente correto antes do corte de Access. A prova HTTP simulada e uma inspeção pública da tela de login não substituem esse fluxo.
+
 ## Container do sender
 
 O `wrangler.jsonc` prepara a imagem de `sender/Dockerfile` como `sender`, sob a política nativa `durable_object`, e associa `CallbackSender` ao binding interno `CALLBACK_SENDER`. O controlador escolhe `instance: "lite"` ao iniciar e todas as chamadas usam o objeto de nome fixo `shared`. Essa política não aceita `max_instances` na versão fixada do Wrangler; a escolha de uma única instância é mantida pelo código da aplicação, sem um teto financeiro prometido. O perfil `local` possui seu próprio binding e Container; o perfil `stdio` os exclui.

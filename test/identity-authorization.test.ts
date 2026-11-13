@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { eventRuntime } from './helpers/mcp-events-runtime';
-import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { readFile } from 'node:fs/promises';
 import { unstable_splitSqlQuery } from 'wrangler';
 
@@ -55,26 +54,6 @@ it('fails temporarily without destroying an active grant when D1 is unavailable'
   expect(retried.status).toBe(200);
   expect(await retried.json()).toMatchObject({ scope: 'mcp:read' });
   expect(fixture.logs.join(' ')).not.toContain('do-not-return');
-});
-
-it('requires an existing active D1 account on the Access browser and consent surfaces', async () => {
-  const { publicKey, privateKey } = await generateKeyPair('RS256');
-  const jwk = { ...await exportJWK(publicKey), kid: 'fixture' };
-  const browser = await eventRuntime(async request => {
-    if (new URL(request.url).hostname === 'access.invalid') return Response.json({ keys: [jwk] });
-    throw new Error('Unauthorized external action');
-  }, '9999', { ENVIRONMENT: 'test', ACCESS_ISSUER: 'https://access.invalid', ACCESS_AUDIENCE: 'browser', ACCESS_JWKS_URL: 'https://access.invalid/jwks', ALLOWED_EMAILS: 'luccamordente@gmail.com,missing@example.test' });
-  try {
-    const token = async (email: string) => new SignJWT({ email }).setProtectedHeader({ alg: 'RS256', kid: 'fixture' }).setSubject('legacy-access-sub').setIssuer('https://access.invalid').setAudience('browser').setIssuedAt().setExpirationTime('5m').sign(privateKey);
-    const active = await token('luccamordente@gmail.com');
-    expect((await browser.fetch('/connections', { headers: { 'cf-access-jwt-assertion': active } })).status).toBe(200);
-    await browser.db.prepare("UPDATE users SET status = 'disabled' WHERE id = 'seed-lucca'").run();
-    for (const path of ['/connections', '/connections/data', '/api/connections', '/admin', '/admin/data', '/authorize']) {
-      expect((await browser.fetch(path, { headers: { 'cf-access-jwt-assertion': active } })).status).toBe(403);
-    }
-    expect((await browser.fetch('/connections', { headers: { 'cf-access-jwt-assertion': await token('missing@example.test') } })).status).toBe(403);
-    expect(await browser.db.prepare("SELECT id FROM users WHERE email = 'missing@example.test'").first()).toBeNull();
-  } finally { await browser.runtime.dispose(); }
 });
 
 it('adds unique Clerk links without rewriting existing identities, connection defaults or credentials', async () => {

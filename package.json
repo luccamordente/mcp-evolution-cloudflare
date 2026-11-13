@@ -13,7 +13,9 @@
     "test": "vitest run",
     "test:sender-container": "node --test test/sender-container.container.mjs",
     "test:acceptance:gif": "node scripts/acceptance-gif.mjs",
-    "check": "npm run check:gallery && npm run typecheck && npm test",
+    "build:auth": "node scripts/build-auth.mjs",
+    "check:auth": "node scripts/build-auth.mjs --check",
+    "check": "npm run check:auth && npm run check:gallery && npm run typecheck && npm test",
     "build:gallery": "node scripts/build-gallery.mjs",
     "check:gallery": "node scripts/build-gallery.mjs --check"
   },
@@ -22,6 +24,9 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@clerk/backend": "3.28.0",
+    "@clerk/clerk-js": "6.43.0",
+    "@clerk/localizations": "4.24.7",
     "@cloudflare/workers-oauth-provider": "1.2.3",
     "@hyzyla/pdfium": "3.0.0",
     "@modelcontextprotocol/client": "2.3.1",

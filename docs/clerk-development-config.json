@@ -1,0 +1,20 @@
+{
+  "application_id": "app_3M1uSBQzCMOfMfnraVHBpldbNhx",
+  "instance": "development",
+  "config": {
+    "auth_access_control": { "sign_up_mode": "restricted" },
+    "auth_email": {
+      "immutable": true,
+      "sign_in_strategies": ["email_code"],
+      "verification_strategies": ["email_code"],
+      "verify_at_sign_up": true
+    },
+    "auth_password": { "enabled": false, "required": false },
+    "connection_oauth_google": { "enabled": false, "authenticatable": false },
+    "paths": {
+      "sign_in": "/sign-in",
+      "sign_up": "/accept-invitation",
+      "after_sign_out_all": "/sign-in"
+    }
+  }
+}

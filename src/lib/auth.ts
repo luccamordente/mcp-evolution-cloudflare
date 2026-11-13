@@ -42,9 +42,15 @@ function pageNavigation(request: Request): boolean {
   return request.method === 'GET' && ['/connections', '/admin', '/authorize'].includes(new URL(request.url).pathname) && (request.headers.get('accept') ?? '').includes('text/html');
 }
 
+function publicAuthHeaders(headers: Headers): Headers {
+  const result = new Headers(headers);
+  for (const name of [...result.keys()]) if (name.startsWith('x-clerk-auth-')) result.delete(name);
+  return result;
+}
+
 export function appendAuthHeaders(response: Response, headers: Headers): Response {
   const output = new Response(response.body, response);
-  for (const [name, value] of headers) if (name !== 'set-cookie') output.headers.set(name, value);
+  for (const [name, value] of publicAuthHeaders(headers)) if (name !== 'set-cookie') output.headers.set(name, value);
   for (const value of headers.getSetCookie()) output.headers.append('Set-Cookie', value);
   output.headers.set('Cache-Control', 'no-store');
   return output;
@@ -87,32 +93,35 @@ export async function authenticateBrowserRequest(request: Request, env: Env): Pr
     if (!env.CLERK_SECRET_KEY || new URL(request.url).origin !== origin) throw new AuthError(503, 'O acesso ao WaPilot está indisponível.');
     const headers = new Headers(request.headers);
     headers.delete('authorization');
+    const navigating = pageNavigation(request);
+    if (!navigating) { headers.set('accept', 'application/json'); headers.delete('sec-fetch-dest'); }
     const verificationUrl = new URL(request.url);
     verificationUrl.searchParams.delete('__clerk_redirect_url');
     verificationUrl.searchParams.delete('__clerk_ticket');
     const client = createClerkClient({ secretKey: env.CLERK_SECRET_KEY, publishableKey: env.CLERK_PUBLISHABLE_KEY });
     const state = await client.authenticateRequest(new Request(verificationUrl, { method: request.method, headers }), { acceptsToken: 'session_token', issuer, authorizedParties: [origin], jwtKey: env.CLERK_JWT_KEY });
-    responseHeaders = state.headers;
-    const location = state.headers.get('location');
+    responseHeaders = publicAuthHeaders(state.headers);
+    if (!navigating) responseHeaders.delete('location');
+    const location = responseHeaders.get('location');
     if (location) {
       if (![origin, issuer].includes(new URL(location).origin)) { responseHeaders.delete('location'); throw new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.'); }
-      return appendAuthHeaders(new Response(null, { status: 307 }), state.headers);
+      return appendAuthHeaders(new Response(null, { status: 307 }), responseHeaders);
     }
     if (state.status === 'handshake') throw new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.');
     if (!state.isAuthenticated) {
       if (/jwk.*(failed|missing|invalid)|secret-key-invalid|unexpected-error/i.test(state.reason ?? '')) throw new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.');
       if (pageNavigation(request)) {
         const url = new URL(request.url);
-        return appendAuthHeaders(new Response(null, { status: 302, headers: { Location: '/sign-in?' + new URLSearchParams({ returnTo: safeReturnPath(url.pathname + url.search, env) }) } }), state.headers);
+        return appendAuthHeaders(new Response(null, { status: 302, headers: { Location: '/sign-in?' + new URLSearchParams({ returnTo: safeReturnPath(url.pathname + url.search, env) }) } }), responseHeaders);
       }
-      return appendAuthHeaders(authResponse(new AuthError(401, 'Entre no WaPilot para continuar.')), state.headers);
+      return appendAuthHeaders(authResponse(new AuthError(401, 'Entre no WaPilot para continuar.')), responseHeaders);
     }
     const auth = state.toAuth();
     if (!auth?.userId || !('sessionClaims' in auth) || auth.sessionClaims.azp !== origin) throw new AuthError(401, 'Entre no WaPilot para continuar.');
     const owner = await env.DB.prepare('SELECT id, email, status FROM users WHERE clerk_user_id = ?').bind(auth.userId).first<{ id: string; email: string; status: string }>();
     if (!owner) throw new AuthError(403, 'Sua conta aguarda ativação por um administrador do WaPilot.');
     if (owner.status !== 'active') throw new AuthError(403, 'Esta conta não tem acesso ao WaPilot.');
-    return { user: { id: owner.id, email: owner.email, claims: {} }, headers: state.headers };
+    return { user: { id: owner.id, email: owner.email, claims: {} }, headers: responseHeaders };
   } catch (error) {
     const failure = error instanceof AuthError ? error : new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.');
     if (failure.status === 403 && pageNavigation(request)) return appendAuthHeaders(new Response(authPage('Acesso ao WaPilot', failure.message, browserSessionScripts(env, 'message')), { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Referrer-Policy': 'no-referrer' } }), responseHeaders);

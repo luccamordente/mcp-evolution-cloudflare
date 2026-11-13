@@ -10,11 +10,11 @@ O protocolo publicado é **MCP 2026-07-28**, com transporte Streamable HTTP stat
 
 - Worker com Hono, TypeScript, D1 e KV; publicação de MCP Events e da migração final depende de autorização separada.
 - OAuth Provider oficial `@cloudflare/workers-oauth-provider` 1.2.3, discovery, CIMD/DCR compatível, Authorization Code, PKCE S256, refresh e revogação.
-- Cloudflare Access com One-time PIN e allowlist de `luccamordente@gmail.com` e `heitorsalazar@gmail.com` em `/authorize`, `/connections` e `/api`.
+- Login incorporado Clerk em pt-BR para navegador, por convite e ativação administrativa. D1 mantém identidade, estado de acesso e propriedade das conexões; o OAuth do MCP continua independente. O corte externo depende dos [gates operacionais](docs/CLERK-OPERATIONS.md).
 - Tokens das instâncias protegidos por AES-GCM e resolvidos apenas por UUID interno do usuário nas ferramentas de conexão; `list_connections` lista somente o cadastro do usuário.
 - Ferramentas de status, contatos, grupos, mensagens retidas no provedor, leitura integral, texto, resposta, encaminhamento e mídia.
 - Webhook por conexão com segredo opaco e seleção de mensagens live para MCP Events no HTTP. D1 guarda somente prévias pendentes por até uma hora e metadados operacionais com prazo; não mantém arquivo geral nem cache de envios.
-- Testes unitários locais e dry-run do Wrangler.
+- Testes HTTP com Worker real em workerd, D1/KV locais e Clerk/serviços externos simulados, além de dry-run do Wrangler.
 
 ## Limite do Evolution Go
 
@@ -38,7 +38,9 @@ npm run dev:local
 
 Depois abra `http://localhost:8787/connections`. O comando aplica as migrations locais e cria `.dev.vars` somente com segredos de exemplo. O backend Evolution Go local é opcional; sem um mock ou uma instância de desenvolvimento em `127.0.0.1:8789`, a tela abre, mas o provisionamento de uma conexão não pode ser concluído.
 
-Configure IDs de bindings em `wrangler.jsonc` e segredos com `wrangler secret put`. Nunca armazene tokens em `.env`, URLs ou respostas MCP. Veja [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/TOOLS.md](docs/TOOLS.md) e [docs/DEPLOY.md](docs/DEPLOY.md).
+Configure IDs de bindings em `wrangler.jsonc` e segredos de produção com `wrangler secret put`, somente no escopo autorizado. Credenciais de desenvolvimento ficam em arquivos locais ignorados; tokens não entram em commits, URLs ou respostas MCP. A configuração Clerk usa `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` e, opcionalmente, `CLERK_JWT_KEY` da instância correspondente ao D1. O perfil local sintético e o stdio continuam independentes desse login.
+
+O [procedimento de identidade](docs/CLERK-OPERATIONS.md) descreve vínculo inicial, convites, desativação D1-first, revogação paginada e retorno seguro. O entrypoint separado de manutenção não integra o Worker publicado, não tem API pública e seu exemplo usa recursos locais. Configuração real, convites/e-mails, sessão por mais de 60 segundos e testes móveis permanecem gates antes do corte. Veja também [arquitetura](docs/ARCHITECTURE.md), [ferramentas](docs/TOOLS.md) e [deploy](docs/DEPLOY.md).
 
 ## Referências e atribuições
 

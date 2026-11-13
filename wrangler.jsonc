@@ -14,7 +14,7 @@
   ],
   "workers_dev": true,
   "ai": { "binding": "AI" },
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "redact_query_string": true },
   "containers": [{
     "name": "wapilot-callback-sender",
     "class_name": "CallbackSender",

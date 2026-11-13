@@ -9,7 +9,7 @@ import { getPlatformProxy, type PlatformProxy } from 'wrangler';
 import { serveStdio, StdioServerTransport, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { createMcpServer, mcpBodyLimit } from '../lib/mcp';
 import { EvolutionGoClient } from '../lib/evolution';
-import { createConnection, ensureUser, getConnection, listConnections, revealConnectionToken } from '../lib/db';
+import { bootstrapLocalUser, createConnection, getConnection, listConnections, revealConnectionToken } from '../lib/db';
 import type { Env } from '../types';
 import { cleanupSendOperations } from '../lib/send-idempotency';
 
@@ -96,7 +96,7 @@ try {
   const metadata = JSON.stringify({ baseUrl: url.href, instanceId });
   const previousMetadata = await optionalFile(metadataPath);
   if ((previousMetadata !== undefined && previousMetadata !== metadata) || (existing?.count && previousMetadata === undefined)) throw new SetupError('A configuração diverge do cadastro local. Use uma persistência separada para outra instância.');
-  const user = await ensureUser(db, identity);
+  const user = await bootstrapLocalUser(db, identity);
   const connections = await listConnections(db, user.id);
   if (connections.length) {
     if (connections.length !== 1 || connections[0].instanceId !== instanceId || !connections[0].isDefault) throw new SetupError('O cadastro local não corresponde à conexão padrão esperada.');

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
-import { createConnection, ensureUser } from '../src/lib/db';
+import { bootstrapLocalUser, createConnection, ensureUser } from '../src/lib/db';
 import { createTestD1 } from './helpers/local-d1';
 import type { Env } from '../src/types';
 
@@ -27,7 +27,7 @@ async function rpc(method: string, params: Record<string, unknown> = {}, scopes 
 
 beforeEach(async () => {
   local = await createTestD1();
-  const owner = await ensureUser(local.db, principal);
+  const owner = await bootstrapLocalUser(local.db, principal);
   connectionId = (await createConnection(local.db, key, { userId: owner.id, friendlyName: 'Acceptance', instanceId: 'instance', token: 'instance-token' })).id;
   env = { DB: local.db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: 'https://provider.invalid', ENVIRONMENT: 'local' };
 });

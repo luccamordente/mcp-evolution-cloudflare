@@ -1,6 +1,8 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { AuthenticatedUser, Env } from '../types';
 import type { AuthInfo } from '@modelcontextprotocol/server';
+import { AuthError } from './auth-error';
+export { AuthError } from './auth-error';
 
 function bearer(request: Request): string | null {
   const value = request.headers.get('authorization');
@@ -71,10 +73,6 @@ async function verifyAccessJwt(token: string, env: Env): Promise<JWTPayload> {
   } catch (error) {
     throw new AuthError(401, 'Invalid Cloudflare Access token', error instanceof Error ? error.message : undefined);
   }
-}
-
-export class AuthError extends Error {
-  constructor(public readonly status: number, message: string, public readonly detail?: unknown) { super(message); this.name = 'AuthError'; }
 }
 
 export function authResponse(error: AuthError): Response {

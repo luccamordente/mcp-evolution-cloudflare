@@ -1,5 +1,6 @@
 import {
   AuthorizationError,
+  OAuthError,
   OAuthProvider,
   getOAuthApi,
   insufficientScope,
@@ -14,6 +15,7 @@ import { serveMcpHttp } from './mcp-http';
 import { logOAuthError } from './oauth-diagnostics';
 import { registerMcpEvents } from './mcp-events';
 import { WAPILOT_LOGO_SVG } from '../ui/wapilot-logo';
+import { bootstrapLocalUser, ensureUser } from './db';
 
 const scopesSupported = ['mcp:read', 'mcp:write', 'offline_access'];
 
@@ -30,14 +32,21 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
       async fetch(request, env, ctx) {
         const props = (ctx as ExecutionContext & { props?: { user?: AuthenticatedUser } }).props;
         const user = props?.user;
-        if (!user) return Response.json({ error: 'OAuth user context missing' }, { status: 500 });
+        if (!user || typeof user.email !== 'string') return Response.json({ error: 'Esta autorização não permite acesso ao WaPilot.' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
         const auth = (ctx as ExecutionContext & { auth?: OAuthResourceAuth }).auth;
+        let server: Awaited<ReturnType<typeof createMcpServer>>;
+        try {
+          if (!auth || auth.userId !== encodeURIComponent(user.email)) throw new AuthError(403, 'Esta autorização não permite acesso ao WaPilot.');
+          server = await createMcpServer(env, user);
+        } catch (error) {
+          const status = error instanceof AuthError ? error.status : 503;
+          return Response.json({ error: status === 403 ? 'Esta conta não tem acesso ao WaPilot.' : 'Não foi possível verificar o acesso ao WaPilot.' }, { status, headers: { 'Cache-Control': 'no-store' } });
+        }
         // Step-up: a send tool called with a read-only token gets a standard 403
         // insufficient_scope challenge naming mcp:write, so clients can re-authorize.
         if (auth && !auth.scope.includes(WRITE_SCOPE) && request.method === 'POST' && await callsWriteTool(request)) {
           return insufficientScope(auth as unknown as OAuthResourceAuth, ['mcp:read', WRITE_SCOPE], 'Sending WhatsApp messages requires the mcp:write scope.');
         }
-        const server = await createMcpServer(env, user);
         if (auth) registerMcpEvents(server, env, user, auth, getOAuthApi(oauthOptions(resourceBaseUrl), env));
         return serveMcpHttp(request, server, mcpBodyLimit(env), auth ? {
           authInfo: {
@@ -57,6 +66,16 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
     },
     authorizeEndpoint: '/authorize',
     tokenEndpoint: '/oauth/token',
+    async tokenExchangeCallback({ env, userId, props }) {
+      try {
+        const user = props?.user;
+        if (!user || typeof user.email !== 'string' || userId !== encodeURIComponent(user.email)) throw new AuthError(403, 'Invalid identity');
+        await ensureUser(env.DB, user);
+      } catch (error) {
+        if (error instanceof AuthError) throw new OAuthError('invalid_grant', { description: 'Esta conta não tem acesso ao WaPilot.' });
+        throw new OAuthError('temporarily_unavailable', { description: 'Não foi possível verificar o acesso ao WaPilot.', statusCode: 503 });
+      }
+    },
     clientRegistrationEndpoint: '/oauth/register',
     onError: logOAuthError,
     scopesSupported,
@@ -84,8 +103,11 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
   let user: AuthenticatedUser;
   try {
     user = await authenticateAccessRequest(request, env);
+    if (env.ENVIRONMENT === 'local') await bootstrapLocalUser(env.DB, user);
+    const owner = await ensureUser(env.DB, user);
+    user = { id: owner.id, email: owner.email, claims: {} };
   } catch (error) {
-    const authError = error instanceof AuthError ? error : new AuthError(500, 'Access authentication failed');
+    const authError = error instanceof AuthError ? error : new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.');
     // Access should protect this route and present the PIN screen. Returning
     // JSON here prevents an HTML login page from being mistaken for MCP data.
     return Response.json({ error: authError.message }, { status: authError.status, headers: { 'Cache-Control': 'no-store' } });

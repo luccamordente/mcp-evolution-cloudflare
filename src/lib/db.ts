@@ -1,12 +1,17 @@
 import type { AuthenticatedUser, ConnectionRecord, ConnectionSummary } from '../types';
 import { decryptToken, encryptToken } from './crypto';
+import { AuthError } from './auth-error';
 
 export async function ensureUser(db: D1Database, user: AuthenticatedUser): Promise<{ id: string; email: string }> {
-  const existing = await db.prepare('SELECT id, email FROM users WHERE email = ?1').bind(user.email).first<{ id: string; email: string }>();
-  if (existing) return existing;
-  const id = crypto.randomUUID();
-  await db.prepare('INSERT INTO users (id, email, status) VALUES (?1, ?2, \'active\')').bind(id, user.email).run();
-  return { id, email: user.email };
+  const existing = await db.prepare("SELECT id, email FROM users WHERE email = ?1 AND status = 'active'").bind(user.email).first<{ id: string; email: string }>();
+  if (!existing) throw new AuthError(403, 'Esta conta não tem acesso ao WaPilot.');
+  return existing;
+}
+
+/** Explicit bootstrap for isolated development databases and test fixtures. */
+export async function bootstrapLocalUser(db: D1Database, user: AuthenticatedUser): Promise<{ id: string; email: string }> {
+  await db.prepare("INSERT INTO users (id, email, status) VALUES (?1, ?2, 'active') ON CONFLICT(email) DO NOTHING").bind(crypto.randomUUID(), user.email).run();
+  return ensureUser(db, user);
 }
 
 export async function listConnections(db: D1Database, userId: string): Promise<ConnectionSummary[]> {

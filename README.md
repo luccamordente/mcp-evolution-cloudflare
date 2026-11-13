@@ -12,13 +12,13 @@ O protocolo publicado é **MCP 2026-07-28**, com transporte Streamable HTTP stat
 - OAuth Provider oficial `@cloudflare/workers-oauth-provider` 1.2.3, discovery, CIMD/DCR compatível, Authorization Code, PKCE S256, refresh e revogação.
 - Login incorporado Clerk em pt-BR para navegador, por convite e ativação administrativa. D1 mantém identidade, estado de acesso e propriedade das conexões; o OAuth do MCP continua independente. O corte externo depende dos [gates operacionais](docs/CLERK-OPERATIONS.md).
 - Tokens das instâncias protegidos por AES-GCM e resolvidos apenas por UUID interno do usuário nas ferramentas de conexão; `list_connections` lista somente o cadastro do usuário.
-- Ferramentas de status, contatos, grupos, mensagens retidas no provedor, leitura integral, texto, resposta, encaminhamento e mídia.
+- Ferramentas de status, contatos, grupos, mensagens retidas e leitura integral. Uma única ferramenta `send_message` cobre as variantes de envio, respostas citadas, encaminhamento e Status; veja [o contrato e a matriz de suporte](docs/SEND-MESSAGE.md).
 - Webhook por conexão com segredo opaco e seleção de mensagens live para MCP Events no HTTP. D1 guarda somente prévias pendentes por até uma hora e metadados operacionais com prazo; não mantém arquivo geral nem cache de envios.
-- Testes HTTP com Worker real em workerd, D1/KV locais e Clerk/serviços externos simulados, além de dry-run do Wrangler.
+- Testes HTTP com Worker real em workerd, D1/KV locais e Clerk/serviços externos simulados, aceitação conectada com os handlers Go e dry-run do Wrangler.
 
 ## Limite do Evolution Go
 
-O contrato usa o header `apikey` e as rotas `/instance/status`, `/user/contacts`, `/group/list`, `/message/search`, `/send/text` e `/send/media`. `list_messages` consulta mensagens persistidas diretamente na API e depende de `DATABASE_SAVE_MESSAGES=true`; o fork não possui endpoint de listagem de chats. Listagem e encaminhamento usam somente mensagens retidas no provedor; disponibilidade futura não é garantida. A migration `0009_drop_legacy_message_storage.sql` remove conteúdo legado sem copiá-lo.
+O contrato usa o header `apikey` e as rotas de instância, contatos, grupos, histórico e envio descritas em [SEND-MESSAGE.md](docs/SEND-MESSAGE.md#inventário-do-provedor-e-suporte-futuro). `list_messages` consulta mensagens persistidas diretamente na API e depende de `DATABASE_SAVE_MESSAGES=true`; o fork não possui endpoint de listagem de chats. Listagem e encaminhamento usam somente mensagens retidas no provedor; disponibilidade futura não é garantida. A migration `0009_drop_legacy_message_storage.sql` remove conteúdo legado sem copiá-lo. A migration `0010_unified_send_fence.sql` protege a troca das quatro ferramentas antigas pela operação `send_message` contra reutilização de chaves ativas.
 
 O estado publicado precisa de nova leitura antes de qualquer operação. Os testes desta transição são locais e sintéticos; não comprovam egress na Cloudflare, execução de agente na OpenAI ou disponibilidade de mensagens reais. Consulte [a ordem de publicação e homologação](docs/DEPLOY.md#publicação-futura-da-transição-de-mensagens).
 
@@ -27,6 +27,7 @@ O estado publicado precisa de nova leitura antes de qualquer operação. Os test
 ```sh
 npm install
 npm run check
+npm run test:acceptance:send
 npx wrangler deploy --dry-run
 ```
 

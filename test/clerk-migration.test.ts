@@ -32,7 +32,7 @@ it('lists and revokes legacy grants through Clerk without changing connection ow
     const foreign = await fixture.rpc(other.accessToken, 'tools/call', { name: 'connection_status', arguments: { connectionId: legacy.connections[0] } }, { 'Mcp-Name': 'connection_status' });
     expect(foreign.body.result.isError).toBe(true);
     expect(statusReads).toBe(reads);
-    const readOnly = await fixture.rpc(legacy.accessToken, 'tools/call', { name: 'send_text', arguments: { to: '5511999999999', text: 'must not send' } }, { 'Mcp-Name': 'send_text' });
+    const readOnly = await fixture.rpc(legacy.accessToken, 'tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text: 'must not send' } } }, { 'Mcp-Name': 'send_message' });
     expect(readOnly.response.status).toBe(403);
     const revoke = await fixture.fetch('/connections/authorizations/' + legacy.grantId + '/revoke', { method: 'POST', headers: { ...headers, cookie: a.cookie + '; ' + csrf } });
     expect(revoke.status).toBe(200);

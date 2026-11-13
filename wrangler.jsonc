@@ -47,6 +47,7 @@
     "IMAGE_STORAGE_ORIGINS": "https://storage.neurau.com.br",
     "AUDIO_STORAGE_ORIGINS": "https://storage.neurau.com.br",
     "DOCUMENT_STORAGE_ORIGINS": "https://storage.neurau.com.br",
+    "SEND_MEDIA_ORIGINS": "https://storage.neurau.com.br",
     "MCP_PUBLIC_URL": "https://app.wapilot.com.br",
     "MAX_MEDIA_BYTES": "8388608",
     "ENVIRONMENT": "production"

@@ -19,6 +19,7 @@ export interface Env {
   ADMIN_EMAILS?: string;
   ENVIRONMENT?: string;
   MAX_MEDIA_BYTES?: string;
+  SEND_MEDIA_ORIGINS?: string;
   /** Comma-separated, exact HTTPS storage origins approved for gallery images. */
   IMAGE_STORAGE_ORIGINS?: string;
   /** Comma-separated, exact HTTPS storage origins approved for audio transcription. */

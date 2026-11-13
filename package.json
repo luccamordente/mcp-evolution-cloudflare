@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p ui/tsconfig.json",
     "test": "vitest run",
     "test:sender-container": "node --test test/sender-container.container.mjs",
+    "test:acceptance:send": "node scripts/send-acceptance-backend.mjs",
     "test:acceptance:gif": "node scripts/acceptance-gif.mjs",
     "build:auth": "node scripts/build-auth.mjs",
     "check:auth": "node scripts/build-auth.mjs --check",

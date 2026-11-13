@@ -43,7 +43,7 @@ it('logs protocol diagnostics without tokens or request payloads', async () => {
 });
 
 it('applies OAuth write scope checks to legacy calls', async () => {
-  const result = await fixture.fetch('/mcp',{method:'POST',headers:{authorization:`Bearer ${account.accessToken}`,'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'send_text',arguments:{to:'5511999999999',text:'must not send'}}})});
+  const result = await fixture.fetch('/mcp',{method:'POST',headers:{authorization:`Bearer ${account.accessToken}`,'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{ name: 'send_message', arguments: { message: { kind: 'text', to:'5511999999999', text:'must not send' } } }})});
   expect(result.status).toBe(403);
   expect(result.headers.get('www-authenticate')).toContain('insufficient_scope');
 });

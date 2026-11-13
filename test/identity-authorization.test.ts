@@ -11,7 +11,7 @@ it('blocks an already issued MCP token as soon as the D1 account is disabled', a
   const account = await fixture.issue({ email: 'disabled@example.test', scope: 'mcp:read mcp:write', legacy: '1' });
   expect((await fixture.rpc(account.accessToken, 'tools/list')).response.status).toBe(200);
   await fixture.db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(account.userId).run();
-  for (const [method, params] of [['tools/list', {}], ['tools/call', { name: 'list_contacts', arguments: {} }], ['tools/call', { name: 'send_text', arguments: { to: '5511999999999', text: 'Must not send' } }]] as const) {
+  for (const [method, params] of [['tools/list', {}], ['tools/call', { name: 'search_contacts', arguments: { query: 'Synthetic' } }], ['tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text: 'Must not send' } } }]] as const) {
     const result = await fixture.rpc(account.accessToken, method, params);
     expect(result.response.status).toBe(403);
     expect(JSON.stringify(result.body)).not.toContain(account.accessToken);
@@ -57,8 +57,8 @@ it('fails temporarily without destroying an active grant when D1 is unavailable'
 });
 
 it('adds unique Clerk links without rewriting existing identities, connection defaults or credentials', async () => {
-  const migration = await readFile('migrations/0010_clerk_identity.sql', 'utf8');
-  const legacy = await eventRuntime(async () => { throw new Error('Unauthorized external action'); }, '0009_drop_legacy_message_storage.sql');
+  const migration = await readFile('migrations/0011_clerk_identity.sql', 'utf8');
+  const legacy = await eventRuntime(async () => { throw new Error('Unauthorized external action'); }, '0010_unified_send_fence.sql');
   try {
     const account = await legacy.issue({ email: 'legacy@example.test' });
     const before = await legacy.db.prepare('SELECT * FROM whatsapp_connections WHERE user_id = ? ORDER BY id').bind(account.userId).all();

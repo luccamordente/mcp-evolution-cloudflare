@@ -64,6 +64,120 @@ A identidade do bearer chega ao servidor como `ctx.props.user`. As ferramentas q
 
 A busca depende da retenção de mensagens no Evolution Go, incluindo `DATABASE_SAVE_MESSAGES=true`; não garante todo o histórico do WhatsApp, e um resultado vazio é inconclusivo. O fork não oferece listagem de chats. Ajustes de contrato devem ficar concentrados em `src/lib/evolution.ts`, com testes mockados das rotas reais. Para o filtro de conversa, `test/mcp-messages.test.ts` exercita o caminho MCP até o cliente Evolution real com D1 e HTTP simulados; testes de schema e rotas complementam validação e serialização. Esses testes verificam o contrato emitido, sem comprovar a versão ou a retenção da instância de produção.
 
+## Clerk development em HTTPS de loopback
+
+`npm run dev:clerk` usa `src/worker.ts` com autenticação Clerk real, em
+`https://localhost:8795`. O perfil independente `wrangler.clerk-test.jsonc` usa
+`ENVIRONMENT=clerk-test`: login nunca cria, vincula ou ativa uma conta D1.
+Não herda rotas de produção, AI, filas, Cron, serviços, DO ou Containers; Docker
+não é necessário. D1/KV têm IDs sintéticos e `remote:false`, e o runtime e o proxy
+são iniciados com bindings remotos desativados. O mock em `127.0.0.1:8794` aceita
+somente leitura de estado de duas conexões sintéticas; não provisiona nem envia
+mensagens. Todas as outras operações do mock são recusadas.
+
+Com autorização para a instância Clerk development e para os destinatários de
+teste, copie `.env.clerk.example` para `.env.clerk`, com permissão `0600`, e
+preencha as duas chaves `pk_test_`/`sk_test_` e `CLERK_TEST_ADMIN_EMAIL`. Esse é o
+único arquivo de entrada; o comando não procura credenciais no ambiente do
+processo, em `.dev.vars`, em `.env.stdio` ou em outra worktree. Não use chaves live.
+Arquivo ausente/inválido produz orientação sem imprimir os valores.
+
+```sh
+cp .env.clerk.example .env.clerk
+chmod 600 .env.clerk
+# Preencha o arquivo privado antes do próximo comando.
+npm run dev:clerk -- --prepare
+```
+
+`--prepare` aplica migrations apenas no D1 local e cria as fixtures
+`clerk-test-admin` (e-mail configurado) e `clerk-test-other`, ambas `disabled`, sem
+vínculo Clerk, cada uma com uma conexão fictícia. Os seeds operacionais legados
+sem vínculo são removidos somente desse D1 de teste. Reinícios preservam os IDs,
+cifras, vínculos e estados deliberadamente alterados. A lista operacional de
+teste contém somente o e-mail configurado; não herda a lista de produção.
+
+Persistência, configuração gerada e segredos próprios ficam exclusivamente em
+`.wrangler/clerk-test`: `bindings`, `wrangler.json`, `runtime.env` e
+`secrets.json`. Os arquivos privados têm permissão `0600`; chave de cifra e
+segredo de consentimento são gerados localmente e preservados juntos ao banco.
+Ausência dos segredos com persistência existente interrompe a preparação. Mudar
+o e-mail exige uma base de teste nova. `.wrangler/local-dev`, `.wrangler/stdio`
+e os ambientes existentes não são sobrescritos.
+
+Prepare um certificado confiável pelo navegador e pelo cliente OAuth. O dono
+da máquina deve instalar e confiar a CA de desenvolvimento; o comando WaPilot
+não instala certificados nem altera a trust store. No macOS, seguindo o
+[mkcert oficial](https://github.com/FiloSottile/mkcert#installation):
+
+```sh
+brew install mkcert
+mkcert -install
+mkdir -p .wrangler/clerk-test/tls
+mkcert -key-file .wrangler/clerk-test/tls/localhost-key.pem -cert-file .wrangler/clerk-test/tls/localhost.pem localhost 127.0.0.1 ::1
+chmod 600 .wrangler/clerk-test/tls/localhost-key.pem
+export NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem"
+npm run dev:clerk
+```
+
+Mantenha a chave privada da CA fora do projeto. Firefox pode exigir `nss` e
+reinicialização conforme o guia mkcert. O cliente OAuth Node precisa receber
+`NODE_EXTRA_CA_CERTS` ao iniciar; outros clientes precisam confiar a mesma CA.
+Nenhuma etapa exige desativar validação TLS. Use a origem exata
+`https://localhost:8795`, inclusive no navegador: `127.0.0.1` não é uma origem
+autorizada alternativa. As portas 8794 e 8795 precisam estar livres.
+
+O Wrangler fixado 4.150.0 recebe protocolo, porta, certificado e
+`dev.host=localhost:8795` explícitos. A
+[configuração oficial](https://developers.cloudflare.com/workers/wrangler/configuration/#local-development-settings)
+descreve a inferência de host a partir de rotas; esse perfil elimina as rotas e
+fixa o host. O self-check faz uma requisição HTTPS com TLS verificado a
+`/connections/data` e exige `401`: o verificador publicado responde `503` se
+`request.url` divergir da origem configurada. Falha no certificado/origem encerra
+Worker e mock com mensagem sanitizada; não há endpoint público de diagnóstico.
+
+A primeira identidade é preparada fora dos endpoints WaPilot, somente após a
+autorização do #62: localizar ou convidar diretamente no Clerk development,
+aceitar/verificar no Account Portal e conferir por read-back o ID, e-mail
+primário verificado e ausência de banimento/bloqueio. Antes disso, confira as
+restrições de conta e o alvo de configuração em
+[CLERK-OPERATIONS.md](docs/CLERK-OPERATIONS.md). Prepare um SQL privado em
+`.wrangler/clerk-test/link-admin.sql`, substituindo e escapando os placeholders
+com os valores conferidos:
+
+```sql
+UPDATE users SET clerk_user_id = 'VERIFIED_DEVELOPMENT_CLERK_ID',
+  status = 'active', updated_at = datetime('now')
+WHERE id = 'clerk-test-admin' AND email = 'APPROVED_TEST_EMAIL'
+  AND status = 'disabled' AND clerk_user_id IS NULL AND invite_pending_at IS NULL;
+SELECT id, email, status, clerk_user_id FROM users WHERE id = 'clerk-test-admin';
+```
+
+Execute apenas contra a configuração de teste já gerada:
+
+```sh
+npx wrangler d1 execute DB --local --config .wrangler/clerk-test/wrangler.json --env-file .wrangler/clerk-test/runtime.env --persist-to .wrangler/clerk-test/bindings --file .wrangler/clerk-test/link-admin.sql
+```
+
+Uma alteração é esperada; zero mudanças ou conflito exige reconciliação, sem
+sobrescrever vínculo. Login deve mostrar somente a conexão dessa fixture.
+Depois do primeiro administrador, os convites de outro destinatário aprovado
+usam os endpoints próprios e permanecem pendentes até ativação explícita.
+Um cliente OAuth local deve registrar retorno acessível, completar consentimento
+com PKCE e chamar `list_connections`; loopback não comprova conector remoto.
+
+Ctrl+C encerra Worker e mock. Depois de parar, `rm -rf .wrangler/clerk-test`
+limpa somente esse ambiente, incluindo fixtures, grants, chaves e certificado;
+remova `.env.clerk` separadamente quando não for mais necessário. Não remova a CA
+compartilhada por outros projetos como parte dessa limpeza.
+
+`test/clerk-local.test.ts` requer OpenSSL e usa uma CA temporária explicitamente
+confiada pelo cliente Node, sem modificar a trust store. Testa a execução HTTPS
+real com um guard de origem exclusivo da fixture, assets/login/API/OAuth,
+isolamento/configuração e cookies Clerk assinados com Backend/JWKS simulados.
+A matriz existente em `test/clerk-browser.test.ts` complementa as negativas.
+Essas provas não enviam e-mails nem homologam Clerk real ou confiança do
+navegador; a aceitação externa permanece no #62.
+
 ## Convites administrativos em desenvolvimento
 
 As rotas próprias são `POST /admin/invitations` com `{ email }` e `POST /admin/invitations/:userId/activate` com `{ clerkUserId }`. Ambas exigem sessão de administrador ativo e CSRF; não há gestão de convites no painel de leitura. Conta convidada permanece `disabled` até o read-back do ID Clerk e do e-mail primário verificado. Uma repetição não envia outro e-mail nem reativa desativados. Consulte o contrato em [ARCHITECTURE.md](docs/ARCHITECTURE.md#convites-e-ativação-administrativa) e a reconciliação em [DEPLOY.md](docs/DEPLOY.md#convites-e-ativação-administrativa).

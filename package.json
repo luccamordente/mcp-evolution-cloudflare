@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:local": "node scripts/dev-local.mjs",
+    "dev:clerk": "npm run build:gallery && npm run build:auth && node scripts/dev-clerk.mjs",
     "dev:stdio": "node scripts/dev-stdio.mjs",
     "prototype:connections": "python3 -m http.server 4173 --directory prototype",
     "deploy": "wrangler deploy",

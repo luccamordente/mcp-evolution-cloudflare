@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
-import { createConnection, ensureUser } from '../src/lib/db';
+import { bootstrapLocalUser, createConnection } from '../src/lib/db';
 import { createTestD1 } from './helpers/local-d1';
 import type { Env } from '../src/types';
 
@@ -62,7 +62,7 @@ const chat = { to: '5511999999999', replyTo: { messageId: 'SOURCE' } };
 describe.runIf(Boolean(backendUrl))('MCP to real Go native-message acceptance', () => {
   beforeAll(async () => {
     local = await createTestD1();
-    const owner = await ensureUser(local.db, principal);
+    const owner = await bootstrapLocalUser(local.db, principal);
     const key = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     connectionId = (await createConnection(local.db, key, { userId: owner.id, friendlyName: 'Native acceptance', instanceId: 'instance', token: 'instance-token' })).id;
     env = { DB: local.db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: backendUrl ?? '', ENVIRONMENT: 'local', SEND_MEDIA_ORIGINS: 'https://media.example.test' };

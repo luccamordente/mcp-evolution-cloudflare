@@ -1,16 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getOAuthApi } from '@cloudflare/workers-oauth-provider';
 import { createOAuthProvider, oauthOptions } from '../src/lib/oauth';
 import type { Env } from '../src/types';
+import { createTestD1 } from './helpers/local-d1';
 
 vi.mock('cloudflare:workers', () => ({ WorkerEntrypoint: class {} }));
 
 const base = 'https://mcp.invalid';
 const allScopes = ['mcp:read', 'mcp:write', 'offline_access'];
+const databases: Awaited<ReturnType<typeof createTestD1>>[] = [];
+afterEach(async () => { await Promise.all(databases.splice(0).map(database => database.dispose())); });
 
 async function setup() {
+  const database = await createTestD1();
+  databases.push(database);
   const values = new Map<string, string>();
   const env = {
+    DB: database.db,
     ENVIRONMENT: 'local',
     LOCAL_DEV_USER_EMAIL: 'dev@example.test',
     CONSENT_SECRET: 'test-consent-secret-with-at-least-32-characters',

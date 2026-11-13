@@ -24,9 +24,25 @@ Em Node 24.13.0, `npx vitest run test/clerk-browser.test.ts test/admin-invitatio
 
 Esses testes não validam a rejeição do cadastro não convidado ou de tickets inválidos no provedor real, tampouco recebimento/aceitação incorporada, renovação após 60 segundos, reabertura de aba, saída, acessibilidade ou aparência em desktop e viewport móvel. A suite de convites testa reconciliação local de estados expirado/revogado, não o fluxo de aceitação no Clerk.
 
+## Validação integrada
+
+Em `9d35bc7`, `npm run check` passou: assets gerados, tipos, **53 arquivos e 776 testes aprovados**, com 1 arquivo e 12 testes conectados pulados; duração de 105,85 segundos. O primeiro check encontrou somente o limite padrão de 5 segundos no teste que executa duas preparações/migrations reais. O commit `71c0091` definiu 30 segundos apenas nesse teste, preservando as asserções; a suíte focada e o check completo seguinte passaram.
+
+`npx wrangler deploy --dry-run --env '' --containers-rollout none` passou em `228e490`, sem publicação. As alterações posteriores foram documentais ou no prazo do teste; o código/configuração do Worker empacotado não mudou. A validação do artefato Access separado está em [access-return-2026-11-13.md](qa/access-return-2026-11-13.md).
+
+## Standards
+
+Revisão por GPT Sol com esforço xhigh, comparando a integração com `9135510`: nenhuma violação documentada ou heurística acionável. Foram conferidos chamadores, helpers, teste novo, configuração, documentação e isolamento; a árvore do runtime publicado permaneceu inalterada.
+
+## Spec
+
+Revisão independente por GPT Sol com esforço xhigh: nenhum defeito local acionável nem escopo extra. A #60 atende à preparação local. A #61 permanece aberta pelos gates de publicação, políticas e automação; a #62 permanece aberta pela configuração e homologação com Clerk real. A ancestralidade do retorno alternativo não substituiu o runtime Clerk.
+
+Resultado das revisões: 0 achados acionáveis em Standards e 0 em Spec; as pendências operacionais de #61 e #62 impedem declarar a spec homologada.
+
 ## Pendente para concluir
 
-1. Repetir as verificações na candidata final. Confirmar as autorizações para alterar a instância development, os dois destinatários de teste, envio de e-mails e o arquivo privado de credenciais de desenvolvimento. Não usar credenciais de produção.
+1. Confirmar as autorizações para alterar a instância development, os dois destinatários de teste, envio de e-mails e o arquivo privado de credenciais de desenvolvimento. Não usar credenciais de produção.
 2. Após autorização, reler configuração e contagem de usuários, aplicar o alvo e verificar no provedor as permissões de e-mail e exclusão, inclusive tratamento explícito de usuários existentes se houver. Configurar e conferir paths e templates em pt-BR, inclusive o assunto do convite; repetir o read-back.
 3. Preparar certificado HTTPS de loopback confiável pelo navegador e cliente OAuth, com a operação de confiança realizada pelo dono da máquina; sem desativar validação TLS. Usar D1/KV locais isolados e somente fixtures. A prova de loopback não comprova um conector remoto.
 4. Resolver o primeiro administrador por identidade existente ou convite administrativo direto e Account Portal, verificar ID, e-mail primário e estado, e vincular somente a fixture local. Com outro destinatário aprovado, executar convite, aceitação incorporada, pendência e ativação pelo WaPilot.

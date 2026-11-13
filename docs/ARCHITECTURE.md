@@ -62,7 +62,7 @@ A resposta JSON:API descreve a mídia efetivamente enviada em `attributes.encodi
 
 Mensagens retidas já preservam `meta.flags` como `Message.flags`. O encaminhamento envia `gifPlayback=true` somente para MP4 marcado pelo bit 64 ou pelos metadados retidos de GIF. O resolvedor consulta o histórico do provedor e tenta `POST /message/status` quando necessário; não recupera conteúdo de um cache local. O token continua restrito à conexão resolvida pelo usuário. Vídeos comuns não recebem a opção de loop. A galeria e a leitura visual de imagens conservam seus contratos existentes.
 
-Os testes de aceitação MCP usam o handler HTTP, o catálogo e o cliente JSON:API reais com D1 e backend simulados. Os testes Go exercitam o handler, a conversão real e a construção da mensagem com o transporte WhatsApp substituído. O comando `npm run test:acceptance:gif` reúne as duas etapas e exige o checkout canônico do backend. Esse resultado valida o contrato e a mídia produzida, sem comprovar entrega ou reprodução em dispositivos reais.
+Os testes de aceitação MCP usam o handler HTTP, o catálogo e o cliente JSON:API reais com D1 e backend simulados. Os testes Go exercitam o handler, a conversão real e a construção da mensagem com o transporte WhatsApp substituído. O comando `npm run test:acceptance:gif` reúne as duas etapas e depende das fontes locais do backend para compilar a fixture, conforme `docs/GIF-ACCEPTANCE.md`. Esse resultado valida o contrato e a mídia produzida, sem comprovar entrega ou reprodução em dispositivos reais.
 
 ## Timeouts
 

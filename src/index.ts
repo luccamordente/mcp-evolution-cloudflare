@@ -2,7 +2,7 @@ import { ingestEventDeliveries } from './lib/event-deliveries';
 import { invalidateEventGrant } from './lib/mcp-events';
 import { Hono } from 'hono';
 import { authenticate, authResponse, AuthError, authenticateAccessRequest } from './lib/auth';
-import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, repointConnection, revealConnectionToken, setDefaultConnection, updateConnection, validateWebhookEvent } from './lib/db';
+import { audit, bootstrapLocalUser, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, repointConnection, revealConnectionToken, setDefaultConnection, updateConnection, validateWebhookEvent } from './lib/db';
 import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionApiError } from './lib/evolution';
 import { avatarLookupJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone, normalizePhoneNumber } from './lib/connection-status';
 import type { ConnectionSummary, Env } from './types';
@@ -29,9 +29,12 @@ async function requireAuth(c: any): Promise<{ info: import('@modelcontextprotoco
  * /admin so both surfaces receive the same audience and session. */
 async function requireAccessUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
   try {
-    return await authenticateAccessRequest(c.req.raw, c.env);
+    const user = await authenticateAccessRequest(c.req.raw, c.env);
+    if (c.env.ENVIRONMENT === 'local') await bootstrapLocalUser(c.env.DB, user);
+    await ensureUser(c.env.DB, user);
+    return user;
   } catch (accessError) {
-    return authResponse(accessError instanceof AuthError ? accessError : new AuthError(500, 'Authentication failed'));
+    return authResponse(accessError instanceof AuthError ? accessError : new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.'));
   }
 }
 
@@ -41,8 +44,12 @@ async function requireUiAuth(c: any): Promise<import('./types').AuthenticatedUse
   // Keep bearer access useful for API clients while preferring Access for the
   // browser. The Access assertion is never accepted at /mcp.
   if (c.req.header('authorization')) {
-    try { return (await authenticate(c.req.raw, c.env)).user; } catch (oauthError) {
-      return authResponse(oauthError instanceof AuthError ? oauthError : new AuthError(500, 'Authentication failed'));
+    try {
+      const user = (await authenticate(c.req.raw, c.env)).user;
+      await ensureUser(c.env.DB, user);
+      return user;
+    } catch (oauthError) {
+      return authResponse(oauthError instanceof AuthError ? oauthError : new AuthError(503, 'Não foi possível verificar o acesso ao WaPilot.'));
     }
   }
   return access;

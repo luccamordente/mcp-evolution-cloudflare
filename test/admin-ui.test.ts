@@ -74,10 +74,10 @@ describe('admin operational page', () => {
 
   it('gives both operational administrators the same Access-only page and rejects others', async () => {
     for (const email of ['luccamordente@gmail.com', 'heitorsalazar@gmail.com']) {
-      const response = await app.request('/admin', {}, { ...env, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: email });
+      const response = await app.request('/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: email });
       expect(response.status).toBe(200);
     }
-    const outsider = await app.request('/admin', {}, { ...env, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'other@example.com' });
+    const outsider = await app.request('/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'other@example.com' });
     expect(outsider.status).toBe(403);
   });
 

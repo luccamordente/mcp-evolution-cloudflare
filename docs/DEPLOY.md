@@ -1,5 +1,11 @@
 # Deploy e configuração
 
+## Fundação de autorização para a migração Clerk
+
+Antes de retirar o Access, publique somente com autorização uma versão que exija usuário D1 `active` no navegador, no consentimento, em cada request MCP e na troca de código/refresh. A migration `0010_clerk_identity.sql` é aditiva e não associa usuários automaticamente. Confirme o inventário de IDs, conexão padrão e credenciais cifradas antes e depois, sem registrar os valores secretos. Sua aplicação remota e o vínculo com a instância Clerk correta são etapas autorizadas separadamente.
+
+O retorno deve usar o commit Access já endurecido com essa barreira, preservando as colunas e os vínculos Clerk, o KV OAuth e todas as revogações. Não restaure uma versão com autocadastro ou acesso de contas `disabled`. Uma falha D1 durante emissão/refresh responde `503 temporarily_unavailable`; não a trate como revogação de conta. A desativação explícita impede novo uso e produz `invalid_grant` no token endpoint.
+
 ## Container do sender
 
 O `wrangler.jsonc` prepara a imagem de `sender/Dockerfile` como `sender`, sob a política nativa `durable_object`, e associa `CallbackSender` ao binding interno `CALLBACK_SENDER`. O controlador escolhe `instance: "lite"` ao iniciar e todas as chamadas usam o objeto de nome fixo `shared`. Essa política não aceita `max_instances` na versão fixada do Wrangler; a escolha de uma única instância é mantida pelo código da aplicação, sem um teto financeiro prometido. O perfil `local` possui seu próprio binding e Container; o perfil `stdio` os exclui.

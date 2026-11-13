@@ -1,12 +1,12 @@
 # Homologação Clerk development — andamento da #62
 
-**Estado em 13/11/2026: perfil privado Tailscale integrado e conferido na máquina real; Clerk real ainda não homologado.** A #60 foi integrada em `228e490`; a adaptação privada foi integrada em `54026be`. A configuração development foi aplicada; o primeiro convite administrativo teve envio confirmado pelo Clerk e está pendente de aceitação. Testes simulados e verificações sem sessão não comprovam entrega, aceitação ou sessão real.
+**Estado em 13/11/2026: homologação development parcial, com sessão Clerk e OAuth/MCP reais aprovados.** A #60 foi integrada em `228e490`; o perfil Tailscale privado em `54026be`; a correção do formulário de consentimento em `4814bf3`. O primeiro administrador aceitou/verificou o convite e foi vinculado somente ao D1 local. O segundo convite, pelos endpoints WaPilot, foi enviado uma vez e permanece pendente. A #62 continua aberta pela aceitação incorporada, ativação e cenários restantes.
 
 ## Leitura do ambiente
 
 - O read-back inicial identificou a aplicação WaPilot `app_3M1uSBQzCMOfMfnraVHBpldbNhx`, instância development `ins_3M1uS6zuL7NHmAvpeezFR2uvBjV`, configuração `v1_7501b808`: cadastro público, senha e Google habilitados, e-mail mutável e paths ainda não configurados. Após autorização, o alvo `docs/clerk-development-config.json` foi aplicado e relido como `v1_ec69bf3a`: convite restrito, código por e-mail, e-mail imutável, senha e Google desligados e paths configurados.
 - No Dashboard, **Configure → User & authentication → User model → User permissions**, a autoexclusão continuou ligada após o primeiro alvo. O operador a desligou e salvou; GPT Terra confirmou ambos os switches desligados antes e depois de recarregar, por volta de 19:16 UTC. A alteração cobre usuários novos; a tela ainda mostrava zero usuários. A restrição foi concluída antes do primeiro convite.
-- Em **Configure → Customization → Emails → Authentication**, Invitation e Verification code estavam inicialmente em inglês. Após o operador fornecer a chave development, `GET /instance` confirmou a instância exata antes de qualquer escrita. Os dois templates foram traduzidos, validados pelo endpoint de prévia e salvos pela Backend API, com read-back às 19:05 UTC. Assuntos atuais: `Convite para acessar o {{app.name}}` e `{{otp_code}} é seu código de verificação`. Entrega pelo Clerk, links, variáveis obrigatórias e estilos originais foram preservados. O Account Portal aparecia ativo; aceitação e entrega real continuam sem teste.
+- Em **Configure → Customization → Emails → Authentication**, Invitation e Verification code estavam inicialmente em inglês. Após o operador fornecer a chave development, `GET /instance` confirmou a instância exata antes de qualquer escrita. Os dois templates foram traduzidos, validados pelo endpoint de prévia e salvos pela Backend API, com read-back às 19:05 UTC. Assuntos atuais: `Convite para acessar o {{app.name}}` e `{{otp_code}} é seu código de verificação`. Entrega pelo Clerk, links, variáveis obrigatórias e estilos originais foram preservados. O operador concluiu a aceitação no Account Portal e o login por código; o agente não acessou códigos nem inspecionou o conteúdo do e-mail real.
 - O schema do conector não expôs a autoexclusão (feedback `fbk_3M3lsUbmAWnUU5t3aOXEFPbQinZ`). A sessão Dashboard fornecida pelo conector é somente leitura, e suas ferramentas não cobrem essa permissão, templates ou convites (feedback `fbk_3M3rA9wSkSQReTHJl221147qr9b`). A chave fornecida permitiu atualizar os templates pela API oficial; o operador concluiu a restrição global pelo Dashboard, sem substituí-la por alterações individuais após o cadastro.
 
 ## Preparação com a chave development fornecida
@@ -19,7 +19,9 @@ As prévias sanitizadas foram conferidas por GPT Terra em 1280×800 e 390×844: 
 
 ## Bootstrap real e decisão de HTTPS privado
 
-Antes do envio, a Backend API foi novamente validada para a instância development. A busca exata e paginada encontrou zero usuários e zero convites para o administrador aprovado nos estados pending, accepted, revoked e expired. Foi emitido um único convite com notificação habilitada, sem redirect customizado e sem ignorar convites existentes. O Clerk confirmou o envio e uma nova leitura confirmou pending e destino no Account Portal. O objeto portador não foi registrado; o resumo operacional permanece apenas no estado local privado. Aceitação, e-mail primário verificado e vínculo D1 ainda estão pendentes.
+Antes do envio, a Backend API foi novamente validada para a instância development. A busca exata e paginada encontrou zero usuários e zero convites para o administrador aprovado nos estados pending, accepted, revoked e expired. Foi emitido um único convite com notificação habilitada, sem redirect customizado e sem ignorar convites existentes. O Clerk confirmou o envio e inicialmente pending no Account Portal. Esse bootstrap não oferece retorno automático à aplicação; o operador concluiu o cadastro no portal e depois entrou no WaPilot.
+
+Após a confirmação humana, o read-back encontrou uma única identidade, com e-mail primário correto/verificado, sem banimento/bloqueio, senha e autoexclusão desligadas. O estado do convite passou a accepted. Às 20:19 UTC, a atualização condicional vinculou e ativou somente `clerk-test-admin`: uma linha alterada, vínculo único, outra fixture intacta, duas conexões preservadas byte a byte e integridade referencial válida. Nenhum ID de produção ou credencial de conexão foi copiado. Identificadores pessoais e resumos operacionais permanecem apenas no estado privado local.
 
 O operador substituiu a etapa de CA local por **Tailscale Serve privado**, com hostname da própria máquina de cada desenvolvedor. Funnel público não foi autorizado. O comando descobre a origem no daemon local, obtém e valida o certificado desse hostname, mantém Worker/mock em loopback e encaminha TCP privado na porta 8443 com TLS até o Wrangler. Não confia em headers encaminhados pelo cliente. [Serve](https://tailscale.com/docs/features/tailscale-serve) atende somente a tailnet; um cliente externo permanece fora desta prova.
 
@@ -39,9 +41,31 @@ Em `54026be`, `npm run dev:clerk` iniciou com o daemon Tailscale real, sem insta
 | Configuração Serve durante a execução | Um encaminhamento TCP privado 8443; sem Funnel nessa porta; configuração persistente anterior preservada |
 | Ctrl+C | Worker/mock encerrados; nenhuma porta de trabalho restante; configuração Serve idêntica à leitura anterior, incluindo os seis serviços existentes em 443 |
 
-O perfil foi reiniciado após a prova de encerramento. A comparação de configuração e os resultados sanitizados permanecem no estado privado local; URLs de outros serviços e chaves não foram registrados no relatório. A prova ocorreu na própria máquina conectada; acesso de um segundo dispositivo e o fluxo autenticado ainda precisam de homologação.
+O perfil foi reiniciado após a prova de encerramento. A comparação de configuração e os resultados sanitizados permanecem no estado privado local; URLs de outros serviços e chaves não foram registrados no relatório. A prova ocorreu na própria máquina conectada; acesso de um segundo dispositivo ainda não foi homologado.
 
 GPT Terra conferiu a superfície deslogada no navegador Orca pela origem privada, sem exceção de certificado, em 1280×800 e 390×844. O componente Clerk real montou em `/sign-in`, com “Seu e-mail”, “Continuar” e instruções em português; não havia Google, senha ou cadastro aberto visíveis. Foco visível, Tab e Enter com campo vazio produziram a validação nativa em português. A página `/accept-invitation` sem ticket mostrou o erro esperado, sem formulário, nas duas dimensões. Não houve cortes horizontais aparentes. Os rodapés “Development mode” e “Secured by Clerk” continuam em inglês; não foram ocultados. Nenhum endereço foi preenchido ou código solicitado. Essa conferência não cobre a aceitação, sessão autenticada ou OAuth MCP.
+
+### Sessão, consentimento e MCP reais
+
+O operador concluiu o login diretamente na aba Orca, sem compartilhar o código. GPT Terra conferiu:
+
+| Cenário real | Resultado |
+| --- | --- |
+| Dashboard autenticado | Uma conexão da fixture administrativa; outra fixture ausente |
+| Mais de 60 segundos e atualização | Sessão mantida, sem loop |
+| Nova aba | Dashboard autenticado retomado |
+| Desktop, largura móvel e teclado | Seletor acessível por Enter/Escape; dados da fixture correta |
+| Consentimento | Cliente e permissões esperados em pt-BR; aprovação explícita |
+| Cookie de navegador em `/mcp`, sem bearer | `401` |
+| Saída normal | `/connections` voltou ao login; API de dados `401` |
+
+A primeira aprovação revelou um bug: `Referrer-Policy: no-referrer` no documento fazia o formulário nativo falhar na barreira de origem. Dois envios nativos sem handle reproduziram o erro; `fetch` CORS sem handle passou pela barreira. Alterar somente a política do documento para `same-origin` removeu o erro, com destino do formulário confirmado na mesma origem. Isso corresponde à regra de serialização de `Origin` do [padrão Fetch](https://fetch.spec.whatwg.org/#append-a-request-origin-header); o header recebido não foi capturado. A correção `69eb294`, integrada em `4814bf3`, muda somente a política do consentimento, preservando a exigência de origem canônica, a transação vinculada ao navegador e `no-referrer` nas páginas de login/convite. O repro nativo e a aprovação real passaram após o ajuste.
+
+O cliente OAuth local registrou callback em loopback, usou PKCE S256 e conferiu a troca do código. O verificador privado inicialmente enviou `initialize`, que pertence à era legada; o servidor respondeu `404/-32601`. Corrigido o verificador para [`server/discover`](https://modelcontextprotocol.io/specification/2026-07-28/server/discover), a revisão `2026-07-28`, `list_connections` com uma conexão administrativa, respostas JSON sem sessão de transporte, refresh e nova leitura passaram às 20:33 UTC. Bearer OAuth na API do navegador retornou `401`. Após o logout, leitura, refresh e nova leitura continuaram funcionando às 20:35 UTC, sem nova aprovação ou revogação silenciosa. Nenhum código, bearer, refresh token ou cookie foi incluído nas evidências. O teste usa cliente na máquina/tailnet; não comprova um conector externo.
+
+### Segundo convite do produto
+
+A busca exata encontrou o alias aprovado sem identidade e sem convites nos quatro estados. GPT Terra emitiu uma única chamada a `POST /admin/invitations` com sessão administrativa real e CSRF: `201`, estado pending e resposta com somente identificador local/estado. O read-back confirmou um convite pending no Clerk e a linha D1 `disabled`, sem vínculo, com pendência; as duas conexões continuavam pertencendo às fixtures originais. O endpoint usa o retorno canônico `/accept-invitation`. Aceitação incorporada, identidade verificada desse convidado, negativa enquanto pendente e ativação deliberada ainda precisam de execução. Não houve reenvio automático.
 
 ### Modern Web Guidance
 
@@ -72,28 +96,30 @@ Em `54026be`, assets e typecheck passaram. Os 14 testes focados do launcher/cóp
 
 A revisão independente Standards/Spec por GPT Sol xhigh do diff `a0096fc...54026be` não encontrou achados acionáveis. Os testes novos cobrem hostname próprio, TLS válido/inválido, origem de URLs, conflitos/offline/HTTPS ausente, preservação de serviços, ausência de Funnel 8443 e limpeza da sessão própria.
 
-`npx wrangler deploy --dry-run --env '' --containers-rollout none` passou em `228e490`, sem publicação. As alterações posteriores alcançaram documentação, testes, setup de worktrees e o launcher/configuração local Clerk; o código/configuração do Worker empacotado não mudou. A validação do artefato Access separado está em [access-return-2026-11-13.md](qa/access-return-2026-11-13.md).
+Até `54026be`, as alterações posteriores ao dry-run de `228e490` alcançaram documentação, testes, setup e launcher/configuração local Clerk, sem mudar o bundle publicado. A correção `4814bf3` altera um header desse bundle; `npx wrangler deploy --dry-run --env '' --containers-rollout none` passou novamente nessa revisão (upload 9.485,93 KiB, gzip 3.387,48 KiB), sem publicação. Os 18 testes focados e typecheck passaram. O check integrado `npm run check -- -- --maxWorkers=1` também passou: assets, tipos, **784 testes aprovados e 12 pulados**, em 237,68 segundos de Vitest, preservando as asserções. Standards/Spec por GPT Sol xhigh de `d961dd5..69eb294` não encontraram achados acionáveis. Nenhum guard foi relaxado, timeout alterado ou diagnóstico temporário inserido no Worker.
+
+A validação do artefato Access separado está em [access-return-2026-11-13.md](qa/access-return-2026-11-13.md).
 
 ## Standards
 
-Revisão por GPT Sol com esforço xhigh, comparando a integração com `9135510`: nenhuma violação documentada ou heurística acionável. Foram conferidos chamadores, helpers, teste novo, configuração, documentação e isolamento; a árvore do runtime publicado permaneceu inalterada.
+Revisão inicial por GPT Sol com esforço xhigh, comparando a integração com `9135510`: nenhuma violação documentada ou heurística acionável. A revisão adicional da correção `69eb294` confirmou a mudança restrita ao documento de consentimento, com negativos de origem/binding e aprovação/PKCE/replay preservados. Não houve publicação do runtime alterado.
 
 ## Spec
 
-Revisão independente por GPT Sol com esforço xhigh: nenhum defeito local acionável nem escopo extra. A #60 atende à preparação local. A #61 permanece aberta pelos gates de publicação, políticas e automação; a #62 permanece aberta pela aceitação, vínculo e homologação com Clerk real. A ancestralidade do retorno alternativo não substituiu o runtime Clerk.
+Revisão independente por GPT Sol com esforço xhigh: nenhum defeito local acionável nem escopo extra. A #60 atende à preparação local. A #61 permanece aberta pelos gates de publicação, políticas e automação; a #62 permanece aberta pela aceitação/ativação do segundo convidado e matriz restante. A ancestralidade do retorno alternativo não substituiu o runtime Clerk.
 
 Resultado das revisões: 0 achados acionáveis em Standards e 0 em Spec; as pendências operacionais de #61 e #62 impedem declarar a spec homologada.
 
 ## Pendente para concluir
 
-1. Concluir a aceitação do primeiro convite no Account Portal, verificar ID, e-mail primário e estado no Clerk e vincular somente a fixture D1 local. Os templates traduzidos já foram salvos, mas entrega e valores dinâmicos reais precisam de conferência.
-2. Com o outro destinatário aprovado, executar convite, aceitação incorporada, pendência e ativação pelos endpoints WaPilot.
-3. Executar a matriz real da #59 pela origem privada: negativas de convite e acesso, cookies, Origin/CSRF, consentimento/PKCE/MCP, renovação após 60 segundos, nova aba e saída sem revogar grant, desktop/móvel e teclado. Registrar resultados sem tickets, OTP, cookies, bearer ou conteúdo sensível. Não usar Funnel nem desativar TLS. Repetir checks/dry-run somente se novas correções mudarem o código ou o bundle publicado.
+1. Aceitar/verificar o segundo convite já enviado, conferir pt-BR no e-mail e na aceitação incorporada, provar pendência sem acesso e ativar deliberadamente a mesma linha pelos endpoints WaPilot após read-back administrativo.
+2. Completar/consolidar os negativos da matriz #59, distinguindo testes HTTP simulados de recusas observadas no provedor real. O cadastro não convidado e os tickets expirados/revogados não foram exercitados no Clerk real; o teste sem ticket não os substitui. Os valores dinâmicos do e-mail real também não foram inspecionados pelo agente.
+3. Preservar as evidências sanitizadas e a comparação do inventário na ativação do convidado. Não usar Funnel nem desativar TLS. Repetir testes/dry-run somente diante de nova correção ou falha.
 
 ## Continuação da homologação
 
 A configuração permanece **WaPilot / Development / Invite-only**, com alteração de e-mail e autoexclusão desligadas. A sessão Dashboard fornecida ao agente continua somente leitura; os ajustes manuais já concluídos não precisam ser repetidos.
 
-O primeiro destinatário deve aceitar/verificar o convite já enviado no Account Portal. Não emitir outro convite nem compartilhar códigos, tickets ou links portadores. Depois da aceitação, a operação autorizada confere a identidade antes do vínculo local. O [guia oficial dos templates](https://clerk.com/docs/guides/customizing-clerk/email-sms-templates) descreve prévia, edição e entrega.
+O primeiro destinatário já aceitou/verificou e concluiu a sessão no WaPilot. O próximo passo humano é aceitar o convite do alias aprovado pelo e-mail, na origem privada, com a sessão administrativa encerrada pelo teste de saída. Não emitir outro convite nem compartilhar códigos, tickets ou links portadores. A identidade do convidado deve ser conferida antes da ativação local. O [guia oficial dos templates](https://clerk.com/docs/guides/customizing-clerk/email-sms-templates) descreve prévia, edição e entrega.
 
 O arquivo privado de desenvolvimento já foi fornecido com permissão `0600`. A decisão atual usa o HTTPS do Tailscale, em substituição à instalação da CA local; cada desenvolvedor precisa ter seu próprio cliente conectado e sua origem descoberta localmente. A implantação e as identidades de produção continuam fora desta operação.

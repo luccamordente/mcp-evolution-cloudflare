@@ -1,6 +1,6 @@
-# Homologação Clerk development — andamento da #62
+# Homologação Clerk development — evidências da #62
 
-**Estado em 13/11/2026: homologação development parcial, com sessão Clerk e OAuth/MCP reais aprovados.** A #60 foi integrada em `228e490`; o perfil Tailscale privado em `54026be`; a correção do formulário de consentimento em `4814bf3`. O primeiro administrador aceitou/verificou o convite e foi vinculado somente ao D1 local. O segundo convite, pelos endpoints WaPilot, foi enviado uma vez e aceito; a identidade foi verificada, mas o acesso continua pendente. A #62 permanece aberta pela ativação e cenários restantes.
+**Estado em 13/11/2026: #62 homologada no escopo development, com os limites abaixo.** A #60 foi integrada em `228e490`; o perfil Tailscale privado em `54026be`; a correção do formulário de consentimento em `4814bf3`; os ajustes visuais em `25fd478`. Administrador e convidado aceitaram/verificaram os convites e foram vinculados somente ao D1 local, pelo bootstrap e endpoint próprios. Sessão real, pendência, ativação, isolamento, consentimento/PKCE/MCP/refresh e saída foram conferidos. O check final serial e o dry-run passaram; os negativos extensos permanecem identificados como provas HTTP simuladas, conforme a divisão prevista no #62.
 
 ## Leitura do ambiente
 
@@ -67,11 +67,21 @@ O cliente OAuth local registrou callback em loopback, usou PKCE S256 e conferiu 
 
 A busca exata encontrou o alias aprovado sem identidade e sem convites nos quatro estados. GPT Terra emitiu uma única chamada a `POST /admin/invitations` com sessão administrativa real e CSRF: `201`, estado pending e resposta com somente identificador local/estado. O read-back confirmou um convite pending no Clerk e a linha D1 `disabled`, sem vínculo, com pendência; as duas conexões continuavam pertencendo às fixtures originais. O endpoint usa o retorno canônico `/accept-invitation`. Não houve reenvio automático.
 
-O operador aceitou/verificou esse convite na aba Orca e confirmou a mensagem de aguardar ativação. O read-back encontrou uma identidade única do alias, e-mail primário correto/verificado, sem banimento/bloqueio/deprovisionamento e com senha/autoexclusão desligadas. Após a aceitação, D1 continuou `disabled`, sem vínculo, com a mesma pendência; hashes dos registros estáveis das duas fixtures e das conexões permaneceram iguais. GPT Terra confirmou a mensagem em desktop/móvel, API de dados `403` JSON com `no-store` e saída por teclado. A aba ficou preparada para login administrativo, necessário para chamar o endpoint de ativação; nenhum vínculo/estado foi alterado para contornar essa exigência. A ativação ainda não foi executada.
+O operador aceitou/verificou esse convite na aba Orca e confirmou a mensagem de aguardar ativação. O read-back encontrou uma identidade única do alias, e-mail primário correto/verificado, sem banimento/bloqueio/deprovisionamento e com senha/autoexclusão desligadas. Após a aceitação, D1 continuou `disabled`, sem vínculo, com a mesma pendência; hashes dos registros estáveis das duas fixtures e das conexões permaneceram iguais. GPT Terra confirmou a mensagem em desktop/móvel, API de dados `403` JSON com `no-store` e saída por teclado.
+
+Após novo read-back Clerk, o operador entrou como administrador. GPT Terra confirmou acesso administrativo e CSRF e emitiu uma única chamada a `POST /admin/invitations/:userId/activate`: `200`, estado active, resposta sem portadores. Às 20:51 UTC, a leitura D1 confirmou a mesma linha ativa, vínculo verificado único, pendência limpa, campos estáveis do convidado preservados, demais usuários/conexões com hashes idênticos e FKs válidas. Não houve SQL para contornar a autorização do endpoint.
+
+O operador entrou novamente como convidado e confirmou os textos principais do e-mail/aceitação em português. GPT Terra conferiu a conta correta sem pendência: `/connections/data` respondeu `200`, JSON com `no-store` e zero conexões; `/admin` respondeu `403`. As duas conexões anteriores continuaram isoladas nas fixtures originais. Desktop, viewport móvel e seletor por Enter/Escape passaram; a sessão convidada foi mantida aberta, sem criar número, QR ou autorização adicional.
+
+### Ajustes visuais encontrados na homologação
+
+O painel vazio afirmava que o WhatsApp estava pronto, e em 390 px o bloco de identidade sobrepunha a marca em 27 px. O commit `b9ab7c4`, integrado em `25fd478`, usa título neutro quando não há conexão e reserva a largura intrínseca da marca, com faixa restante flexível e avatar de largura preservada. O teste JSDOM de resultado visível para zero/uma conexão passou por RED/GREEN. No runtime integrado, sem override, Terra mediu `brand.right=142`, `user.left=181`, avatar de 34 px, sem sobreposição/overflow horizontal; desktop e teclado também passaram. Nenhuma string de identidade foi cortada em JavaScript.
 
 ### Modern Web Guidance
 
 - **`accessibility`**: apliquei `lang="pt-BR"` ao HTML e ao markup do editor, preservando a estrutura e os estilos do fornecedor, conforme “Do declare the page's human language”. A prévia e o read-back confirmaram o idioma declarado; não houve modernização do layout de e-mail.
+- **`css-layout`**: distribuí as faixas do cabeçalho na origem do problema, sem mascarar a colisão com clipping, seguindo “Do NOT use `overflow: hidden` to mask layout issues”. A marca mantém sua largura e a identidade usa o espaço restante.
+- **`single-line-overflow`**: mantive o e-mail completo e escapado no DOM, ajustando somente a distribuição visual (“Keep the full text in the DOM”). Não introduzi corte de strings ou dependência para truncamento.
 
 ## Matriz HTTP existente
 
@@ -102,26 +112,28 @@ Até `54026be`, as alterações posteriores ao dry-run de `228e490` alcançaram 
 
 A validação do artefato Access separado está em [access-return-2026-11-13.md](qa/access-return-2026-11-13.md).
 
+Em `25fd478`, o dry-run atualizado passou novamente (upload 9.486,22 KiB, gzip 3.387,53 KiB), sem publicação. O teste UI focado e typecheck passaram. O check final `npm run check -- -- --maxWorkers=1` passou com assets, tipos, **785 testes aprovados e 12 pulados**, em 185,72 segundos de Vitest. Revisões Standards/Spec por GPT Sol xhigh do patch visual não encontraram achados acionáveis.
+
 ## Standards
 
-Revisão inicial por GPT Sol com esforço xhigh, comparando a integração com `9135510`: nenhuma violação documentada ou heurística acionável. A revisão adicional da correção `69eb294` confirmou a mudança restrita ao documento de consentimento, com negativos de origem/binding e aprovação/PKCE/replay preservados. Não houve publicação do runtime alterado.
+Revisão inicial por GPT Sol com esforço xhigh, comparando a integração com `9135510`: nenhuma violação documentada ou heurística acionável. As revisões adicionais de `69eb294` e `b9ab7c4` confirmaram mudanças restritas ao consentimento e aos dois defeitos visuais, sem relaxar origem/binding ou remover texto acessível. Não houve publicação do runtime alterado.
 
 ## Spec
 
-Revisão independente por GPT Sol com esforço xhigh: nenhum defeito local acionável nem escopo extra. A #60 atende à preparação local. A #61 permanece aberta pelos gates de publicação, políticas e automação; a #62 permanece aberta pela ativação do segundo convidado e matriz restante. A ancestralidade do retorno alternativo não substituiu o runtime Clerk.
+Revisão independente por GPT Sol com esforço xhigh: nenhum defeito local acionável nem escopo extra. A revisão final de aceite da #62 confirmou a divisão explícita entre negativos HTTP e comportamentos reais no critério 6; não exigiu novos convites, revogações artificiais ou terceiro destinatário. Ativação e login isolado do convidado foram concluídos depois dessa auditoria, e os limites abaixo permanecem registrados. A #61 continua independente pelos gates de publicação, políticas e automação; a ancestralidade do retorno alternativo não substituiu o runtime Clerk.
 
-Resultado das revisões: 0 achados acionáveis em Standards e 0 em Spec; as pendências operacionais de #61 e #62 impedem declarar a spec homologada.
+Resultado das revisões: 0 achados acionáveis em Standards e 0 em Spec. O aceite de development da #62 não encerra as pendências de #61 nem homologa produção ou a spec #59 inteira.
 
-## Pendente para concluir
+## Limites e próximas fases
 
-1. Entrar como administrador e ativar deliberadamente a mesma linha do convidado pelo endpoint WaPilot, após read-back já preparado; conferir acesso da conta ativada e preservar o inventário. Falta confirmar explicitamente com o operador os textos do e-mail/aceitação, sem compartilhar conteúdo portador.
-2. Completar/consolidar os negativos da matriz #59, distinguindo testes HTTP simulados de recusas observadas no provedor real. O cadastro não convidado e os tickets expirados/revogados não foram exercitados no Clerk real; o teste sem ticket não os substitui. Os valores dinâmicos do e-mail real também não foram inspecionados pelo agente.
-3. Preservar as evidências sanitizadas e a comparação do inventário na ativação do convidado. Não usar Funnel nem desativar TLS. Repetir testes/dry-run somente diante de nova correção ou falha.
+1. Cadastro não convidado e aceitação de tickets inválidos/expirados/revogados não foram exercitados no provedor real. O teste sem ticket não os substitui; expired/revoked nos testes HTTP comprova reconciliação local. Os valores dinâmicos do e-mail real não foram inspecionados pelo agente; os textos principais foram confirmados pelo operador.
+2. Acesso por segundo dispositivo ou conector externo não foi testado. O transporte escolhido é privado, e o cliente precisa alcançar a tailnet; a prova não habilita Funnel.
+3. A #61 e as fases de produção da #59 mantêm gates próprios. Não houve merge no `main`, push, deploy, migration remota ou vínculo de usuário de produção. Preservar as evidências sanitizadas e o inventário; repetir testes/dry-run somente diante de nova correção ou falha.
 
-## Continuação da homologação
+## Estado operacional
 
 A configuração permanece **WaPilot / Development / Invite-only**, com alteração de e-mail e autoexclusão desligadas. A sessão Dashboard fornecida ao agente continua somente leitura; os ajustes manuais já concluídos não precisam ser repetidos.
 
-Os dois destinatários já aceitaram/verificaram os convites. O próximo passo humano é entrar na aba Orca como administrador; a conta convidada permanece pendente até a chamada administrativa protegida. Não emitir outro convite nem compartilhar códigos, tickets ou links portadores. A identidade do convidado foi conferida antes de preparar essa ativação local. O [guia oficial dos templates](https://clerk.com/docs/guides/customizing-clerk/email-sms-templates) descreve prévia, edição e entrega.
+Os dois destinatários já aceitaram/verificaram os convites e estão ativos somente no D1 local correspondente. Após o check, o perfil privado foi reiniciado; Terra confirmou a sessão convidada preservada, dados `200` sem conexões e `/admin` `403`, deixando a aba no dashboard. Não emitir outro convite nem compartilhar códigos, tickets ou links portadores. O [guia oficial dos templates](https://clerk.com/docs/guides/customizing-clerk/email-sms-templates) descreve prévia, edição e entrega.
 
 O arquivo privado de desenvolvimento já foi fornecido com permissão `0600`. A decisão atual usa o HTTPS do Tailscale, em substituição à instalação da CA local; cada desenvolvedor precisa ter seu próprio cliente conectado e sua origem descoberta localmente. A implantação e as identidades de produção continuam fora desta operação.

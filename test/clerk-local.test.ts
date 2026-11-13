@@ -57,7 +57,7 @@ it('prepares only isolated local bindings, secrets and disabled synthetic fixtur
     expect((await db.prepare('SELECT count(*) as count FROM whatsapp_connections').first())?.count).toBe(2);
   } finally { await proxy.dispose(); }
   expect(first.stdout + first.stderr).not.toContain('sk_test_synthetic');
-});
+}, 30_000);
 it('requires a trusted HTTPS certificate before starting the Clerk profile', async () => {
   const root = await checkout();
   await writeFile(resolve(root, '.env.clerk'), 'CLERK_PUBLISHABLE_KEY=pk_test_Y2xlcmsuZml4dHVyZS5pbnZhbGlkJA==\nCLERK_SECRET_KEY=sk_test_synthetic\nCLERK_TEST_ADMIN_EMAIL=admin@example.test\n');

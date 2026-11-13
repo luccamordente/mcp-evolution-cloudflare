@@ -16,8 +16,11 @@ As licenças e versões fixadas estão no lockfile:
 - `@modelcontextprotocol/client` 2.3.1 — Apache-2.0; peer do SDK MCP Apps v2.
 - `@modelcontextprotocol/ext-apps` 2.0.3 — SDK oficial MCP Apps. O pacote declara MIT, mas o arquivo LICENSE distribuído registra a transição de código para Apache-2.0, preservando trechos MIT; veja [texto integral preservado](third_party/mcp-ext-apps-LICENSE.txt). O build da UI mantém os avisos distribuídos.
 - `@cloudflare/workers-oauth-provider` 1.2.3 — MIT; OAuth 2.1, PKCE S256, RFC 8414/7591/8707/9207/9728 e armazenamento KV.
+- `@clerk/backend` 3.28.0 — MIT; verificação de sessão de navegador no Worker.
+- `@clerk/clerk-js` 6.43.0 — MIT; SDK JavaScript carregado pelo Frontend API da instância. A UI correspondente é `@clerk/ui` 1.42.5, em URL versionada do mesmo provedor.
+- `@clerk/localizations` 4.24.7 — MIT; localização `ptBR` incorporada em `public/auth.js`, com aviso preservado no asset e [licença integral](third_party/clerk-localizations-LICENSE.txt).
 - `hono` 4.13.13 — MIT; roteamento Web API para a interface e webhook.
-- `jose` 6.2.12 — MIT; validação JWT/JWKS de assertions do Cloudflare Access.
+- `jose` 6.2.12 — MIT; JWT/JWKS sintéticos nos testes e contratos auxiliares de tokens.
 - `zod` 4.6.7 — MIT; schemas explícitos das ferramentas.
 - `@hyzyla/pdfium` 3.0.0 — wrapper MIT para PDFium; preserva o módulo WebAssembly já utilizado pela leitura de páginas publicada. [Licença distribuída pelo pacote](third_party/pdfium-wrapper-LICENSE.txt).
 - `fast-png` 8.0.0 — MIT; codificação de PNG para imagens de páginas. [Licença distribuída pelo pacote](third_party/fast-png-LICENSE.txt).

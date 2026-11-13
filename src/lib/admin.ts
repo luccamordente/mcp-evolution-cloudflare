@@ -92,15 +92,15 @@ export interface AdminSnapshotDependencies {
   readLiveStatus?: (connection: AdminConnectionRecord, instanceToken: string) => Promise<unknown>;
 }
 
-/** The admin allowlist is independent from the broader Access allowlist. An
+/** The operator allowlist is independent from general user authorization. An
  * empty explicitly configured value denies administrative access. */
-export function adminEmails(env: Pick<Env, 'ALLOWED_EMAILS'> & { ADMIN_EMAILS?: string }): Set<string> {
+export function adminEmails(env: Pick<Env, 'ADMIN_EMAILS'>): Set<string> {
   const configured = env.ADMIN_EMAILS;
   const values = configured === undefined ? DEFAULT_ADMIN_EMAILS : configured.split(',');
   return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean));
 }
 
-export function isAdminOperator(email: string, env: Pick<Env, 'ALLOWED_EMAILS'> & { ADMIN_EMAILS?: string }): boolean {
+export function isAdminOperator(email: string, env: Pick<Env, 'ADMIN_EMAILS'>): boolean {
   return adminEmails(env).has(email.trim().toLowerCase());
 }
 

@@ -70,7 +70,7 @@ Os campos abaixo pertencem a `options`, assim como `customMessageId`, `mediaSour
 | `document` | `application/*` |
 | `gif` | `image/gif` ou `video/mp4` |
 
-`gif` solicita reprodução em loop. Um GIF de entrada é convertido pelo backend para MP4 silencioso. `video` conserva vídeo comum, exceto quando `gifPlayback: true` solicita loop. Os limites de conversão estão em [TOOLS.md](TOOLS.md#envio-compacto-e-recuperação).
+`gif` solicita reprodução em loop. Um GIF de entrada é convertido pelo backend para MP4 silencioso. `video` conserva vídeo comum, exceto quando `gifPlayback: true` solicita loop. Consulte o [envelope público de envio](TOOLS.md#envio-compacto-e-recuperação).
 
 `sticker.url`, URLs presentes em `link.text`, cabeçalhos de botões e imagens/vídeos dos cartões são downloads remotos executados pelo provedor. Eles exigem uma origem HTTPS exata em `SEND_MEDIA_ORIGINS`, separada das allowlists de leitura. A configuração vazia bloqueia esses downloads. URLs não aceitam credenciais ou fragmentos, e a origem da API é excluída da allowlist.
 

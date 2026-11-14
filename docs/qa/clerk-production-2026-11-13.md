@@ -1,6 +1,6 @@
 # Preparação Clerk production — #63 — 13/11/2026
 
-> Continuação em [14/11/2026](clerk-production-2026-11-14.md): production criada sem clone e configuração parcial relida e domínio/DNS/e-mail/SSL verificados; autoexclusão e origem dos paths também foram corrigidas; artefato/configuração/secrets e retorno permanecem abertos. O registro abaixo preserva a evidência histórica de 13/11.
+> Continuação em [14/11/2026](clerk-production-2026-11-14.md): production criada sem clone e configuração parcial relida e domínio/DNS/e-mail/SSL verificados; autoexclusão e origem dos paths também foram corrigidas; candidata/configuração/secrets foram preparados e relidos sem tráfego. A preparação remota aguarda revisão documental final; bootstrap e corte permanecem posteriores. O registro abaixo preserva a evidência histórica de 13/11.
 
 **Estado: preparação documental; produção ainda não provisionada nem pronta para o corte.** Este registro acompanha a [#63](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/63), subordinada à [#59](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/59). O operador autorizou explicitamente criar production clonando development e configurar o DNS de `wapilot.com.br`. A tentativa de criação foi recusada pelo Clerk antes do provisionamento; não houve mudança DNS ou de secrets.
 

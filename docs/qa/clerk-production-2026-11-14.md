@@ -1,6 +1,6 @@
 # Preparação Clerk production — #63 — 14/11/2026
 
-**Estado: instância production, domínio e controles de acesso conferidos; #63 permanece aberta, sem corte.** Continuação do [registro de 13/11](clerk-production-2026-11-13.md), preservando sua tentativa recusada e a validação histórica da candidata. A criação e o DNS de `wapilot.com.br` já estavam autorizados. O operador aceitou explicitamente os e-mails padrão do Clerk, sem upgrade de plano; a UI WaPilot e as restrições de segurança continuam obrigatórias.
+**Estado: preparação remota da #63 concluída, sujeita à revisão documental final; candidata inativa, sem corte.** Continuação do [registro de 13/11](clerk-production-2026-11-13.md), preservando sua tentativa recusada e a validação histórica da candidata. A criação e o DNS de `wapilot.com.br` já estavam autorizados. O operador aceitou explicitamente os e-mails padrão do Clerk, sem upgrade de plano; a UI WaPilot e as restrições de segurança continuam obrigatórias.
 
 ## Criação e read-back efetivos
 
@@ -13,7 +13,7 @@ O Clerk CLI **4.1.0** confirmou autenticação do operador por `doctor`. A leitu
 | Publishable key pública | `pk_live_Y2xlcmsud2FwaWxvdC5jb20uYnIk` |
 | Domínio Clerk | `wapilot.com.br`; às 13:30 UTC, status do domínio, DNS, e-mail e SSL `complete` |
 | Origem do produto/recurso OAuth | Preservados: `https://app.wapilot.com.br` e `https://app.wapilot.com.br/mcp` |
-| Secret da nova instância | Capturada somente em arquivos locais ignorados com permissão `0600`; não enviada ao Worker nem incluída em versão candidata |
+| Secret da nova instância | Capturada em arquivos locais ignorados `0600` e incluída somente como `secret_text` na versão candidata inativa; nenhum valor registrado aqui |
 
 Após ler schema/configuração, foi preparado um patch restrito, seguido de dry-run, aplicação e read-back production. O read-back completo retornou **`v1_35bed73d`**; o hash da seleção do patch foi **`v1_da448f4e`**. São escopos diferentes, não versões intercambiáveis do mesmo objeto. O hash `v1_da448f4e` continuou igual após as conferências finais: cobre somente as chaves de autenticação e paths relativos selecionadas, sem representar Home/origem absoluta nem o controle global de autoexclusão.
 
@@ -39,9 +39,27 @@ As Display URLs inicialmente apontavam home, sign-in, aceitação e saída para 
 
 A página de entrada do Account Portal foi carregada sem login e exibiu o formulário WaPilot. Essa inspeção comprova o carregamento público, sem executar convite, login ou redirects autenticados; o fluxo real permanece em #64/#65.
 
-A leitura atual dos deployments encontrou **`cce19d4b-683c-4b18-8937-8ec44d13950e` em 100%**, criada em **14/11 às 12:53:07 UTC**. Portanto, a versão Access `6af1ec15…` registrada em 13/11 não deve ser presumida ativa nem usada como retorno sem nova reconciliação. O read-back das configurações ativas confirmou `observability.redact_query_string=true`, compatibilidade `2026-10-13` e flags `nodejs_compat`/`global_fetch_strictly_public`. Às **13:29:42 UTC**, os probes retornaram health `200`, metadata OAuth `200`, MCP sem bearer `401` com metadata e `no-store`, e `/connections` `302` para Access com `no-store`. São amostras do serviço Access, sem homologar Clerk. As operações desta preparação não publicaram Worker. Antes da #65, reconciliar o artefato servido, a candidata com a API Clerk atual e um retorno seguro; os testes históricos da candidata não comprovam equivalência com essa revisão.
+A leitura atual dos deployments encontrou **`cce19d4b-683c-4b18-8937-8ec44d13950e` em 100%**, criada em **14/11 às 12:53:07 UTC**. Portanto, a versão Access `6af1ec15…` registrada em 13/11 não deve ser presumida ativa nem usada como retorno sem nova reconciliação. O read-back das configurações ativas confirmou `observability.redact_query_string=true`, compatibilidade `2026-10-13` e flags `nodejs_compat`/`global_fetch_strictly_public`. Às **13:29:42 UTC**, os probes retornaram health `200`, metadata OAuth `200`, MCP sem bearer `401` com metadata e `no-store`, e `/connections` `302` para Access com `no-store`. São amostras do serviço Access, sem homologar Clerk. As operações desta preparação não promoveram versão para tráfego. O retorno Access atual é essa revisão `cce19d4b…`, de fonte `a29ea1f20c443c497be65dca221eb43f1ef97db3`; sua continuidade autenticada e os demais testes de corte permanecem em #65.
 
-## Gates restantes
+## Artefato, configuração e secrets preparados
+
+A fonte final **`c3e555da8c12d2f0111385a1fcae8999ed52d35b`** incorporou a API de cinco ferramentas e resolveu os quatro achados de revisão. Standards e Spec encerraram sem pendências. O check completo aprovou assets e tipos, **836 testes aprovados e 15 pulados, 56 arquivos aprovados e um pulado, em 167,19 segundos**. Esse resultado substitui o check intermediário de `dd23979` para esta candidata; não homologa login production ou continuidade de grants.
+
+A configuração de release privada partiu do Wrangler de produção e preservou as vars ativas, IDs D1/KV, imagem atual do sender fixada por digest, compatibilidade e exports, mantendo redaction explícita e adicionando a publishable key production. Código/configuração e o arquivo privado contendo somente a nova secret Clerk passaram juntos no dry-run de `versions upload --secrets-file --profile wapilot`: **8.743,92 KiB bruto / 3.164,40 KiB gzip**, sem build Docker.
+
+O primeiro upload com `--strict` foi bloqueado pelo guard do Wrangler porque a última atualização havia ocorrido via script/API; esse bloqueio não criou versão nem mudou tráfego. Após comparar e reconciliar o código/configuração atuais (`a29ea1f…`/`cce19d4b…`), reler deployment/lista de versões e confirmar especificamente o destino e as alterações já revisados, o operador responsável documentou a exceção e repetiu o upload sem `--strict`. Foi uma exceção deliberada ao guard de origem da atualização, não uma rejeição de aprovação automática. A operação preparou somente uma versão inativa.
+
+| Read-back às 14:12 UTC | Resultado |
+| --- | --- |
+| Versão candidata | **`ed29ef2e-efa4-4a77-8271-5bf4f83ca26f`**, tag `clerk-59-c3e555da` |
+| Bindings existentes | `existingBindingChanges=[]` |
+| Adições exatas | `CLERK_PUBLISHABLE_KEY` correspondente à production e `CLERK_SECRET_KEY` do tipo `secret_text` |
+| Container, exports e compatibilidade | Imagem e metadata preservadas em relação ao alvo revisado |
+| Deployment com tráfego | **`cce19d4b-683c-4b18-8937-8ec44d13950e` em 100%**; candidata inativa |
+
+O ajuste existente de workers.dev/previews habilitados foi preservado. URLs de versão não são isolamento e não foram usadas para testes autenticados. Saídas brutas do CLI ficaram apenas em arquivos privados `0600`, com `WRANGLER_WRITE_LOGS=false`; nenhum valor de secret foi incluído neste registro. Não houve alteração de usuários/convites/grants, D1/KV, migrations, policies, Queues ou Cron, nem deployment de tráfego.
+
+## Gates de preparação e etapas posteriores
 
 | Gate da #63 | Estado em 14/11/2026 |
 | --- | --- |
@@ -52,13 +70,11 @@ A leitura atual dos deployments encontrou **`cce19d4b-683c-4b18-8937-8ec44d13950
 | DNS, certificado e domínio verificados | Concluído às 13:30 UTC: cinco CNAMEs relidos, status/DNS/e-mail/SSL `complete` e TLS direto validado nos dois hosts |
 | E-mails padrão e entrega configurada | Padrões, assuntos em inglês, variáveis e entrega relidos; recebimento/fluxo completo pertencem a #64/#65, com os paths corrigidos |
 | Account Portal e bootstrap seguro anterior ao corte | Formulário público WaPilot carregado; convite/login/redirects autenticados ainda não executados (#64/#65) |
-| Versão coerente de código/configuração/secrets | Pendente; reconciliar revisão ativa nova, candidata e retorno antes da #65; nenhum upload nesta etapa |
-| Redaction nos sistemas que receberão convites | Worker ativo confirmado; demais sistemas e conferência anterior ao envio permanecem gates |
+| Versão coerente de código/configuração/secrets | Concluído: candidata `ed29ef2e…` inativa, adições e preservação confirmadas às 14:12 UTC; retorno Access atual identificado |
+| Redaction nos sistemas que receberão convites | Confirmada no Worker ativo e na configuração candidata; reconferir demais sistemas antes do envio real |
 
-O [plano de upload versionado de 13/11](clerk-production-2026-11-13.md#código-configuração-e-secrets-na-mesma-versão) continua aplicável: `versions upload --secrets-file --profile wapilot`, com configuração privada revisada, preservação dos demais secrets/bindings e read-back antes de qualquer promoção. Não usar `secret put/delete` para staging. Revalidar Worker ativo, Builds pausado e ausência de concorrência antes dessa escrita; as leituras históricas não atestam o estado atual.
+O [plano de upload versionado de 13/11](clerk-production-2026-11-13.md#código-configuração-e-secrets-na-mesma-versão) foi executado com a exceção documentada de `--strict` acima. O gate de artefato/configuração/secrets e seu read-back está concluído. A #63 está preparada remotamente e aguarda revisão documental final; este registro não altera o estado da issue no GitHub. Bootstrap/vínculos e recebimento real (#64), continuidade autenticada e corte (#65), e estabilização (#66) continuam pendentes.
 
-Não houve alteração de billing, Access, Worker, D1/KV, usuários ou grants, migration, convite, upload, publicação ou push nesta etapa. #64–66 continuam pendentes. Os **838 testes aprovados e 15 pulados** e o dry-run da candidata são evidências históricas de 13/11, não uma nova execução ou homologação production.
+Não houve alteração de billing ou Access, aplicação de migration, convite, usuário, grant, push ou mudança de tráfego. A criação da candidata inativa não é o corte. Os **838 testes aprovados e 15 pulados** e o dry-run de 13/11 permanecem evidência histórica; a validação final desta candidata está registrada acima.
 
-A reconciliação local da API de cinco ferramentas foi integrada em `dd239799324f9334138b586c0cf567f8ce2ae073` e passou no check completo: **825 testes aprovados e 15 pulados, 184,23 segundos**. A revisão Standards identificou ajustes de MIME, prazos, orientação e link na fonte atual; as correções da candidata e sua nova validação estavam em andamento no fechamento deste complemento. Esse resultado intermediário não aprova a candidata final nem substitui artefato/configuração/secrets versionados, read-back e plano atual de retorno exigidos para concluir a #63.
-
-Validação documental: revisão das fontes operacionais e do relato sanitizado das operações efetivas, links relativos e `git diff --check`. A skill TDD foi consultada; não há mudança de runtime nem lógica nova que justifique teste de texto. Não foram repetidos testes, dry-run de Worker ou consultas ao backend de mensagens para este registro.
+Validação documental: revisão das fontes operacionais e do relato sanitizado das operações efetivas, links relativos e `git diff --check`. A skill TDD foi consultada; não há mudança de runtime nem lógica nova que justifique teste de texto. Este complemento documental não repetiu testes, dry-run ou consultas ao backend de mensagens; registra as validações e operações realizadas pelo responsável pela preparação.

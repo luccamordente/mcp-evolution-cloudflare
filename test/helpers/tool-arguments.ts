@@ -1,4 +1,4 @@
-// Converts existing behavior fixtures to the five-tool API at the call site.
+// Converts existing behavior fixtures to the six-tool API at the call site.
 // This is test-only; production never accepts the removed argument shapes.
 export function migrateToolArguments(name: string, value: Record<string, unknown>): Record<string, unknown> {
   const { messageId, ...options } = value;

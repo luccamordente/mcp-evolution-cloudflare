@@ -1,6 +1,6 @@
 # Desenvolvimento
 
-O catálogo atual HTTP/stdio contém exatamente `search_connections`, `search_groups`, `search_messages`, `get_message` e `send_message`. Argumentos comuns ficam em `options`. Busca de mensagens usa offset/limit (janela máxima 200); mídia e respostas são opções de `get_message`. Veja [TOOLS.md](docs/TOOLS.md) para o contrato completo.
+O catálogo atual HTTP/stdio contém exatamente `search_connections`, `search_contacts`, `search_groups`, `search_messages`, `get_message` e `send_message`. Argumentos comuns ficam em `options`. Busca de mensagens usa offset/limit (janela máxima 200); mídia e respostas são opções de `get_message`. Veja [TOOLS.md](docs/TOOLS.md) para o contrato completo.
 
 Instale Node 22+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
 

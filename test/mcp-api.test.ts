@@ -32,8 +32,8 @@ beforeEach(async () => {
   fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: resource }));
 });
 afterEach(async () => { vi.restoreAllMocks(); await local.dispose(); });
-it('publishes exactly five tools and no gallery resource', async () => {
-  expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_groups', 'search_messages', 'get_message', 'send_message']);
+it('publishes exactly six tools and no gallery resource', async () => {
+  expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_contacts', 'search_groups', 'search_messages', 'get_message', 'send_message']);
   const resources = await rpc('resources/list');
   expect(resources.resources).toEqual([expect.objectContaining({ uri: 'ui://wapilot/send-receipt-v3.html' })]);
 });
@@ -146,4 +146,45 @@ it('guides proactive audio transcription and document reading through the unifie
     expect(guidance).toContain('text/plain');
     expect(guidance).toContain('even without an explicit');
   }
+});
+
+it('restores contact search through the authorized client, filtering and deduplicating before pagination', async () => {
+  fetcher.mockImplementation(async (input, init) => {
+    expect(new URL(String(input)).pathname).toBe('/user/contacts');
+    expect(new URL(String(input)).searchParams.get('search')).toBe('ana & co');
+    expect(new Headers(init?.headers).get('apikey')).toBe('synthetic-token');
+    return Response.json({ jsonapi: { version: '1.1' }, data: [
+      { type: 'chat', id: '1@s.whatsapp.net', attributes: { fullName: 'Ana & Co one', phoneNumber: '5511111111111' } },
+      { type: 'chat', id: '1@s.whatsapp.net', attributes: { fullName: 'Ana & Co duplicate' } },
+      { type: 'chat', id: '2@s.whatsapp.net', attributes: { pushName: 'Ana & Co two', phoneNumber: '5522222222222' } },
+      { type: 'chat', id: '3@s.whatsapp.net', attributes: { fullName: 'Ana & Co three' } },
+      { type: 'chat', id: 'other@s.whatsapp.net', attributes: { fullName: 'Other' } },
+    ] });
+  });
+  const result = await call('search_contacts', { query: '  Ana & Co  ', options: { offset: 1, limit: 1 } });
+  expect(result).toMatchObject({ structuredContent: { data: { connectionId, items: [{ id: '2@s.whatsapp.net', pushName: 'Ana & Co two', phoneNumber: '5522222222222' }], hasMore: true } } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('finds a contact by formatted phone digits on an explicitly selected owned connection', async () => {
+  const owner = await bootstrapLocalUser(local.db, user);
+  const second = await createConnection(local.db, key, { userId: owner.id, friendlyName: 'Work', instanceId: 'second', token: 'second-token' });
+  fetcher.mockImplementation(async (_input, init) => {
+    expect(new Headers(init?.headers).get('apikey')).toBe('second-token');
+    return Response.json({ jsonapi: { version: '1.1' }, data: [{ type: 'chat', id: '5511987654321@s.whatsapp.net', attributes: { fullName: 'Contact' } }] });
+  });
+  expect(await call('search_contacts', { query: '+55 (11) 98765-4321', options: { connectionId: second.id } })).toMatchObject({ structuredContent: { data: { connectionId: second.id, items: [{ jid: '5511987654321@s.whatsapp.net' }], hasMore: false } } });
+});
+it.each([{ offset: -1 }, { limit: 0 }, { limit: 101 }, { offset: 1.5 }])('rejects invalid contact pagination %j before network access', async options => {
+  expect(await call('search_contacts', { query: 'Ana', options })).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'invalid_options' } } } });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it('does not read contacts from another user connection', async () => {
+  const owner = await bootstrapLocalUser(local.db, { id: 'other', email: 'other@example.test', claims: {} });
+  const foreign = await createConnection(local.db, key, { userId: owner.id, friendlyName: 'Foreign', instanceId: 'foreign', token: 'foreign-token' });
+  expect(await call('search_contacts', { query: 'Ana', options: { connectionId: foreign.id } })).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it.each(['', '   ', 'x'.repeat(201)])('rejects invalid contact query without reading contacts (%s)', async query => {
+  expect(await call('search_contacts', { query })).toMatchObject({ isError: true });
+  expect(fetcher).not.toHaveBeenCalled();
 });

@@ -49,6 +49,15 @@ const buttonSet = z.array(button).min(1).max(10).superRefine((buttons, ctx) => {
 const row = z.object({ title: label, description: z.string().max(1000).optional(), rowId: identifier }).strict();
 const header = z.object({ title: label.optional(), subtitle: label.optional(), imageUrl: httpsUrl.optional(), videoUrl: httpsUrl.optional() }).strict().refine(value => Boolean(value.imageUrl) !== Boolean(value.videoUrl), 'WaPilot carousel cards require exactly one image or video URL.');
 
+const eventName = z.string().trim().min(1).refine(value => value.length <= 200, 'WaPilot event names allow at most 200 UTF-16 units.');
+const eventDescription = z.string().min(1).refine(value => value.length <= 10000, 'WaPilot event descriptions allow at most 10000 UTF-16 units.');
+const eventAddress = z.string().min(1).refine(value => value.length <= 1000, 'WaPilot event addresses allow at most 1000 UTF-16 units.');
+const eventInstant = z.iso.datetime({ offset: true, precision: 0 }).refine(value => {
+  const seconds = Date.parse(value) / 1000;
+  return Number.isInteger(seconds) && seconds >= 0 && seconds <= 253402300799;
+}, 'WaPilot requires a valid event instant with an explicit timezone and whole seconds.');
+const eventRecipient = z.string().trim().regex(/^(?:\+?\d+|\d+@(?:s\.whatsapp\.net|lid)|\d+(?:-\d+)?@g\.us)$/).max(200);
+
 export const outgoingMessageSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), ...chat, ...customId, text, forwardingScore: z.number().int().min(0).max(100).optional() }).strict(),
   z.object({ kind: z.literal('link'), ...chat, ...customId, text }).strict(),
@@ -57,6 +66,7 @@ export const outgoingMessageSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('voice_note'), ...chat, ...customId, mimeType: mime, source }).strict(),
   z.object({ kind: z.literal('document'), ...media, fileName: label.optional() }).strict(),
   z.object({ kind: z.literal('gif'), ...media, fileName: label.optional() }).strict(),
+  z.object({ kind: z.literal('event'), to: eventRecipient, replyTo: replyTo.optional(), name: eventName, description: eventDescription.optional(), startTime: eventInstant, endTime: eventInstant.optional(), location: z.object({ name: eventName, address: eventAddress.optional(), latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict().optional() }).strict(),
   z.object({ kind: z.literal('poll'), ...chat, ...customId, question: text, options: z.array(label).min(2).max(12), maxAnswers: z.number().int().min(1).default(1) }).strict(),
   z.object({ kind: z.literal('list'), ...interactiveChat, title: label, description: text, buttonText: label, footerText: label, sections: z.array(z.object({ title: label.optional(), rows: z.array(row).min(1).max(10) }).strict()).min(1).max(10) }).strict(),
   z.object({ kind: z.literal('location'), ...chat, ...customId, name: label, latitude: z.number().min(-90).max(90).refine(value => value !== 0, 'WaPilot cannot send zero latitude with the current service.'), longitude: z.number().min(-180).max(180).refine(value => value !== 0, 'WaPilot cannot send zero longitude with the current service.'), address: text }).strict(),
@@ -69,6 +79,11 @@ export const outgoingMessageSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('status_image'), ...customId, mimeType: mime, source, caption: z.string().max(2000).optional() }).strict(),
   z.object({ kind: z.literal('status_video'), ...customId, mimeType: mime, source, caption: z.string().max(2000).optional() }).strict(),
 ]).superRefine((message, ctx) => {
+  if (message.kind === 'event') {
+    if (message.endTime && Date.parse(message.endTime) <= Date.parse(message.startTime)) ctx.addIssue({ code: 'custom', path: ['endTime'], message: 'WaPilot event end must follow its start.' });
+    if (message.replyTo && message.to.endsWith('@g.us') && !message.replyTo.participant) ctx.addIssue({ code: 'custom', path: ['replyTo', 'participant'], message: 'WaPilot requires the author of a quoted group message.' });
+    if (message.replyTo?.participant && !/^\d+@(?:s\.whatsapp\.net|lid)$/.test(message.replyTo.participant)) ctx.addIssue({ code: 'custom', path: ['replyTo', 'participant'], message: 'WaPilot requires a full participant identifier.' });
+  }
   if ('mimeType' in message) {
     const mimeType = message.mimeType.split(';')[0].trim().toLowerCase();
     const allowed = message.kind === 'image' || message.kind === 'status_image' ? ['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)
@@ -89,11 +104,37 @@ export const outgoingMessageSchema = z.discriminatedUnion('kind', [
   if (message.kind === 'buttons' && message.header && message.buttons.some(item => item.kind !== 'reply')) ctx.addIssue({ code: 'custom', path: ['header'], message: 'WaPilot media headers require reply buttons.' });
 });
 
+const sharedSend = {
+  to: chat.to,
+  replyTo: chat.replyTo, mentions: chat.mentions, delayMs: chat.delayMs,
+  customMessageId: customId.customMessageId, formatJid: chat.formatJid,
+};
+const sharedKeys = { to: true, replyTo: true, mentions: true, delayMs: true, customMessageId: true, formatJid: true, mimeType: true } as const;
+const variants = outgoingMessageSchema.options.filter(variant => !variant.shape.kind.value.startsWith('status_')).map(variant => {
+  const keys = Object.fromEntries(Object.keys(variant.shape).filter(key => key in sharedKeys).map(key => [key, true]));
+  if ('mimeType' in variant.shape) keys.source = true;
+  return z.object(Object.fromEntries(Object.entries(variant.shape).filter(([key]) => !(key in keys)))).strict();
+});
 export const sendMessageInput = z.object({
-  connectionId: z.string().uuid().optional().describe('Omit it to use the user\'s default connection, or pass an internal connection UUID.'),
-  idempotencyKey: z.string().trim().min(1).max(200).optional().describe('Opaque action key without message content. Reuse the same key for the same action for 24 hours. Never change it to retry an unconfirmed send.'),
-  message: outgoingMessageSchema.describe('Choose one message kind and provide only the fields supported by that variant.'),
+  message: z.union(variants),
+  options: z.object({
+    ...sharedSend,
+    mediaSource: source.optional(), mimeType: mime.optional(),
+    connectionId: z.string().uuid().optional(),
+    idempotencyKey: identifier.optional().describe('Opaque action key. Reuse identical arguments and key for 24 hours; never change keys to retry an unconfirmed send.'),
+  }).strict(),
 }).strict();
+export function expandSendMessage(input: z.infer<typeof sendMessageInput>): OutgoingMessage {
+  const { connectionId: _connection, idempotencyKey: _key, mediaSource, ...envelope } = input.options;
+  const candidate = { ...input.message, ...envelope, ...(mediaSource ? { source: mediaSource } : {}) };
+  const { kind } = z.object({ kind: z.string() }).parse(input.message);
+  if (envelope.to === 'status' && ['text', 'image', 'video'].includes(kind)) {
+    const { to: _to, ...status } = candidate;
+    return outgoingMessageSchema.parse({ ...status, kind: `status_${kind}` });
+  }
+  if (envelope.to === 'status') throw new Error('WaPilot Status supports text, image and video only.');
+  return outgoingMessageSchema.parse(candidate);
+}
 export type OutgoingMessage = z.infer<typeof outgoingMessageSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageInput>;
 
@@ -102,6 +143,7 @@ export class SendMessageInputError extends Error {
 }
 
 export async function prepareSendMessage(message: OutgoingMessage, env: Pick<Env, 'MAX_MEDIA_BYTES' | 'SEND_MEDIA_ORIGINS' | 'EVOLUTION_BASE_URL'>) {
+  if (message.kind === 'event') message = { ...message, to: message.to.includes('@') ? message.to : `${message.to.replace(/^\+/, '')}@s.whatsapp.net`, startTime: new Date(message.startTime).toISOString(), ...(message.endTime ? { endTime: new Date(message.endTime).toISOString() } : {}) };
   const max = Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024);
   let contentHash: string | undefined;
   if ('mimeType' in message) {
@@ -139,6 +181,7 @@ export function messagePresentation(message: OutgoingMessage): Pick<SendReceipt,
   let summary: string;
   switch (message.kind) {
     case 'text': case 'link': case 'status_text': summary = message.text; break;
+    case 'event': summary = `Evento: ${message.name}\n${message.startTime}`; break;
     case 'poll': summary = `${message.question}\n${message.options.map((item, index) => `${index + 1}. ${item}`).join('\n')}`; break;
     case 'list': summary = `${message.title}\n${message.description}\n${message.sections.flatMap(section => section.rows.map(item => item.title)).join('\n')}`; break;
     case 'buttons': summary = `${message.title}\n${message.description}\n${message.buttons.map(item => item.label).join(' · ')}`; break;

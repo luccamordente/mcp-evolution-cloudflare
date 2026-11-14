@@ -1,7 +1,8 @@
+import { migrateToolArguments } from './helpers/tool-arguments';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
-import { createConnection, ensureUser } from '../src/lib/db';
+import { createConnection, bootstrapLocalUser } from '../src/lib/db';
 import type { AuthenticatedUser, Env } from '../src/types';
 import { createTestD1 } from './helpers/local-d1';
 
@@ -14,6 +15,8 @@ let connectionId: string;
 let sent: number;
 
 async function call(name: string, args: Record<string, unknown>, principal = user, scopes = ['mcp:read', 'mcp:write']) {
+  if (name === 'get_send_status') { name = 'get_message'; const { operation: _operation, ...options } = args; args = { options }; }
+  else if (name === 'send_message') args = migrateToolArguments(name, args);
   const handler = createMcpHandler(() => createMcpServer(env, principal), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST',
@@ -29,7 +32,7 @@ async function call(name: string, args: Record<string, unknown>, principal = use
 
 beforeEach(async () => {
   local = await createTestD1();
-  const ensured = await ensureUser(local.db, user);
+  const ensured = await bootstrapLocalUser(local.db, user);
   const connection = await createConnection(local.db, encryptionKey, { userId: ensured.id, friendlyName: 'Test', instanceId: 'instance-a', token: 'instance-secret' });
   connectionId = connection.id;
   env = { DB: local.db, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://provider.invalid', ENVIRONMENT: 'local' };
@@ -161,10 +164,10 @@ describe('send idempotency through MCP with real D1', () => {
   });
 
   it('isolates keys by user and connection while conflicting across message variants', async () => {
-    const ensured = await ensureUser(local.db, user);
+    const ensured = await bootstrapLocalUser(local.db, user);
     const second = await createConnection(local.db, encryptionKey, { userId: ensured.id, friendlyName: 'Second', instanceId: 'instance-b', token: 'second-secret' });
     const other: AuthenticatedUser = { id: 'claim-b', email: 'b@example.test', claims: {} };
-    const otherUser = await ensureUser(local.db, other);
+    const otherUser = await bootstrapLocalUser(local.db, other);
     const otherConnection = await createConnection(local.db, encryptionKey, { userId: otherUser.id, friendlyName: 'Other', instanceId: 'instance-c', token: 'other-secret' });
     const args = { idempotencyKey: 'same-key', message: { kind: 'text', to: '5511999999999', text: 'Ação por conta' } };
     const denied = await call('send_message', args, user, ['mcp:read']);
@@ -234,7 +237,7 @@ it('scopes read-only send lookup to the authenticated owner and never dispatches
   const accepted = await call('get_send_status',{operation:'send_message',idempotencyKey:'lookup-owner'},user,['mcp:read']);
   expect(accepted.structuredContent.data).toMatchObject({outcome:'accepted',messageId:'SENT-1'});
   const other = {id:'other-claim',email:'other@example.test',claims:{}};
-  const owner = await ensureUser(local.db,other);
+  const owner = await bootstrapLocalUser(local.db,other);
   await createConnection(local.db,encryptionKey,{userId:owner.id,friendlyName:'Other',instanceId:'other-instance',token:'other-token'});
   const foreign = await call('get_send_status',{operation:'send_message',idempotencyKey:'lookup-owner',connectionId},other);
   expect(foreign.structuredContent.data.error.code).toBe('connection_not_found');

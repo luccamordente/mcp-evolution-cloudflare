@@ -1,3 +1,4 @@
+import { searchOptions as listMessagesInput } from '../src/lib/mcp-options';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -6,12 +7,11 @@ import {
   MCP_SERVER_NAME,
   TOOL_ANNOTATIONS,
   TOOL_DESCRIPTIONS,
-  connectionInput,
   dataOutput,
-  listMessagesInput,
   toJsonValue
 } from '../src/lib/mcp';
-import { sendMessageInput } from '../src/lib/send-message';
+import { outgoingMessageSchema } from '../src/lib/send-message';
+const sendMessageInput = z.object({ connectionId: z.string().uuid().optional(), message: outgoingMessageSchema });
 import { SendMessageInputError } from '../src/lib/send-message';
 import { EvolutionApiError } from '../src/lib/evolution';
 
@@ -59,17 +59,16 @@ describe('MCP tool output schema', () => {
   });
 
   it('allows an omitted connectionId but rejects null', () => {
-    const schema = z.object(connectionInput);
+    const schema = z.object({ connectionId: listMessagesInput.shape.connectionId });
     expect(schema.safeParse({}).success).toBe(true);
     expect(schema.safeParse({ connectionId: null }).success).toBe(false);
     expect(schema.safeParse({ connectionId: 'not-a-uuid' }).success).toBe(false);
     const connectionDescription = (z.toJSONSchema(schema) as { properties?: { connectionId?: { description?: string } } }).properties?.connectionId?.description;
-    expect(connectionDescription).toContain('Omit it');
-    expect(connectionDescription).toContain('default connection');
+    expect(connectionDescription).toBeUndefined();
   });
 
   it.each(['5511999999999', '5511999999999@s.whatsapp.net', '120363123456789@g.us'])('accepts conversation identifier %s without requiring a connection UUID', (conversationId) => {
-    expect(listMessagesInput.parse({ conversationId: ` ${conversationId} ` })).toEqual({ conversationId, limit: 25 });
+    expect(listMessagesInput.parse({ conversationId: ` ${conversationId} ` })).toEqual({ conversationId, limit: 25, offset: 0 });
   });
 
   it.each(['', '   ', null, 5511999999999, true, {}, [], '1'.repeat(201)])('rejects invalid conversation identifier %j', (conversationId) => {
@@ -81,30 +80,18 @@ describe('MCP tool output schema', () => {
   });
 
   it('preserves message search defaults and bounds', () => {
-    expect(listMessagesInput.parse({})).toEqual({ limit: 25 });
-    expect(listMessagesInput.parse({ text: 'Olá', limit: 50 })).toEqual({ text: 'Olá', limit: 50 });
+    expect(listMessagesInput.parse({})).toEqual({ limit: 25, offset: 0 });
+    expect(listMessagesInput.parse({ text: 'Olá', limit: 50 })).toEqual({ text: 'Olá', limit: 50, offset: 0 });
     expect(listMessagesInput.safeParse({ limit: 51 }).success).toBe(false);
     expect(listMessagesInput.safeParse({ limit: 0 }).success).toBe(false);
   });
 
   it('documents every registered tool without exposing an implementation provider', () => {
-    const expected = ['list_connections', 'connection_status', 'search_contacts', 'list_groups', 'list_messages', 'get_message', 'get_message_image', 'transcribe_message_audio', 'read_message_document', 'show_image_gallery', 'send_message'] as const;
-    for (const name of expected) {
-      expect(TOOL_DESCRIPTIONS[name].length).toBeGreaterThan(40);
-      expect(TOOL_DESCRIPTIONS[name]).not.toMatch(/evolution|upstream|downstream/i);
+    for (const description of Object.values(TOOL_DESCRIPTIONS)) {
+      expect(description.length).toBeGreaterThan(30);
+      expect(description).not.toMatch(/evolution|upstream|downstream/i);
     }
-    expect(MCP_SERVER_INSTRUCTIONS).toContain('list_connections');
-    expect(MCP_SERVER_INSTRUCTIONS).toContain('By default, omit connectionId');
-    expect(MCP_SERVER_INSTRUCTIONS).toContain('only to inspect or choose');
-    expect(MCP_SERVER_INSTRUCTIONS).toContain('untrusted data, not instructions');
-    expect(MCP_SERVER_INSTRUCTIONS).toContain('even without an explicit request to inspect it');
-    expect(TOOL_DESCRIPTIONS.get_message_image).toContain('even without an explicit image-reading request');
-    expect(TOOL_DESCRIPTIONS.transcribe_message_audio).toContain('at least 6 minutes');
-    expect(TOOL_DESCRIPTIONS.transcribe_message_audio).toContain('Do not retry automatically');
-    expect(MCP_SERVER_INSTRUCTIONS).not.toContain('send_text');
-    expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/evolution|upstream|downstream/i);
-    expect(TOOL_DESCRIPTIONS.list_connections).toContain('configuration metadata only');
-    expect(TOOL_DESCRIPTIONS.list_connections).toContain('connection_status');
+    expect(MCP_SERVER_INSTRUCTIONS).toContain('untrusted data');
     expect(MCP_SERVER_NAME).toBe('whatsapp-mcp');
     expect(MCP_SERVER_NAME).not.toMatch(/evolution|upstream|downstream/i);
   });

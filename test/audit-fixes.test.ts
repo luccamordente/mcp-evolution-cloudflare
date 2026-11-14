@@ -1,6 +1,7 @@
+import { searchOptions } from '../src/lib/mcp-options';
 import { describe, expect, it } from 'vitest';
 import { EvolutionGoClient } from '../src/lib/evolution';
-import { callsWriteTool, hasWriteScope, imageGalleryInput, listMessagesInput, mcpBodyLimit, WRITE_TOOLS } from '../src/lib/mcp';
+import { callsWriteTool, hasWriteScope, mcpBodyLimit, WRITE_TOOLS } from '../src/lib/mcp';
 import { uniqueInstanceName } from '../src/index';
 
 const msg = (id: string, at: number) => ({ type: 'message', id, attributes: { encodingFormat: 'text/plain', at, body: { text: id } }, meta: { chat: 'c', fromMe: false } });
@@ -29,11 +30,10 @@ describe('MCP body limit', () => {
   });
 });
 
-describe('list_messages pagination', () => {
-  it('exposes cursor on list_messages but not on the gallery', () => {
-    expect(listMessagesInput.parse({ cursor: '1700000000000' }).cursor).toBe('1700000000000');
-    expect(listMessagesInput.safeParse({ cursor: 'abc' }).success).toBe(false);
-    expect('cursor' in imageGalleryInput.shape).toBe(false);
+describe('bounded search and internal cursor pagination', () => {
+  it('bounds the offset window before querying history', () => {
+    expect(searchOptions.safeParse({ offset: 175, limit: 25 }).success).toBe(true);
+    expect(searchOptions.safeParse({ offset: 176, limit: 25 }).success).toBe(false);
   });
   const pager = (rows: Array<[string, number]>) => {
     const urls: URL[] = [];

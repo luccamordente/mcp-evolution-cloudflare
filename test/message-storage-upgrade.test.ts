@@ -1,3 +1,4 @@
+import { migrateToolArguments, migrateToolCall } from './helpers/tool-arguments';
 import { expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { unstable_splitSqlQuery } from 'wrangler';
@@ -59,8 +60,11 @@ it('removes legacy content on upgrade, preserves identity and operational state,
     const connection = await fixture.db.prepare('SELECT encrypted_token FROM whatsapp_connections WHERE id = ?').bind(connectionId).first<{ encrypted_token: string }>();
     expect(await decryptToken(connection!.encrypted_token, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')).toBe('synthetic-instance');
     expect(await (await fixture.fetch('/fixture/grants?'+new URLSearchParams({ user: encodeURIComponent('fixture-a@example.test') }))).json()).toEqual(grants);
-    const call = async (name: string, args: Record<string, unknown> = {}) => (await fixture.rpc(account.accessToken, 'tools/call', { name, arguments: args }, { 'Mcp-Name': name })).body.result;
-    expect((await call('list_connections')).structuredContent.data.map((c: { id: string }) => c.id)).toEqual(expect.arrayContaining(account.connections));
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const params = name === 'send_message' ? { name, arguments: migrateToolArguments(name, args) } : migrateToolCall({ name, arguments: args });
+      return (await fixture.rpc(account.accessToken, 'tools/call', params, { 'Mcp-Name': String(params.name) })).body.result;
+    };
+    expect((await call('list_connections')).structuredContent.data.items.map((c: { id: string }) => c.id)).toEqual(expect.arrayContaining(account.connections));
     await fixture.queue(jobs);
     expect(callbacks).toHaveLength(1);
     expect(JSON.parse(callbacks[0].body).data.messageId).toBe('cycle-message');

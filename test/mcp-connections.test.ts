@@ -38,7 +38,7 @@ function scopedDb() {
 
 describe('list_connections ownership', () => {
   it('returns only connections belonging to the authenticated user', async () => {
-    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({
       data: [
         { instanceName: 'instance-a', owner: 'a@example.com' },
         { instanceName: 'instance-b', owner: 'b@example.com' },
@@ -55,12 +55,12 @@ describe('list_connections ownership', () => {
       { id: 'claim-user-a', email: 'a@example.com', claims: {} },
     );
 
-    const tool = (server as unknown as { _registeredTools: Record<string, { handler: () => Promise<unknown> }> })._registeredTools.list_connections;
-    const result = await tool.handler();
+    const tool = (server as unknown as { _registeredTools: Record<string, { handler: (args: unknown) => Promise<unknown> }> })._registeredTools.search_connections;
+    const result = await tool.handler({});
 
     expect(result).toMatchObject({
       structuredContent: {
-        data: [{ id: 'connection-a', friendlyName: 'Lucca', instanceId: 'instance-a' }],
+        data: { items: [{ id: 'connection-a', friendlyName: 'Lucca', instanceId: 'instance-a' }] },
       },
     });
     expect(fetcher).not.toHaveBeenCalled();
@@ -102,13 +102,13 @@ describe('list_connections ownership', () => {
       { id: 'claim-user-a', email: 'a@example.com', claims: {} },
     );
 
-    const tool = (server as unknown as { _registeredTools: Record<string, { handler: (args: unknown) => Promise<unknown> }> })._registeredTools.connection_status;
-    const result = await tool.handler({ connectionId: 'c770126e-773a-408f-9405-89561d05447c' });
+    const tool = (server as unknown as { _registeredTools: Record<string, { handler: (args: unknown) => Promise<unknown> }> })._registeredTools.get_message;
+    const result = await tool.handler({ messageId: 'message-1', options: { connectionId: 'c770126e-773a-408f-9405-89561d05447c' } });
 
     expect(result).toMatchObject({
       isError: true,
       structuredContent: { data: { error: {
-        code: 'connection_not_found', status: 404, retryable: false, operation: 'connection_status',
+        code: 'connection_not_found', status: 404, retryable: false, operation: 'get_message',
         message: 'Connection not found',
       } } },
     });

@@ -1,3 +1,4 @@
+import { migrateToolArguments } from './helpers/tool-arguments';
 import { afterEach, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -78,41 +79,41 @@ it('serves the shared tools and resources with a persistent default connection o
   }
   const first = await open();
   expect(first.client.getServerCapabilities()).not.toHaveProperty('events');
-  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toContain('connection_status');
+  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toContain('search_connections');
   const resources = await first.client.listResources();
   expect((await first.client.readResource({ uri: resources.resources[0].uri })).contents).toHaveLength(1);
-  const listed = await first.client.callTool({ name: 'list_connections', arguments: {} });
-  const connections = (listed.structuredContent as { data: Array<{ id: string; isDefault: number }> }).data;
+  const listed = await first.client.callTool({ name: "search_connections", arguments: migrateToolArguments("list_connections", {}) });
+  const connections = (listed.structuredContent as { data: { items: Array<{ id: string; isDefault: number }> } }).data.items;
   expect(connections).toHaveLength(1);
   expect(connections[0].isDefault).toBe(1);
-  expect((await first.client.callTool({ name: 'connection_status', arguments: {} })).isError).not.toBe(true);
-  for (const tool of [{ name: 'search_contacts', arguments: { query: 'Fixture' } }, { name: 'list_groups', arguments: {} }, { name: 'list_messages', arguments: {} }]) {
+  expect((await first.client.callTool({ name: "search_connections", arguments: migrateToolArguments("connection_status", {}) })).isError).not.toBe(true);
+  for (const tool of [{ name: "search_groups", arguments: migrateToolArguments("list_groups", {}) }, { name: "search_messages", arguments: migrateToolArguments("list_messages", {}) }]) {
     const result = await first.client.callTool(tool);
     expect(result.isError).not.toBe(true);
     expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(1);
   }
-  const sent = await first.client.callTool({ name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text: 'Local fixture send' } } });
+  const sent = await first.client.callTool({ name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: '5511999999999', text: 'Local fixture send' } }) });
   expect(sent.isError).not.toBe(true);
   expect(sent.structuredContent).toMatchObject({ data: { messageId: 'local-send-1' } });
   const mediaArgs = { message: { kind: 'document', to: '5511999999999', mimeType: 'application/pdf', source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024).toString('base64') } } };
-  const media = await first.client.callTool({ name: 'send_message', arguments: mediaArgs });
+  const media = await first.client.callTool({ name: 'send_message', arguments: migrateToolArguments("send_message", mediaArgs) });
   expect(media.isError).not.toBe(true);
   expect(receivedMediaBytes).toBe(8 * 1024 * 1024);
-  const oversized = await first.client.callTool({ name: 'send_message', arguments: { message: { ...mediaArgs.message, source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') } } } });
+  const oversized = await first.client.callTool({ name: 'send_message', arguments: migrateToolArguments("send_message", { message: { ...mediaArgs.message, source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') } } }) });
   expect(oversized.structuredContent).toMatchObject({ data: { error: { code: 'media_too_large' } } });
   expect(first.stderr().includes('fixture-instance-credential')).toBe(false);
   await first.close();
   const keyBefore = await readFile(resolve(state, 'encryption.key'), 'utf8');
   expect(Buffer.from(keyBefore, 'base64url').byteLength).toBe(32);
   const second = await open();
-  const reopened = await second.client.callTool({ name: 'list_connections', arguments: {} });
-  expect((reopened.structuredContent as { data: Array<{ id: string }> }).data.map((item) => item.id)).toEqual([connections[0].id]);
-  expect((await second.client.callTool({ name: 'connection_status', arguments: { connectionId: connections[0].id } })).isError).not.toBe(true);
-  const history = await second.client.callTool({ name: 'list_messages', arguments: {} });
+  const reopened = await second.client.callTool({ name: "search_connections", arguments: migrateToolArguments("list_connections", {}) });
+  expect((reopened.structuredContent as { data: { items: Array<{ id: string }> } }).data.items.map((item) => item.id)).toEqual([connections[0].id]);
+  expect((await second.client.callTool({ name: "search_connections", arguments: migrateToolArguments("connection_status", { connectionId: connections[0].id }) })).isError).not.toBe(true);
+  const history = await second.client.callTool({ name: "search_messages", arguments: migrateToolArguments("list_messages", {}) });
   expect((history.structuredContent as { data: { items: Array<{ id: string }> } }).data.items.map(item => item.id)).toEqual(['fixture-message']);
   for (const tool of [
-    { name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text: 'Fixture reply', replyTo: { messageId: 'local-send-1' } } } },
-    { name: 'send_message', arguments: { message: { kind: 'forward', to: '5511999999999', source: { conversationId: '5511999999999', messageId: 'fixture-message' } } } },
+    { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: '5511999999999', text: 'Fixture reply', replyTo: { messageId: 'local-send-1' } } }) },
+    { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'forward', to: '5511999999999', source: { conversationId: '5511999999999', messageId: 'fixture-message' } } }) },
   ]) expect((await second.client.callTool(tool)).isError).not.toBe(true);
   await second.close();
   expect(await readFile(resolve(state, 'encryption.key'), 'utf8') === keyBefore).toBe(true);

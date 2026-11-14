@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -24,16 +25,21 @@ import (
 	send_service "github.com/evolution-foundation/evolution-go/pkg/sendMessage/service"
 	whatsmeow_service "github.com/evolution-foundation/evolution-go/pkg/whatsmeow/service"
 	"github.com/gin-gonic/gin"
+	_ "github.com/glebarez/go-sqlite"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 type capture struct {
-	To      string         `json:"to"`
-	ID      string         `json:"id"`
-	Message *waE2E.Message `json:"message"`
+	To           string         `json:"to"`
+	ID           string         `json:"id"`
+	Message      *waE2E.Message `json:"message"`
+	SecretStored bool           `json:"secretStored"`
+	RoundTrip    bool           `json:"roundTrip"`
 }
 
 type webhookSink struct {
@@ -46,6 +52,9 @@ type retainedSource struct{}
 
 func (retainedSource) InsertMessage(message_model.Message) error { return nil }
 func (retainedSource) GetMessageByID(id string, _ ...string) (*message_model.Message, error) {
+	if id == "EVENT_SOURCE" {
+		return &message_model.Message{InstanceID: "instance", MessageID: id, Source: "5511777777777@lid", Sender: "5511999999999@s.whatsapp.net", Body: json.RawMessage(`{"text":"Quoted event fixture"}`)}, nil
+	}
 	if id != "SOURCE" {
 		return nil, errors.New("not retained")
 	}
@@ -72,6 +81,21 @@ func main() {
 		panic(err)
 	}
 	http.DefaultTransport = assetTransport{image: imageBytes.Bytes()}
+	ctx := context.Background()
+	address := "file:" + filepath.Join(os.Getenv("WAPILOT_ACCEPTANCE_TMP"), "secrets.db") + "?_pragma=foreign_keys(1)"
+	secrets, err := sqlstore.New(ctx, "sqlite", address, nil)
+	if err != nil {
+		panic(err)
+	}
+	defer secrets.Close()
+	device := secrets.NewDevice()
+	ownID := types.NewJID("5511888888888", types.DefaultUserServer)
+	device.ID = &ownID
+	device.LID = types.NewJID("5511888888888", types.HiddenUserServer)
+	device.Account = &waAdv.ADVSignedDeviceIdentity{Details: []byte{}, AccountSignature: make([]byte, 64), AccountSignatureKey: make([]byte, 32), DeviceSignature: make([]byte, 64)}
+	if err := device.Save(ctx); err != nil {
+		panic(err)
+	}
 	var captures []capture
 	var mu sync.Mutex
 	whatsmeow.WapilotAcceptanceSend = func(_ context.Context, to types.JID, message *waE2E.Message, extra ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
@@ -79,16 +103,37 @@ func main() {
 		if len(extra) > 0 && extra[0].ID != "" {
 			id = extra[0].ID
 		}
+		stored := false
+		roundTrip := false
+		if message.GetEventMessage() != nil {
+			reopened, err := sqlstore.New(ctx, "sqlite", address, nil)
+			if err != nil {
+				return whatsmeow.SendResponse{}, err
+			}
+			original, err := reopened.GetDevice(ctx, ownID)
+			if err != nil {
+				reopened.Close()
+				return whatsmeow.SendResponse{}, err
+			}
+			saved, _, err := original.MsgSecrets.GetMessageSecret(ctx, to, device.LID, id)
+			stored = err == nil && len(saved) == 32 && bytes.Equal(saved, message.GetMessageContextInfo().GetMessageSecret())
+			reopened.Close()
+			if !stored {
+				return whatsmeow.SendResponse{}, errors.New("event secret was not durable before dispatch")
+			}
+			encoded, err := proto.Marshal(message)
+			var decoded waE2E.Message
+			roundTrip = err == nil && proto.Unmarshal(encoded, &decoded) == nil && proto.Equal(message, &decoded)
+		}
 		mu.Lock()
-		captures = append(captures, capture{To: to.String(), ID: id, Message: message})
+		captures = append(captures, capture{To: to.String(), ID: id, Message: message, SecretStored: stored, RoundTrip: roundTrip})
 		mu.Unlock()
 		return whatsmeow.SendResponse{ID: id, Timestamp: time.Now()}, nil
 	}
 	whatsmeow.WapilotAcceptanceUpload = func(_ context.Context, data []byte, _ whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 		return whatsmeow.UploadResponse{URL: "https://upload.invalid/media", DirectPath: "/media", FileLength: uint64(len(data)), MediaKey: make([]byte, 32), FileSHA256: make([]byte, 32), FileEncSHA256: make([]byte, 32)}, nil
 	}
-	ownID := types.NewJID("5511888888888", types.DefaultUserServer)
-	client := &whatsmeow.Client{Store: &store.Device{ID: &ownID}}
+	client := &whatsmeow.Client{Store: device}
 	cfg := &config.Config{LogDirectory: os.Getenv("WAPILOT_ACCEPTANCE_TMP"), LogMaxSize: 1}
 	svc := send_service.NewSendService(map[string]*whatsmeow.Client{"instance": client}, webhookSink{}, cfg, logger.NewLoggerManager(cfg), retainedSource{})
 	handler := send_handler.NewSendHandler(svc)
@@ -104,6 +149,13 @@ func main() {
 		}
 	})
 	router.DELETE("/_captures", func(c *gin.Context) { mu.Lock(); captures = nil; mu.Unlock(); c.Status(204) })
+	router.POST("/_close_secrets", func(c *gin.Context) {
+		if err := secrets.Close(); err != nil {
+			c.Status(500)
+			return
+		}
+		c.Status(204)
+	})
 	router.GET("/_image", func(c *gin.Context) { c.Data(200, "image/png", imageBytes.Bytes()) })
 	routes := router.Group("/send")
 	routes.Use(jsonapi.Middleware(), func(c *gin.Context) {
@@ -114,6 +166,7 @@ func main() {
 		c.Set("instance", &instance_model.Instance{Id: "instance", Jid: ownID.String(), Token: "instance-token"})
 		c.Next()
 	})
+	routes.POST("/event", handler.SendEvent)
 	routes.POST("/text", handler.SendText)
 	routes.POST("/link", handler.SendLink)
 	routes.POST("/media", handler.SendMedia)

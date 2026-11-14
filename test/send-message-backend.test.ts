@@ -13,7 +13,7 @@ import type { Env } from '../src/types';
 
 const backendUrl = process.env.WAPILOT_SEND_ACCEPTANCE_URL;
 const execute = promisify(execFile);
-const capturesSchema = z.array(z.object({ to: z.string(), id: z.string(), message: z.record(z.string(), z.unknown()) }));
+const capturesSchema = z.array(z.object({ to: z.string(), id: z.string(), message: z.record(z.string(), z.unknown()), secretStored: z.boolean().optional(), roundTrip: z.boolean().optional() }));
 const resultSchema = z.object({ result: z.object({ isError: z.boolean().optional(), structuredContent: z.object({ data: z.object({ outcome: z.string(), messageId: z.string().optional() }).passthrough() }) }) });
 const principal = { id: 'native-acceptance', email: 'native@example.test', claims: {} };
 let local: Awaited<ReturnType<typeof createTestD1>>;
@@ -74,6 +74,19 @@ describe.runIf(Boolean(backendUrl))('MCP to real Go native-message acceptance', 
     video = (await readFile(file)).toString('base64');
   }, 30000);
   afterAll(async () => { await local?.dispose(); if (temporary) await rm(temporary, { recursive: true, force: true }); });
+
+  it('constructs native events after durable SDK secret storage and preserves protobuf round-trip', async () => {
+    const event = { kind: 'event', to: '5511777777777@lid', name: 'Synthetic event', startTime: '2026-11-20T18:00:00Z', location: { name: 'Zero', latitude: 0, longitude: 0 }, replyTo: { messageId: 'EVENT_SOURCE' } };
+    const first = await native(event);
+    const second = await native(event);
+    expect(first).toMatchObject({ to: event.to, secretStored: true, roundTrip: true, message: { eventMessage: { name: event.name, startTime: 1795197600, location: { degreesLatitude: 0, degreesLongitude: 0 }, contextInfo: { stanzaID: 'EVENT_SOURCE', quotedMessage: { conversation: 'Quoted event fixture' } } } } });
+    const secrets = z.object({ messageContextInfo: z.object({ messageSecret: z.string() }) });
+    const a = secrets.parse(first.message).messageContextInfo.messageSecret;
+    const b = secrets.parse(second.message).messageContextInfo.messageSecret;
+    expect(Buffer.from(a, 'base64')).toHaveLength(32);
+    expect(a).not.toBe(b);
+    expect(first.message).not.toHaveProperty('documentMessage');
+  });
 
   it('constructs text with native quote contents and mentions', async () => {
     const capture = await native({ kind: 'text', to: '120363123456789@g.us', replyTo: { messageId: 'SOURCE', participant: '5511999999999@s.whatsapp.net' }, text: 'Native text', mentions: { kind: 'users', jids: ['5511777777777@s.whatsapp.net'] } });
@@ -165,4 +178,12 @@ describe.runIf(Boolean(backendUrl))('MCP to real Go native-message acceptance', 
     expect(result.isError).toBe(true);
     expect(capturesSchema.parse(await (await fetch(`${backendUrl}/_captures`)).json())).toHaveLength(before);
   });
+  it('does not dispatch an event when durable secret storage fails', async () => {
+    const before = capturesSchema.parse(await (await fetch(`${backendUrl}/_captures`)).json()).length;
+    expect((await fetch(`${backendUrl}/_close_secrets`, { method: 'POST' })).status).toBe(204);
+    const result = await send({ kind: 'event', to: '5511777777777@lid', name: 'Must not dispatch', startTime: '2026-11-20T18:00:00Z' });
+    expect(result.isError).toBe(true);
+    expect(capturesSchema.parse(await (await fetch(`${backendUrl}/_captures`)).json())).toHaveLength(before);
+  });
+
 });

@@ -122,7 +122,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (process.exitCode === 0) {
       const result = JSON.parse(await readFile(report, 'utf8'));
       const native = result.testResults.find(test => basename(test.name) === 'send-message-backend.test.ts')?.assertionResults ?? [];
-      if (native.length < 12 || native.some(test => test.status !== 'passed')) throw new Error('Native send acceptance did not execute every required case.');
+      if (native.length < 14 || native.some(test => test.status !== 'passed')) throw new Error('Native send acceptance did not execute every required case.');
       console.log(`Send acceptance passed ${result.numPassedTests} tests, including ${native.length} native Go cases.`);
     }
   } catch (error) {

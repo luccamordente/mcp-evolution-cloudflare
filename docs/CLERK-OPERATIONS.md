@@ -16,7 +16,7 @@ A [preparação production da #63 em 13/11/2026](qa/clerk-production-2026-11-13.
 
 ## Vínculo deliberado dos usuários existentes
 
-O [registro da #64 em 14/11/2026](qa/clerk-identity-linking-2026-11-14.md) documenta o inventário, a aplicação exclusiva da migration aditiva, os dois convites administrativos production e o vínculo de Lucca após verificação/read-back. Heitor continua com convite pendente e sem vínculo; a #64 e o corte permanecem pendentes.
+O [registro da #64 em 14/11/2026](qa/clerk-identity-linking-2026-11-14.md) documenta o inventário, a aplicação exclusiva da migration aditiva, os dois convites administrativos production e o vínculo de Lucca após verificação/read-back. Heitor continua com convite pendente e sem vínculo; a #64 e o corte permanecem pendentes. O mesmo registro distingue a versão Access histórica do novo read-back da publicação paralela `8e9211a5…`, com seis ferramentas, e exige reconciliar a candidata Clerk antes do corte.
 
 1. Com autorização para o ambiente alvo, confira a aplicação/instância Clerk, o D1 e o KV existentes e a revisão publicada. Registre somente identificadores, contagens e comparações de integridade; não exporte tokens de conexão ou props dos grants. Antes de aplicar migrations, confirme `0010_unified_send_fence.sql` já aplicada e somente `0011_clerk_identity.sql` pendente e aprovada. Ela é aditiva e não altera conexões. Interrompa diante de outra migration ou inventário divergente.
 2. No D1 correspondente, leia `users.id`, e-mail canônico, estado e vínculo atual dos dois usuários. Preserve esses IDs e as FKs. Confira os IDs/defaults e a integridade das cifras no ambiente confiável antes/depois; os testes locais não substituem essa leitura remota.

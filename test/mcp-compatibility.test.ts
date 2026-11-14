@@ -1,4 +1,4 @@
-import { migrateToolArguments } from './helpers/tool-arguments';
+import { sendArguments } from './helpers/mcp-arguments';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { eventRuntime } from './helpers/mcp-events-runtime';
 
@@ -22,7 +22,7 @@ it.each(['2025-03-26', '2025-06-18', '2025-11-25'])('accepts a %s client without
   expect(listed.status).toBe(200);
   expect(listed.headers.get('Mcp-Session-Id')).toBeNull();
   expect((await listed.json() as {result:{tools:{name:string}[]}}).result.tools.some(tool=>tool.name==='search_connections')).toBe(true);
-  const called = await post({jsonrpc:'2.0',id:3,method:'tools/call',params:{name:"search_connections",arguments:migrateToolArguments("list_connections", {})}}, protocolVersion);
+  const called = await post({jsonrpc:'2.0',id:3,method:'tools/call',params:{name:"search_connections",arguments:{ options: {  } }}}, protocolVersion);
   expect(called.status).toBe(200);
   expect((await called.json() as {result:{isError?:boolean}}).result.isError).not.toBe(true);
 });
@@ -44,7 +44,7 @@ it('logs protocol diagnostics without tokens or request payloads', async () => {
 });
 
 it('applies OAuth write scope checks to legacy calls', async () => {
-  const result = await fixture.fetch('/mcp',{method:'POST',headers:{authorization:`Bearer ${account.accessToken}`,'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{ name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to:'5511999999999', text:'must not send' } }) }})});
+  const result = await fixture.fetch('/mcp',{method:'POST',headers:{authorization:`Bearer ${account.accessToken}`,'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{ name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to:'5511999999999', text:'must not send' } }) }})});
   expect(result.status).toBe(403);
   expect(result.headers.get('www-authenticate')).toContain('insufficient_scope');
 });

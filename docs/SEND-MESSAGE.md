@@ -1,6 +1,6 @@
 # Contrato de `send_message`
 
-O catálogo MCP atual usa somente `search_connections`, `search_contacts`, `search_groups`, `search_messages`, `get_message` e `send_message`. Os exemplos e nomes antigos abaixo registram contratos/validações anteriores; para novos clientes, consulte [o contrato atual](TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. Não há ferramenta `get_send_status`: a consulta operacional por chave fica em `get_message.options.idempotencyKey`.
+O catálogo MCP atual usa somente `search_connections`, `search_contacts`, `search_groups`, `search_messages`, `get_message` e `send_message`. Para os argumentos e limites, consulte [o contrato atual](TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. A consulta operacional por chave usa `get_message` com `options.idempotencyKey`.
 
 
 `send_message` é a única ferramenta MCP de envio. O catálogo HTTP e o catálogo stdio compartilham os schemas de `src/lib/send-message.ts`. O adaptador em `src/lib/evolution.ts` converte cada variante para a rota correspondente do provedor. Campos desconhecidos ou incompatíveis com a variante são rejeitados.
@@ -148,7 +148,7 @@ O resultado conserva `connectionId`, `accepted`, os identificadores retornados p
 
 A operação canônica de idempotência é `send_message`. A chave protege a ação por 24 horas no escopo do usuário e da conexão. O hash inclui variante, destino, referência citada, opções e conteúdo ordenado. Trocar a variante com a mesma chave produz conflito; não cria outra ação independente.
 
-As antigas ferramentas `send_text`, `send_media`, `reply_to_message` e `forward_message` foram removidas do catálogo e dos handlers. `get_send_status` ainda aceita esses nomes como `operation` somente para consultar registros operacionais anteriores à migração. Esses registros continuam sujeitos à expiração original de 24 horas.
+As antigas ferramentas `send_text`, `send_media`, `reply_to_message` e `forward_message` foram removidas do catálogo e dos handlers. `get_message` com `options.idempotencyKey` ainda aceita esses nomes como `operation` somente para consultar registros operacionais anteriores à migração. Esses registros continuam sujeitos à expiração original de 24 horas.
 
 A migration `0010_unified_send_fence.sql` cria bloqueios atômicos entre os namespaces antigo e novo. Um registro legado ativo impede reservar a mesma chave por `send_message`; uma reserva nova impede um Worker antigo de reservar essa chave no namespace legado. O erro `send_legacy_action_exists` não autoriza reenvio, troca de chave ou cópia de conteúdo. A consulta usa a operação original, sem iniciar outra escrita. A [ordem de publicação](DEPLOY.md#publicação-da-ferramenta-unificada-de-envio) aplica essa migration antes do corte de catálogo e clientes.
 

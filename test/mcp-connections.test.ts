@@ -36,7 +36,7 @@ function scopedDb() {
   };
 }
 
-describe('list_connections ownership', () => {
+describe('search_connections ownership', () => {
   it('returns only connections belonging to the authenticated user', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({
       data: [

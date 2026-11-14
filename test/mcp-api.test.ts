@@ -37,7 +37,7 @@ it('publishes exactly six tools and no gallery resource', async () => {
   expect(JSON.stringify(await rpc('resources/list'))).not.toContain('image-gallery');
 });
 it('returns the latest retained delivery status without downloading media', async () => {
-  expect(await call('get_message', { messageId: 'm1' })).toMatchObject({ structuredContent: { data: { connectionId, message: { status: 'Read', text: 'hello' } } } });
+  expect(await call('get_message', { messageId: 'm1', options: {  } })).toMatchObject({ structuredContent: { data: { connectionId, message: { status: 'Read', text: 'hello' } } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 it.each([

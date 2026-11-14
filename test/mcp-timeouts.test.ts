@@ -8,7 +8,7 @@ describe('MCP timeout attribution', () => {
       init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     }));
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'private-token', timeoutMs: 10, fetcher });
-    const operation = kind === 'read' ? 'connection_status' : 'send_message';
+    const operation = kind === 'read' ? 'search_connections' : 'send_message';
     const error = await (kind === 'read' ? client.status() : client.sendMessage({ kind: 'text', to: '5511999999999', text: 'Private text' })).catch(error => error);
     const classified = classifyMcpError(error, operation);
 
@@ -44,7 +44,7 @@ describe('MCP timeout attribution', () => {
       }));
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'private-token', timeoutMs: 10, fetcher });
     const error = await client.status().catch(error => error);
-    expect(classifyMcpError(error, 'connection_status')).toMatchObject({ code: 'wapilot_timeout', status: 504 });
+    expect(classifyMcpError(error, 'search_connections')).toMatchObject({ code: 'wapilot_timeout', status: 504 });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

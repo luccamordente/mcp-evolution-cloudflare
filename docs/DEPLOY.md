@@ -1,5 +1,11 @@
 # Deploy e configuração
 
+## Atualização operacional de 14/11/2026
+
+A reconciliação da candidata Clerk preserva a API publicada de cinco ferramentas descrita em [TOOLS.md](TOOLS.md). Para a continuidade OAuth, use `search_connections` com `{ "options": {} }`, sem `include`: a resposta fica em `result.structuredContent.data.items` e consulta somente D1. Compare IDs, propriedade, padrão e nome amigável de forma privada; percorra offset/limit caso haja mais de 50 conexões. Teste primeiro o bearer pré-corte, depois o refresh original, preservando issuer/recurso canônico e escopos. Não consulte status live nem mensagens para essa prova.
+
+O retorno Access de 13/11 abaixo é evidência histórica. A publicação corrente informada pelo read-back operacional de 14/11 é `a29ea1f20c443c497be65dca221eb43f1ef97db3`, versão `cce19d4b-683c-4b18-8937-8ec44d13950e`; a versão `6af1ec15…` restaura nomes e envelopes MCP antigos e deixou de ser o retorno preferido. Antes do corte #65, registre novamente o artefato exato e o inventário de configuração, bindings e imagem da versão vigente. O read-back de 14/11 confirmou `observability.redact_query_string=true` ativo; a omissão no fonte dessa publicação não demonstra regressão live. Mantenha `true` explícito na candidata e em qualquer upload de retorno, e confira depois da publicação. Preserve `0011_clerk_identity.sql`, vínculos, KV, dados e revogações; não reative Builds automaticamente.
+
 Para identidade, vínculo, desativação recuperável e corte/retorno Clerk, siga o [procedimento operacional atual](CLERK-OPERATIONS.md). O alvo Clerk development foi aplicado com autorização e conferido em 13/11/2026; isso não configura produção nem comprova migração do login remoto. Os registros datados de publicação abaixo também não comprovam esse corte.
 
 ## Fundação de autorização para a migração Clerk
@@ -283,7 +289,7 @@ Verificações remotas: `/healthz` respondeu 200 com MCP `2026-07-28`; `POST /mc
 
 Esta mudança prepara `send_message`, os schemas por `message.kind`, o adaptador de envio e a migration `0010_unified_send_fence.sql`. Não publica Worker, aplica migration remota, altera infraestrutura ou envia mensagens reais. Os registros anteriores deste documento são históricos e não comprovam o estado atual do deployment.
 
-A troca de catálogo remove `send_text`, `reply_to_message`, `send_media` e `forward_message`. Os nomes antigos continuam aceitos somente pelo argumento `operation` de `get_send_status`, para consulta dos registros anteriores até sua expiração original de 24 horas. Clientes precisam atualizar as chamadas para o novo envelope, sem transformar uma ação de resultado desconhecido em uma nova chave.
+A troca de catálogo remove `send_text`, `reply_to_message`, `send_media` e `forward_message`. O catálogo atual também remove `get_send_status`: a recuperação de `send_message` usa `get_message.options.idempotencyKey`. Registros legados mantêm o bloqueio de reutilização até a expiração original, sem consulta pública por operação antiga. Clientes precisam atualizar as chamadas para o novo envelope, sem transformar uma ação de resultado desconhecido em uma nova chave.
 
 Antes de um corte autorizado, execute esta sequência:
 

@@ -1,5 +1,11 @@
 # Fundação Access e retorno — #61
 
+## Atualização operacional de 14/11/2026
+
+A reconciliação da candidata Clerk preserva a API publicada de cinco ferramentas descrita em [TOOLS.md](../TOOLS.md). Para a continuidade OAuth, use `search_connections` com `{ "options": {} }`, sem `include`: a resposta fica em `result.structuredContent.data.items` e consulta somente D1. Compare IDs, propriedade, padrão e nome amigável de forma privada; percorra offset/limit caso haja mais de 50 conexões. Teste primeiro o bearer pré-corte, depois o refresh original, preservando issuer/recurso canônico e escopos. Não consulte status live nem mensagens para essa prova.
+
+O retorno Access de 13/11 abaixo é evidência histórica. A publicação corrente informada pelo read-back operacional de 14/11 é `a29ea1f20c443c497be65dca221eb43f1ef97db3`, versão `cce19d4b-683c-4b18-8937-8ec44d13950e`; a versão `6af1ec15…` restaura nomes e envelopes MCP antigos e deixou de ser o retorno preferido. Antes do corte #65, registre novamente o artefato exato e o inventário de configuração, bindings e imagem da versão vigente. O read-back de 14/11 confirmou `observability.redact_query_string=true` ativo; a omissão no fonte dessa publicação não demonstra regressão live. Mantenha `true` explícito na candidata e em qualquer upload de retorno, e confira depois da publicação. Preserve `0011_clerk_identity.sql`, vínculos, KV, dados e revogações; não reative Builds automaticamente.
+
 A janela de produção da #61 foi **explicitamente autorizada e executada em 13/11/2026**. A fundação Access está publicada, com autorização D1, queries redigidas e respostas autenticadas `no-store`. O retorno preferido é a versão **`6af1ec15-cef2-4f01-b4c6-31c0c21e64dc`**, artefato **`16452515cd819d85557894821225937a9f26b660`**. **Os critérios da #61 foram concluídos, com merge local e revisões finais Standards/Spec sem achados.**
 
 ## Resultado atual da janela autorizada (23:16–23:37 UTC)

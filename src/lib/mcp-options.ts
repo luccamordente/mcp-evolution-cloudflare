@@ -6,6 +6,7 @@ export class OptionsError extends Error {
 const connectionId = z.string().uuid().optional();
 const pagination = { offset: z.number().int().safe().min(0).default(0), limit: z.number().int().min(1).max(100).default(50) };
 export const connectionOptions = z.object({ ...pagination, query: z.string().max(200).optional(), include: z.array(z.literal('status')).optional() }).strict();
+export const contactOptions = z.object({ ...pagination, connectionId }).strict();
 export const groupOptions = z.object({ ...pagination, connectionId, query: z.string().max(200).optional(), include: z.array(z.literal('participants')).optional() }).strict();
 export const searchOptions = z.object({ ...pagination, connectionId, conversationId: z.string().trim().min(1).max(200).optional(), text: z.string().max(200).optional(), limit: z.number().int().min(1).max(50).default(25) }).strict().refine(o => o.offset + o.limit <= 200, 'WaPilot search requires offset + limit <= 200. Narrow the conversation or text filter.');
 export const getOptions = z.object({
@@ -25,6 +26,7 @@ function input<T extends z.ZodRawShape>(shape: T) {
 }
 const loosePagination = { offset: z.number().optional(), limit: z.number().optional() };
 export const searchConnectionsInput = input({ ...connectionOptions.shape, ...loosePagination });
+export const searchContactsInput = input({ ...contactOptions.shape, ...loosePagination }).extend({ query: z.string().trim().min(1).max(200).describe('Contact name or phone number fragment to search for.') });
 export const searchGroupsInput = input({ ...groupOptions.shape, ...loosePagination });
 export const searchMessagesInput = input({ ...searchOptions.shape, ...loosePagination });
 export const getMessageInput = input({ ...getOptions.shape, ...loosePagination, page: z.number().optional(), pages: z.array(z.number()).optional(), crop: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).optional() }).extend({ messageId: z.string().trim().min(1).max(200).optional() });

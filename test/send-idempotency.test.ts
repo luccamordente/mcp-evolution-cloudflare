@@ -1,7 +1,8 @@
+import { migrateToolArguments } from './helpers/tool-arguments';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
-import { bootstrapLocalUser, createConnection, ensureUser } from '../src/lib/db';
+import { createConnection, bootstrapLocalUser } from '../src/lib/db';
 import type { AuthenticatedUser, Env } from '../src/types';
 import { createTestD1 } from './helpers/local-d1';
 
@@ -14,6 +15,8 @@ let connectionId: string;
 let sent: number;
 
 async function call(name: string, args: Record<string, unknown>, principal = user, scopes = ['mcp:read', 'mcp:write']) {
+  if (name === 'get_send_status') { name = 'get_message'; const { operation: _operation, ...options } = args; args = { options }; }
+  else if (name === 'send_message') args = migrateToolArguments(name, args);
   const handler = createMcpHandler(() => createMcpServer(env, principal), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST',
@@ -161,7 +164,7 @@ describe('send idempotency through MCP with real D1', () => {
   });
 
   it('isolates keys by user and connection while conflicting across message variants', async () => {
-    const ensured = await ensureUser(local.db, user);
+    const ensured = await bootstrapLocalUser(local.db, user);
     const second = await createConnection(local.db, encryptionKey, { userId: ensured.id, friendlyName: 'Second', instanceId: 'instance-b', token: 'second-secret' });
     const other: AuthenticatedUser = { id: 'claim-b', email: 'b@example.test', claims: {} };
     const otherUser = await bootstrapLocalUser(local.db, other);

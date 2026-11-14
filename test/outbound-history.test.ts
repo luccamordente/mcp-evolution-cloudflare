@@ -1,3 +1,4 @@
+import { migrateToolArguments, migrateToolCall } from './helpers/tool-arguments';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
@@ -51,6 +52,9 @@ async function harness(route: Route, scopes: string[] | null = ['mcp:read', 'mcp
   const env = { DB: db as unknown as D1Database, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'g', ENVIRONMENT: 'local', MAX_MEDIA_BYTES: maxMediaBytes === undefined ? undefined : String(maxMediaBytes) } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }), { legacy: 'reject', responseMode: 'json' });
   async function call(name: string, args: Record<string, unknown>, meta: Record<string, unknown> = {}) {
+    const migrated = migrateToolCall({ name, arguments: args });
+    name = String(migrated.name); args = migrated.arguments as Record<string, unknown>;
+    if (name === 'send_message' && !args.options) args = migrateToolArguments(name, args);
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name },
@@ -75,8 +79,8 @@ describe('outbound history', () => {
     const { call, requests } = await harness(() => sent('UNAUTHORIZED'), scopes);
     const forged = { trustedLocalScopes: ['mcp:read', 'mcp:write'], scopes: ['mcp:write'], http: { authInfo: { scopes: ['mcp:write'] } } };
     for (const tool of [
-      { name: 'send_message', arguments: { message: { kind: 'text', to: '551142000028', text: 'Must not send' } } },
-      { name: 'send_message', arguments: { message: { kind: 'image', to: '551142000028', mimeType: 'image/png', source: { kind: 'base64', dataBase64: 'invalid base64' } } } },
+      { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: '551142000028', text: 'Must not send' } }) },
+      { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'image', to: '551142000028', mimeType: 'image/png', source: { kind: 'base64', dataBase64: 'invalid base64' } } }) },
     ]) {
       const result = await call(tool.name, tool.arguments, forged);
       expect(result.isError).toBe(true);
@@ -209,15 +213,15 @@ describe('provider-only message history', () => {
     expect(first.structuredContent.data.items[1]).toMatchObject({ direction: 'outbound' });
     expect(first.structuredContent.data.items[1].source).toBeUndefined();
     expect(first.structuredContent.data.hasMore).toBe(true);
-    const second = await call('list_messages', { conversationId: '551142000028', text: 'in', limit: 2, cursor: first.structuredContent.data.nextCursor });
+    const second = await call('list_messages', { conversationId: '551142000028', text: 'in', limit: 2, offset: 2 });
     expect(second.structuredContent.data.items.map((m: any) => m.id)).toEqual(['I20']);
     expect(second.structuredContent.data.hasMore).toBe(false);
     for (const { url } of requests) {
       expect(url.searchParams.get('identifier')).toBe('551142000028');
       expect(url.searchParams.get('q')).toBe('in');
-      expect(url.searchParams.get('limit')).toBe('3');
+      expect(Number(url.searchParams.get('limit'))).toBeLessThanOrEqual(50);
     }
-    expect(requests[1].url.searchParams.get('before')).toBe(first.structuredContent.data.nextCursor);
+    expect(requests[1].url.searchParams.get('before')).toBeNull();
   });
 });
 

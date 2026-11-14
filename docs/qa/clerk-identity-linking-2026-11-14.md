@@ -1,6 +1,6 @@
 # Vínculo de identidades production — #64 — 14/11/2026
 
-**Estado: inventário e migration conferidos; dois convites criados, aguardando aceitação/verificação humana. Vínculos pendentes. Sem corte.** Este registro complementa a [preparação #63](clerk-production-2026-11-14.md) e o [procedimento de vínculo](../CLERK-OPERATIONS.md#vínculo-deliberado-dos-usuários-existentes), seguindo a [#64](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/64) e os gates da [#59](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/59). As operações externas e seus read-backs cabem ao responsável pela execução; este complemento documental não opera credenciais ou serviços.
+**Estado: Lucca autenticou no Portal, identidade verificada e vínculo D1 conferido; Heitor permanece com convite pendente e sem vínculo. A #64 continua aberta. Sem corte.** Este registro complementa a [preparação #63](clerk-production-2026-11-14.md) e o [procedimento de vínculo](../CLERK-OPERATIONS.md#vínculo-deliberado-dos-usuários-existentes), seguindo a [#64](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/64) e os gates da [#59](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/59). As operações externas e seus read-backs cabem ao responsável pela execução; este complemento documental não opera credenciais ou serviços.
 
 ## Inventário anterior ao vínculo
 
@@ -18,9 +18,11 @@ Antes de cada envio, reler usuários e convites na instância production para lo
 
 Foram criados uma vez cada os dois convites administrativos individuais para os administradores inventariados, com `notify=true` e `ignore_existing=false`. O read-back retornou **dois convites pendentes**. A criação e a solicitação de envio não comprovam recebimento humano. O redirect explícito de bootstrap foi `https://accounts.wapilot.com.br/sign-up`, conforme a [documentação oficial de convites Clerk](https://clerk.com/docs/guides/users/inviting); os Paths canônicos do produto foram mantidos. A resposta usou o wrapper da Frontend API `/v1/tickets/accept`; nenhum link/ticket portador foi persistido, visitado ou exposto. GPT Terra confirmou o formulário de login do Portal e a recusa do signup restrito sem ticket; essa inspeção não executou aceitação.
 
-A aceitação/verificação foi solicitada às pessoas e continua aguardando confirmação. Cada pessoa precisa receber e aceitar seu convite e concluir a verificação. O operador então relê o usuário pelo ID na instância production: e-mail primário verificado igual ao canônico D1, conta não banida/excluída/bloqueada e vínculo ainda não usado por outra linha. Busca por e-mail apenas localiza candidatos. Não marcar e-mail como verificado administrativamente, não inferir entrega por resposta de envio e não registrar convite real, OTP, cookie ou sessão em evidências.
+Na retomada, o usuário confirmou que **somente Lucca concluiu** o fluxo. A consulta da instância production, a busca exata e o GET direto da identidade confirmaram e-mail primário verificado igual ao canônico D1, `banned=false`, `locked=false` e `last_sign_in_at` presente. O convite de Lucca estava aceito e o de Heitor permanecia pendente. O login de Lucca no Portal foi confirmado pelo usuário e pelo último login na API; isso não comprova login no Worker. Recebimento, aceitação e verificação de Heitor continuam sem confirmação. Cada pessoa precisa receber e aceitar seu convite e concluir a verificação. O operador então relê o usuário pelo ID na instância production: e-mail primário verificado igual ao canônico D1, conta não banida/excluída/bloqueada e vínculo ainda não usado por outra linha. Busca por e-mail apenas localiza candidatos. Não marcar e-mail como verificado administrativamente, não inferir entrega por resposta de envio e não registrar convite real, OTP, cookie ou sessão em evidências.
 
 ## Escrita condicionada e comparação final
+
+Na retomada, três preflights CLI somente leitura falharam na seleção não interativa de conta: o perfil `wapilot` tinha duas contas. Nenhuma linha D1 foi retornada nem mutação executada nessas tentativas. O Wrangler gerou três debug logs locais próprios; exatamente esses três arquivos foram removidos, com comprovação privada sanitizada. O wrapper passou a definir explicitamente `CLOUDFLARE_ACCOUNT_ID` do alvo autorizado e `WRANGLER_WRITE_LOGS=false`; a nova leitura D1 foi bem-sucedida e preservou o inventário. A regra permanente continua sendo capturar saídas brutas somente em memória, sem normalizar a gravação de logs.
 
 Após os read-backs, preparar SQL privado revisado usando o [formato do runbook](../CLERK-OPERATIONS.md#vínculo-deliberado-dos-usuários-existentes), com literais corretamente escapados. Nenhum SQL preenchido ou valor real de vínculo pertence ao Git ou à issue. A atualização deve atingir somente `clerk_user_id` e `updated_at`, condicionada a ID/e-mail esperados, `status='active'`, vínculo nulo e ausência de pendência.
 
@@ -28,18 +30,24 @@ Uma alteração por vínculo novo é esperada. Vínculo idêntico já conferido 
 
 Reler o schema, a unicidade, as contas e conexões depois da migration e de cada vínculo. Comparar o inventário privado: mesmos IDs, estados, propriedade, padrão, nomes, instâncias, hashes/tamanhos das cifras e zero violações referenciais. `updated_at` alterado nas linhas vinculadas é esperado. Não regravar credenciais, gerar QR, refazer pareamento ou tocar em grants para provar preservação.
 
+## Vínculo parcial executado
+
+Antes da escrita, uma nova leitura D1 confirmou o inventário anterior, com dois ativos, três conexões e zero violações de FK; a Backend API foi novamente consultada imediatamente antes da aplicação. O SQL privado de Lucca foi revisado e aprovado por GPT Sol xhigh, condicionado a ID/e-mail esperados, conta ativa, vínculo nulo e ausência de pendência. Foi aplicado uma vez, com exit code `0`. O `--file --json` do CLI incluiu um prefixo de progresso que impediu o parser da resposta; **a escrita não foi repetida**. A prova da alteração vem da comparação posterior; `meta.changes` não foi recuperado.
+
+O read-back às **14:40:56 UTC** comparou o resultado com o inventário imediatamente anterior e confirmou exatamente uma linha alterada, somente em `clerk_user_id` e `updated_at`. O vínculo era único, o índice estava presente e `foreign_key_check` continuava sem violações. Os dois usuários permaneceram ativos; as três conexões preservaram IDs, propriedade, padrão, nomes/instâncias e hashes/tamanhos das cifras. A linha de Heitor ficou integralmente intacta, sem vínculo ou pendência D1, e seu convite Clerk continuava pendente. As evidências comparativas sanitizadas permanecem privadas.
+
 ## Gates e continuidade
 
 | Gate da #64 | Estado neste registro |
 | --- | --- |
 | Inventário atual e referência privada de integridade | Conferido: 2 ativos, 0 desativados, 3 conexões, 2 padrões, 0 violações de FK |
 | Barreira `0010` efetiva; aplicação exclusiva de `0011` ou schema já conferido | Concluído: dois triggers conferidos, somente `0011` aplicada, registro/schema/índice relidos e inventário preservado |
-| Bootstrap individual sem duplicação; recebimento e verificação reais | Dois convites criados uma vez e relidos pendentes; recebimento, aceitação e verificação humanas ainda não confirmados |
-| Read-back das identidades e SQL privado revisado | Pendente; nenhum valor de vínculo presumido |
-| Vínculo de todos os ativos e comparação final do inventário | Pendente |
-| Autenticação dos dois administradores no Clerk production | Pendente; Portal e Worker são provas separadas |
+| Bootstrap individual sem duplicação; recebimento e verificação reais | Dois convites criados uma vez; Lucca aceitou/verificou e autenticou; Heitor ainda pendente |
+| Read-back das identidades e SQL privado revisado | Concluído para Lucca por API e revisão GPT Sol xhigh; pendente para Heitor |
+| Vínculo de todos os ativos e comparação final do inventário | Lucca vinculado e inventário preservado por comparação; Heitor sem vínculo, gate geral pendente |
+| Autenticação dos dois administradores no Clerk production | Portal confirmado para Lucca; Heitor pendente; Worker ainda não testado |
 
-Após os convites, nenhum vínculo ou pendência D1 foi preenchido: a migration não foi usada para simular o fluxo de convite do produto. A revisão Access `cce19d4b…` continuava ativa; a candidata Clerk `ed29ef2e…` permanecia inativa. Esta etapa não promove tráfego nem retira Access. Revalidar as versões antes do corte #65. Sessão no Portal não comprova login no Worker: dashboard, consentimento, bearer/refresh anteriores e grant novo pertencem à conferência canônica da #65. Não há indisponibilidade planejada nesta preparação; não foi realizada medição contínua de disponibilidade por este complemento.
+Apenas o vínculo deliberado de Lucca foi preenchido; nenhuma pendência D1 foi forjada para simular o fluxo de convite do produto. A revisão Access `cce19d4b…` continuava ativa; a candidata Clerk `ed29ef2e…` permanecia inativa. Esta etapa não promove tráfego nem retira Access. Revalidar as versões antes do corte #65. Sessão no Portal não comprova login no Worker: dashboard, consentimento, bearer/refresh anteriores e grant novo pertencem à conferência canônica da #65. Não há indisponibilidade planejada nesta preparação; não foi realizada medição contínua de disponibilidade por este complemento.
 
 No retorno para Access, manter a migration aditiva, os vínculos, estados D1, KV e revogações. Não restaurar snapshot antigo, reativar conta ou aceitar dois provedores automaticamente. Qualquer ativo adicional sem vínculo impede o corte até resolução ou decisão explícita de adiá-lo.
 

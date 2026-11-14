@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
-import { createConnection, ensureUser } from '../src/lib/db';
+import { createConnection, bootstrapLocalUser } from '../src/lib/db';
 import { createTestD1 } from './helpers/local-d1';
 import type { Env } from '../src/types';
 
@@ -29,7 +29,7 @@ async function rpc(method: string, params: Record<string, unknown> = {}, scopes 
 
 beforeEach(async () => {
   local = await createTestD1();
-  const owner = await ensureUser(local.db, principal);
+  const owner = await bootstrapLocalUser(local.db, principal);
   connectionId = (await createConnection(local.db, key, { userId: owner.id, friendlyName: 'Acceptance', instanceId: 'instance', token: 'instance-token' })).id;
   env = { DB: local.db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: 'https://provider.invalid', ENVIRONMENT: 'local' };
 });
@@ -149,7 +149,7 @@ it('allows storage carousel cards with production config and rejects other origi
 });
 
 it.each(['pending', 'unknown', 'completed'])('fences a %s legacy action key and keeps its status queryable', async state => {
-  const owner = await ensureUser(local.db, principal);
+  const owner = await bootstrapLocalUser(local.db, principal);
   await local.db.prepare('INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,result_json,expires_at) VALUES (?,?,?,?,?,?,?,?,?)')
     .bind('legacy', owner.id, connectionId, 'send_text', 'original-key', 'old-hash', state, state === 'completed' ? JSON.stringify({ accepted: true, messageId: 'OLD' }) : null, Date.now() + 86400000).run();
   const fetcher = vi.spyOn(globalThis, 'fetch');
@@ -163,7 +163,7 @@ it.each(['pending', 'unknown', 'completed'])('fences a %s legacy action key and 
 it('fences an older Worker from reserving a key already used by the unified tool', async () => {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'NEW' } }));
   await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { idempotencyKey: 'new-key', message: { kind: 'text', to: recipient, text: 'One action' } }) });
-  const owner = await ensureUser(local.db, principal);
+  const owner = await bootstrapLocalUser(local.db, principal);
   await expect(local.db.prepare('INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES (?,?,?,?,?,?,?,?)')
     .bind('old-worker', owner.id, connectionId, 'send_text', 'new-key', 'old-hash', 'pending', Date.now() + 86400000).run()).rejects.toThrow('send_legacy_action_exists');
 });
@@ -176,7 +176,7 @@ it('rejects link-preview metadata downloads outside approved origins', async () 
 });
 
 it('allows a unified action after the legacy key expires without waiting for cleanup', async () => {
-  const owner = await ensureUser(local.db, principal);
+  const owner = await bootstrapLocalUser(local.db, principal);
   await local.db.prepare('INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES (?,?,?,?,?,?,?,?)')
     .bind('expired', owner.id, connectionId, 'send_media', 'expired-key', 'old-hash', 'unknown', Date.now() - 1).run();
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'AFTER-EXPIRY' } }));

@@ -304,7 +304,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       if (format && !(format === 'text/plain' && (pdf || mime.startsWith('audio/') || mime === 'text/plain') || format === 'image/*' && (pdf || mime.startsWith('image/')) || format === 'application/pdf' && pdf)) throw new OptionsError('incompatible_encoding_format', `WaPilot message MIME is ${mime}. Supported formats: ${pdf ? 'text/plain, image/*, application/pdf' : mime.startsWith('audio/') || mime === 'text/plain' ? 'text/plain' : mime.startsWith('image/') ? 'image/*' : 'metadata only'}.`);
       if (message.contentUnavailable || (message.text === undefined && !message.media && !message.medias?.length && !hasNativeContent(message) && message.update?.state !== 'unsupported')) throw new MessageReadError('message_content_unavailable', 404, 'WaPilot found the message but its content is unavailable.', message.messageType, message.contentUnavailableReason, message.contentDiagnostic);
       const { media, medias, ...metadata } = withSource(message, own);
-      const data: Record<string, unknown> = { connectionId: id, messageId, message: { ...metadata, ...(media ? { media: { mimeType: media.mimeType, fileName: media.fileName, size: media.size, mediaId: media.mediaId } } : {}), ...(medias ? { medias: medias.map(({ url: _url, content: _content, ...item }) => item) } : {}) } };
+      const data: Record<string, unknown> = { connectionId: id, messageId, message: { ...metadata, ...(media ? { media: { mimeType: media.mimeType, fileName: media.fileName, size: media.size, mediaId: media.mediaId } } : {}), ...(medias ? { medias: medias.map(({ url: _url, content, ...item }) => ({ ...item, ...(item.encodingFormat === 'text/vcard' && typeof content === 'string' ? { content } : {}) })) } : {}) } };
       if (format) data.mimeType = mime;
       const binary: CallToolResult['content'] = [];
       if (includes.includes('metadata')) Object.assign(data, await inspectMessageDocument(c, env, messageId, { cursor: o.cursor, bookmarkCursor: o.bookmarkCursor, limit: Math.min(o.limit, 5) }, ctx.mcpReq.signal));
@@ -312,7 +312,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
         const quoted = await c.getMessage(message.quotedId, ctx.mcpReq.signal);
         if (quoted) {
           const { media: qm, medias: qms, ...rest } = withSource(quoted, own);
-          data.quoted = { ...rest, ...(qm ? { media: { mimeType: qm.mimeType, fileName: qm.fileName, size: qm.size } } : {}), ...(qms ? { medias: qms.map(({ url: _url, content: _content, ...item }) => item) } : {}) };
+          data.quoted = { ...rest, ...(qm ? { media: { mimeType: qm.mimeType, fileName: qm.fileName, size: qm.size } } : {}), ...(qms ? { medias: qms.map(({ url: _url, content, ...item }) => ({ ...item, ...(item.encodingFormat === 'text/vcard' && typeof content === 'string' ? { content } : {}) })) } : {}) };
         } else data.quoted = null;
       }
       for (const [include, kind] of [['poll-responses', 'votes'], ['event-responses', 'eventResponses']] as const) {

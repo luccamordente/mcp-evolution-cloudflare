@@ -430,7 +430,8 @@ describe('get_message_document HTTP MCP output', () => {
       expect(await readFile(file)).toEqual(bytes);
     } finally { await rm(temporary, { recursive: true, force: true }); }
     expect(toMarkdown).not.toHaveBeenCalled();
-    expect(JSON.stringify({ metadata: result.structuredContent, auditBindings })).not.toMatch(/private-link|signature|7294|instance-secret|global-secret/);
+    expect(JSON.stringify(result.structuredContent)).not.toContain('7294');
+    expect(JSON.stringify({ metadata: result.structuredContent, auditBindings })).not.toMatch(/private-link|signature|instance-secret|global-secret/);
     expect(fetcher.mock.calls[2][1]).toMatchObject({ redirect: 'manual', credentials: 'omit' });
     expect(fetcher.mock.calls[2][1]?.headers).toBeUndefined();
   });

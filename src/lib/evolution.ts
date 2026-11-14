@@ -359,7 +359,11 @@ function normalizeMessage(value: unknown): Message {
       return {
         encodingFormat: stringValue(rec.encodingFormat),
         url: stringValue(rec.url),
-        content: rec.content,
+        ...(rec.encodingFormat === 'text/vcard' && typeof rec.content === 'string' ? { content: rec.content } : {}),
+        accuracyMeters: typeof rec.accuracyMeters === 'number' && Number.isFinite(rec.accuracyMeters) ? rec.accuracyMeters : undefined,
+        speed: typeof rec.speed === 'number' && Number.isFinite(rec.speed) ? rec.speed : undefined,
+        degrees: typeof rec.degrees === 'number' && Number.isFinite(rec.degrees) ? rec.degrees : undefined,
+        waveform: typeof rec.waveform === 'string' ? rec.waveform : undefined,
         fileName: stringValue(rec.fileName),
         fileSize: typeof rec.fileSize === 'number' ? rec.fileSize : undefined,
         duration: typeof rec.duration === 'number' ? rec.duration : undefined,
@@ -632,6 +636,7 @@ export class EvolutionGoClient {
     const parsed = responsePageSchema.safeParse(await this.request<unknown>(`${path}?${query}`, { redirect: 'manual' }));
     if (!parsed.success) throw new EvolutionApiError(502, 'WaPilot received an invalid message response page.');
     const page = parsed.data;
+    if (page.data.length > limit) throw new EvolutionApiError(502, 'WaPilot received an oversized message response page.');
     if (page.data.some(row => row.type !== (kind === 'votes' ? 'poll-vote' : 'event-response'))) throw new EvolutionApiError(502, 'WaPilot received an unexpected message response type.');
     if (page.data.some(row => ('pollMessageId' in row.attributes ? row.attributes.pollMessageId : row.attributes.eventMessageId) !== messageId)) throw new EvolutionApiError(502, 'WaPilot received responses for another message.');
     let nextCursor: string | undefined;
@@ -849,6 +854,11 @@ export class EvolutionGoClient {
         if (message.kind === 'gif') attributes.gifPlayback = true;
         else if (message.kind === 'video' && message.gifPlayback !== undefined) attributes.gifPlayback = message.gifPlayback;
         timeoutMs = MEDIA_REQUEST_TIMEOUT_MS;
+        break;
+      case 'event':
+        route = '/send/event';
+        encodingFormat = 'application/vnd.whatsapp.event';
+        body = { event: { name: message.name, startTime: Date.parse(message.startTime) / 1000, ...(message.description !== undefined ? { description: message.description } : {}), ...(message.endTime ? { endTime: Date.parse(message.endTime) / 1000 } : {}), ...(message.location ? { location: message.location } : {}) } };
         break;
       case 'poll':
         route = '/send/poll';

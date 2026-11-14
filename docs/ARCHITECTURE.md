@@ -1,6 +1,6 @@
 # Arquitetura
 
-O catálogo MCP atual usa somente `search_connections`, `search_groups`, `search_messages`, `get_message` e `send_message`. Os exemplos e nomes antigos abaixo registram contratos/validações anteriores; para novos clientes, consulte [o contrato atual](TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. Não há ferramenta `get_send_status`: a consulta operacional por chave fica em `get_message.options.idempotencyKey`.
+O catálogo MCP atual usa somente `search_connections`, `search_contacts`, `search_groups`, `search_messages`, `get_message` e `send_message`. Os exemplos e nomes antigos abaixo registram contratos/validações anteriores; para novos clientes, consulte [o contrato atual](TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. Não há ferramenta `get_send_status`: a consulta operacional por chave fica em `get_message.options.idempotencyKey`.
 
 
 O endpoint público é `POST /mcp`. O Worker cria um servidor MCP e transporte por troca HTTP a cada request. A entrada moderna usa `legacy: 'reject'` e `responseMode: 'json'`; o adaptador `src/lib/mcp-http.ts` também atende envelopes 2025 por transporte stateless com `enableJsonResponse: true`; não existem sessões de transporte, `Mcp-Session-Id`, SSE, WebSocket, `/sse` ou `createLegacyMcpHandler`.

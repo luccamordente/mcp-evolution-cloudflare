@@ -87,7 +87,7 @@ it('serves the shared tools and resources with a persistent default connection o
   expect(connections).toHaveLength(1);
   expect(connections[0].isDefault).toBe(1);
   expect((await first.client.callTool({ name: "search_connections", arguments: migrateToolArguments("connection_status", {}) })).isError).not.toBe(true);
-  for (const tool of [{ name: "search_groups", arguments: migrateToolArguments("list_groups", {}) }, { name: "search_messages", arguments: migrateToolArguments("list_messages", {}) }]) {
+  for (const tool of [{ name: "search_contacts", arguments: { query: "Fixture" } }, { name: "search_groups", arguments: migrateToolArguments("list_groups", {}) }, { name: "search_messages", arguments: migrateToolArguments("list_messages", {}) }]) {
     const result = await first.client.callTool(tool);
     expect(result.isError).not.toBe(true);
     expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(1);

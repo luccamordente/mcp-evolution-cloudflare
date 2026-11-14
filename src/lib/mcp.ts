@@ -1,5 +1,5 @@
 import { evolutionState, extractPhone } from './connection-status';
-import { OptionsError, connectionOptions, groupOptions, searchOptions, getOptions, searchConnectionsInput, searchGroupsInput, searchMessagesInput, getMessageInput } from './mcp-options';
+import { OptionsError, contactOptions, searchContactsInput, connectionOptions, groupOptions, searchOptions, getOptions, searchConnectionsInput, searchGroupsInput, searchMessagesInput, getMessageInput } from './mcp-options';
 import { hasNativeContent } from './native-message';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { SEND_RECEIPT_HTML } from '../generated/send-receipt';
@@ -23,6 +23,7 @@ export const MCP_SERVER_INSTRUCTIONS = MCP_COMMON_INSTRUCTIONS;
 export const MCP_SERVER_NAME = 'whatsapp-mcp';
 export const TOOL_DESCRIPTIONS = {
   search_connections: 'Search your WaPilot connections. Include status for live availability.',
+  search_contacts: 'Find WaPilot contacts by name or phone number before choosing a message recipient.',
   search_groups: 'Search WaPilot groups by name or JID. Include participants when needed.',
   search_messages: 'Search partial retained WaPilot history, optionally within one conversation. Offset plus limit must be at most 200.',
   get_message: 'Read retained message text, attachment metadata and status. Select text/plain for audio transcription or PDF text, image/* for images or PDF pages, application/pdf for the original PDF. PDF text has no OCR and cannot establish visual coverage. Rendering returns delivered pages, not proof of examination. Includes add PDF metadata, poll or event responses, or quoted message. Do not retry processing automatically; allow 6 minutes for audio and 90 seconds for PDF.',
@@ -257,6 +258,15 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       }));
       return ok({ items, offset: o.offset, hasMore: o.offset + items.length < rows.length });
     } catch (error) { return fail('search_connections', error); }
+  });
+  server.registerTool('search_contacts', { description: TOOL_DESCRIPTIONS.search_contacts, inputSchema: searchContactsInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ query, options }) => {
+    const parsed = contactOptions.safeParse(options ?? {});
+    if (!parsed.success) return fail('search_contacts', new OptionsError('invalid_options', parsed.error.issues.map(i => i.message).join('; ')));
+    const o = parsed.data;
+    return read('search_contacts', o.connectionId, async (c, id) => {
+      const { items, hasMore } = await c.searchContacts(query, String(o.offset), o.limit);
+      return { connectionId: id, items, hasMore };
+    });
   });
   server.registerTool('search_groups', { description: TOOL_DESCRIPTIONS.search_groups, inputSchema: searchGroupsInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ options }) => {
     const parsed = groupOptions.safeParse(options ?? {});

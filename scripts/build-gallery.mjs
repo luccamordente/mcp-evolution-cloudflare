@@ -6,7 +6,7 @@ import path from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sdkLicense = await readFile(path.join(root, 'node_modules/@modelcontextprotocol/ext-apps/LICENSE'), 'utf8');
 const fontLicenses = await Promise.all(['dm-sans', 'manrope'].map(name => readFile(path.join(root, `third_party/${name}-LICENSE.txt`), 'utf8')));
-for (const name of ['image-gallery', 'send-receipt']) {
+for (const name of ['send-receipt']) {
   const receipt = name === 'send-receipt';
   const bundle = await build({
     entryPoints: [path.join(root, receipt ? 'ui/receipt-app.ts' : 'ui/app.ts')], bundle: true, write: false,

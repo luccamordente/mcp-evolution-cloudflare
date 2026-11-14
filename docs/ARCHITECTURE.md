@@ -1,5 +1,8 @@
 # Arquitetura
 
+O catálogo MCP atual usa somente `search_connections`, `search_groups`, `search_messages`, `get_message` e `send_message`. Os exemplos e nomes antigos abaixo registram contratos/validações anteriores; para novos clientes, consulte [o contrato atual](TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. Não há ferramenta `get_send_status`: a consulta operacional por chave fica em `get_message.options.idempotencyKey`.
+
+
 O endpoint público é `POST /mcp`. O Worker cria um servidor MCP e transporte por troca HTTP a cada request. A entrada moderna usa `legacy: 'reject'` e `responseMode: 'json'`; o adaptador `src/lib/mcp-http.ts` também atende envelopes 2025 por transporte stateless com `enableJsonResponse: true`; não existem sessões de transporte, `Mcp-Session-Id`, SSE, WebSocket, `/sse` ou `createLegacyMcpHandler`.
 
 O protocolo implementado é MCP `2026-07-28`. O SDK v2.3.1 mantém uma constante histórica de compatibilidade para a era 2025, então o Worker publica explicitamente a revisão 2026 no health check e usa a entrada moderna do `createMcpHandler`. Requests MCP 2026 devem conter a versão e os cabeçalhos de roteamento exigidos pela revisão (`MCP-Protocol-Version`, `Mcp-Method` e `Mcp-Name`).
@@ -181,9 +184,9 @@ O adaptador usa a classificação do SDK; uma declaração moderna malformada co
 
 ## Resultado operacional de envios
 
-Os registros `send_operations` existentes sustentam `get_send_status`, somente leitura e escopado por usuário/conexão/ferramenta/chave. A consulta não depende do token da instância nem da disponibilidade do provedor. Uma reserva pendente nunca autoriza novo despacho; uma interrupção pode deixá-la `pending` até a expiração. Aceites confirmados preservam o ID do provedor mesmo se a gravação ou auditoria falhar depois; nesse caso o registro posterior pode continuar `unknown`. Não há promessa de reconciliação automática por chave no provedor.
+Os registros `send_operations` sustentam a consulta sem `messageId` de `get_message`, via `options.idempotencyKey`, no escopo do usuário e conexão. A consulta retorna somente o estado operacional do envio unificado; não depende do token da instância nem reenvia mensagens. IDs conhecidos são consultados diretamente por `get_message`, que mapeia o `status` retido informado pelo provedor. O resultado operacional não comprova entrega ou leitura.
 
-As respostas incluem a conexão resolvida, resultado explícito e disponibilidade de recibos. Entrega e leitura usam `unavailable` porque o WaPilot não agrega os recibos separados; isso não declara incapacidade do provedor. Nenhuma mudança desta integração cria cache de mensagens ou estende a retenção de 24 horas de idempotência. Chaves são opcionais e ausência de uma chave não protege duas chamadas independentes.
+Uma reserva pendente nunca autoriza novo despacho; uma interrupção pode deixá-la `pending` até a expiração. Aceites confirmados preservam o ID do provedor mesmo se a gravação ou auditoria falhar depois; nesse caso o registro posterior pode continuar `unknown`. Não há reconciliação automática por chave no provedor, cache de mensagens ou extensão da retenção de 24 horas. Chaves são opcionais; sem chave não há deduplicação entre chamadas.
 
 
 ## Renderização de PDF

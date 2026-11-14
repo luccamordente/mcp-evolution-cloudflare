@@ -1,3 +1,4 @@
+import { migrateToolArguments } from './helpers/tool-arguments';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
@@ -14,6 +15,8 @@ let connectionId: string;
 let sent: number;
 
 async function call(name: string, args: Record<string, unknown>, principal = user, scopes = ['mcp:read', 'mcp:write']) {
+  if (name === 'get_send_status') { name = 'get_message'; const { operation: _operation, ...options } = args; args = { options }; }
+  else if (name === 'send_message') args = migrateToolArguments(name, args);
   const handler = createMcpHandler(() => createMcpServer(env, principal), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST',

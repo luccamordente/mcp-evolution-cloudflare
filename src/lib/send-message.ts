@@ -89,11 +89,37 @@ export const outgoingMessageSchema = z.discriminatedUnion('kind', [
   if (message.kind === 'buttons' && message.header && message.buttons.some(item => item.kind !== 'reply')) ctx.addIssue({ code: 'custom', path: ['header'], message: 'WaPilot media headers require reply buttons.' });
 });
 
+const sharedSend = {
+  to: chat.to,
+  replyTo: chat.replyTo, mentions: chat.mentions, delayMs: chat.delayMs,
+  customMessageId: customId.customMessageId, formatJid: chat.formatJid,
+};
+const sharedKeys = { to: true, replyTo: true, mentions: true, delayMs: true, customMessageId: true, formatJid: true, mimeType: true } as const;
+const variants = outgoingMessageSchema.options.filter(variant => !variant.shape.kind.value.startsWith('status_')).map(variant => {
+  const keys = Object.fromEntries(Object.keys(variant.shape).filter(key => key in sharedKeys).map(key => [key, true]));
+  if ('mimeType' in variant.shape) keys.source = true;
+  return z.object(Object.fromEntries(Object.entries(variant.shape).filter(([key]) => !(key in keys)))).strict();
+});
 export const sendMessageInput = z.object({
-  connectionId: z.string().uuid().optional().describe('Omit it to use the user\'s default connection, or pass an internal connection UUID.'),
-  idempotencyKey: z.string().trim().min(1).max(200).optional().describe('Opaque action key without message content. Reuse the same key for the same action for 24 hours. Never change it to retry an unconfirmed send.'),
-  message: outgoingMessageSchema.describe('Choose one message kind and provide only the fields supported by that variant.'),
+  message: z.union(variants),
+  options: z.object({
+    ...sharedSend,
+    mediaSource: source.optional(), mimeType: mime.optional(),
+    connectionId: z.string().uuid().optional(),
+    idempotencyKey: identifier.optional().describe('Opaque action key. Reuse identical arguments and key for 24 hours; never change keys to retry an unconfirmed send.'),
+  }).strict(),
 }).strict();
+export function expandSendMessage(input: z.infer<typeof sendMessageInput>): OutgoingMessage {
+  const { connectionId: _connection, idempotencyKey: _key, mediaSource, ...envelope } = input.options;
+  const candidate = { ...input.message, ...envelope, ...(mediaSource ? { source: mediaSource } : {}) };
+  const { kind } = z.object({ kind: z.string() }).parse(input.message);
+  if (envelope.to === 'status' && ['text', 'image', 'video'].includes(kind)) {
+    const { to: _to, ...status } = candidate;
+    return outgoingMessageSchema.parse({ ...status, kind: `status_${kind}` });
+  }
+  if (envelope.to === 'status') throw new Error('WaPilot Status supports text, image and video only.');
+  return outgoingMessageSchema.parse(candidate);
+}
 export type OutgoingMessage = z.infer<typeof outgoingMessageSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageInput>;
 

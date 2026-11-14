@@ -1,3 +1,4 @@
+import { migrateToolCall } from './helpers/tool-arguments';
 import { z } from 'zod';
 import { nativeMessageSchema, responsePageSchema } from '../src/lib/native-message';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -78,12 +79,15 @@ let local: Awaited<ReturnType<typeof createTestD1>>;
 let env: Env;
 let connectionId: string;
 async function call(name: string, args: Record<string, unknown>) {
+  const migrated = migrateToolCall({ name, arguments: { connectionId, ...args } });
+  name = String(migrated.name);
+  args = migrated.arguments as Record<string, unknown>;
   const handler = createMcpHandler(() => createMcpServer(env, principal), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST', headers: { 'content-type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { connectionId, ...args }, _meta: { [PROTOCOL_VERSION_META_KEY]: '2026-07-28', [CLIENT_INFO_META_KEY]: { name: 'history-acceptance', version: '1' }, [CLIENT_CAPABILITIES_META_KEY]: {} } } }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, _meta: { [PROTOCOL_VERSION_META_KEY]: '2026-07-28', [CLIENT_INFO_META_KEY]: { name: 'history-acceptance', version: '1' }, [CLIENT_CAPABILITIES_META_KEY]: {} } } }),
   }), { authInfo: { token: 'test', clientId: 'history-acceptance', scopes: ['mcp:read'] } });
-  return z.object({ result: z.object({ isError: z.boolean().optional(), structuredContent: z.object({ data: z.object({ message: nativeMessageSchema.optional(), items: z.array(z.object({ id: z.string() })).optional(), meta: z.object({ coverage: z.string() }).optional(), nextCursor: z.string().optional() }) }) }) }).parse(await response.json());
+  return z.object({ result: z.object({ isError: z.boolean().optional(), structuredContent: z.object({ data: z.object({ message: nativeMessageSchema.optional(), items: z.array(z.object({ id: z.string() })).optional(), meta: z.object({ coverage: z.string() }).optional(), nextCursor: z.string().optional() }).loose() }) }) }).parse(await response.json());
 }
 
 describe.runIf(Boolean(backendUrl))('H-A8 real MCP and Go HTTP history', () => {
@@ -109,13 +113,13 @@ describe.runIf(Boolean(backendUrl))('H-A8 real MCP and Go HTTP history', () => {
       const ids = new Set<string>();
       let pages = 0;
       do {
-        const result = await call('list_message_responses', { messageId, relationship, limit: 100, ...(cursor ? { cursor } : {}) });
+        const result = await call('list_message_responses', { messageId, relationship, limit: 100, offset: ids.size });
         expect(result.result?.isError, JSON.stringify(result)).not.toBe(true);
-        const page = result.result.structuredContent.data;
+        const page = z.object({ items: z.array(z.object({ id: z.string() })), meta: z.object({ coverage: z.string() }), hasMore: z.boolean() }).parse(result.result.structuredContent.data[relationship === 'votes' ? 'poll-responses' : 'event-responses']);
         expect(page.meta?.coverage).toBe('observed');
         expect(page.items?.length).toBeLessThanOrEqual(100);
         for (const item of page.items ?? []) { expect(ids.has(item.id)).toBe(false); ids.add(item.id); }
-        cursor = page.nextCursor;
+        cursor = page.hasMore ? 'more' : undefined;
         pages++;
         expect(pages).toBeLessThan(20);
       } while (cursor);

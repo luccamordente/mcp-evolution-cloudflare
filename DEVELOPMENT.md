@@ -1,5 +1,8 @@
 # Desenvolvimento
 
+O catálogo MCP atual usa somente `search_connections`, `search_groups`, `search_messages`, `get_message` e `send_message`. Os exemplos e nomes antigos abaixo registram contratos/validações anteriores; para novos clientes, consulte [o contrato atual](docs/TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. Não há ferramenta `get_send_status`: a consulta operacional por chave fica em `get_message.options.idempotencyKey`.
+
+
 Instale Node 22+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
 
 ## TokenSave por worktree

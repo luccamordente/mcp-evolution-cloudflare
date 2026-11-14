@@ -57,7 +57,7 @@ O primeiro upload com `--strict` foi bloqueado pelo guard do Wrangler porque a �
 | Container, exports e compatibilidade | Imagem e metadata preservadas em relação ao alvo revisado |
 | Deployment com tráfego | **`cce19d4b-683c-4b18-8937-8ec44d13950e` em 100%**; candidata inativa |
 
-O ajuste existente de workers.dev/previews habilitados foi preservado. URLs de versão não são isolamento e não foram usadas para testes autenticados. Saídas brutas do CLI ficaram apenas em arquivos privados `0600`, com `WRANGLER_WRITE_LOGS=false`; nenhum valor de secret foi incluído neste registro. Não houve alteração de usuários/convites/grants, D1/KV, migrations, policies, Queues ou Cron, nem deployment de tráfego.
+O ajuste existente de workers.dev/previews habilitados foi preservado. URLs de versão não são isolamento e não foram usadas para testes autenticados. Apesar de `WRANGLER_WRITE_LOGS=false`, stdout/stderr brutos foram capturados temporariamente em quatro arquivos privados `0600`, em diretório `0700`, contrariando o procedimento de manter essas saídas somente em memória. Antes do encerramento, os quatro arquivos próprios (`upload-stdout.log`, `upload-stderr.log`, `upload-reviewed-stdout.log` e `upload-reviewed-stderr.log`) foram apagados; restaram somente manifesto e resumos sanitizados/read-backs, sem commit ou exposição dessas saídas no chat. A regra permanente de somente memória permanece inalterada; nenhum valor de secret foi incluído neste registro. Não houve alteração de usuários/convites/grants, D1/KV, migrations, policies, Queues ou Cron, nem deployment de tráfego.
 
 ## Gates de preparação e etapas posteriores
 

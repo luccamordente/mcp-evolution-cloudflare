@@ -124,3 +124,26 @@ it('resolves quoted messages on the same connection and redacts attachment URLs'
   expect(JSON.stringify(result)).not.toContain('private.invalid');
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+
+it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { include: ['event-responses'] }])('keeps untrusted MIME out of option errors and audit records: %j', async options => {
+  resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'private-mime https://private.invalid/file?token=secret-value', body: { text: 'hello' } } };
+  const result = await call('get_message', { messageId: 'm1', options });
+  expect(result.isError).toBe(true);
+  const audit = await local.db.prepare("SELECT metadata_json FROM audit_log WHERE operation = 'get_message' AND outcome = 'failure'").all();
+  expect(audit.results).toHaveLength(1);
+  for (const output of [JSON.stringify(result), JSON.stringify(audit.results)]) {
+    expect(output).not.toMatch(/private-mime|private\.invalid|secret-value/);
+  }
+});
+
+it('guides proactive audio transcription and document reading through the unified tool', async () => {
+  const discovery = await rpc('server/discover');
+  const catalog = await rpc('tools/list');
+  const description = catalog.tools?.find(tool => tool.name === 'get_message')?.description;
+  for (const guidance of [discovery.instructions, description]) {
+    expect(guidance).toContain('audio');
+    expect(guidance).toContain('document');
+    expect(guidance).toContain('text/plain');
+    expect(guidance).toContain('even without an explicit');
+  }
+});

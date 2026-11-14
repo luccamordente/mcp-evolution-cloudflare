@@ -216,7 +216,7 @@ As respostas incluem a conexão resolvida, resultado explícito e disponibilidad
 
 ## Renderização de PDF
 
-`src/lib/pdf-policy.ts` reúne a origem aprovada e o limite de download para todas as leituras de PDF, além do prazo e cancelamento das operações progressivas. A conversão textual conserva seu próprio controle de espera pelo binding de IA.
+`src/lib/pdf-policy.ts` reúne a origem aprovada e o limite de download para todas as leituras de PDF, além do prazo e cancelamento das operações progressivas. No `get_message`, o prazo absoluto começa antes da primeira consulta de metadados: PDF compartilha 60 segundos entre consulta, includes, downloads, inspeção e conversão/renderização; transcrição de áudio compartilha 300 segundos entre consulta, download e inferência. Os helpers recebem o mesmo vencimento e não reiniciam o orçamento entre etapas. O cancelamento do cliente permanece distinto do timeout local, e os timers são removidos ao concluir. Chamadores diretos dos helpers conservam os prazos padrão. A conversão textual limita a espera pelo binding de IA sem afirmar cancelamento remoto.
 
 `src/lib/pdf-processing.ts` concentra o processamento por página; `pdfium-runtime.ts` carrega PDFium WASM como módulo estático do Worker através do hook `instantiateWasm`. O runtime só é carregado quando uma operação PDF visual o utiliza; o stdio mantém bindings remotos desligados e não fornece o loader WASM do Worker. Cada operação cria sua instância de biblioteca e destrói documento, páginas e biblioteca em `finally`, sem cache ou dados compartilhados entre usuários. Não há filesystem, persistência, inferência visual ou recursos adicionais de infraestrutura.
 

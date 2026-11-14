@@ -18,10 +18,9 @@ export function downloadPdf(client: EvolutionGoClient, env: DocumentEnv, message
   return client.getMessageDocument(messageId, approvedMediaOrigins(env.DOCUMENT_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL), Math.min(Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024), 8 * 1024 * 1024), signal);
 }
 
-export async function withPdfDownload<T>(client: EvolutionGoClient, env: DocumentEnv, messageId: string, parentSignal: AbortSignal, abortError: (kind: 'cancel' | 'timeout') => Error, process: (blob: Blob, signal: AbortSignal, expiresAt: number) => Promise<T>): Promise<T> {
-  const expiresAt = Date.now() + PDF_TIMEOUT_MS;
+export async function withPdfDownload<T>(client: EvolutionGoClient, env: DocumentEnv, messageId: string, parentSignal: AbortSignal, abortError: (kind: 'cancel' | 'timeout') => Error, process: (blob: Blob, signal: AbortSignal, expiresAt: number) => Promise<T>, expiresAt = Date.now() + PDF_TIMEOUT_MS): Promise<T> {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), PDF_TIMEOUT_MS);
+  const timer = setTimeout(() => deadline.abort(), Math.max(0, expiresAt - Date.now()));
   const signal = AbortSignal.any([parentSignal, deadline.signal]);
   try {
     checkPdfDeadline(signal, expiresAt);

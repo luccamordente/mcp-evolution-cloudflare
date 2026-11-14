@@ -1,0 +1,46 @@
+# Vínculo de identidades production — #64 — 14/11/2026
+
+**Estado: inventário e migration conferidos; dois convites criados, aguardando aceitação/verificação humana. Vínculos pendentes. Sem corte.** Este registro complementa a [preparação #63](clerk-production-2026-11-14.md) e o [procedimento de vínculo](../CLERK-OPERATIONS.md#vínculo-deliberado-dos-usuários-existentes), seguindo a [#64](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/64) e os gates da [#59](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/59). As operações externas e seus read-backs cabem ao responsável pela execução; este complemento documental não opera credenciais ou serviços.
+
+## Inventário anterior ao vínculo
+
+A leitura operacional inicial de 14/11, aproximadamente às 14:18 UTC, encontrou **dois usuários ativos, nenhum desativado, três conexões e duas conexões padrão**. Os dois usuários correspondem aos administradores operacionais esperados; não foi encontrado usuário ativo adicional. IDs e e-mails individuais não são reproduzidos neste relatório.
+
+O inventário privado anterior preserva IDs dos usuários/conexões, propriedade, padrão, nome amigável e instância. A integridade das cifras é comparada por SHA-256 e tamanho: os tokens cifrados foram processados somente em memória para gerar esses valores, sem descriptografia ou gravação de seu conteúdo. Nenhuma prop de grant foi exportada, e o KV não foi lido ou alterado nesta preparação. `foreign_key_check` retornou zero violações. Auditoria, eventos e grants podem mudar com tráfego/expiração legítimos; comparar os campos estáveis antes/depois, sem exigir igualdade de tabelas operacionais inteiras.
+
+Antes da escrita, o schema `users` ainda tinha apenas os campos anteriores ao Clerk. A tabela de migrations registrava `0001`–`0010` aplicadas e somente `0011_clerk_identity.sql` pendente. Os dois triggers efetivos da barreira `0010_unified_send_fence.sql` foram conferidos antes da aplicação exclusiva de `0011_clerk_identity.sql`, concluída com exit code `0`. A migration acrescentou somente `clerk_user_id`, `invite_pending_at` e índice único parcial do vínculo. O read-back confirmou `0011` registrada e índice presente, os mesmos usuários/conexões, todos ainda sem vínculo e sem pendência, dois usuários ativos, três conexões e zero violações de FK. Nenhum vínculo foi preenchido por essa migration.
+
+## Bootstrap anterior ao corte
+
+A #63 preparou a instância production na aplicação existente, com cadastro restrito, e-mail imutável e autoexclusão desativada antes de haver usuários. O domínio/DNS/e-mail/TLS estavam completos e o formulário público do Account Portal carregava. Isso comprova preparação, sem comprovar entrega, aceitação ou autenticação de uma pessoa.
+
+Antes de cada envio, reler usuários e convites na instância production para localizar identidades preexistentes e evitar duplicação. Para os usuários existentes, o bootstrap é um **convite administrativo individual direto no Clerk**, com aceitação no Account Portal oficial disponível antes do corte. Usar explicitamente o Portal padrão no bootstrap, sem depender de `/accept-invitation` do produto: a versão ativa ainda usa Access, e o path incorporado preparado para convites novos do produto não comprova que essa página já esteja publicada. Não usar os endpoints WaPilot de convite para desativar/recriar uma conta ativa ou forjar pendência.
+
+Foram criados uma vez cada os dois convites administrativos individuais para os administradores inventariados, com `notify=true` e `ignore_existing=false`. O read-back retornou **dois convites pendentes**. A criação e a solicitação de envio não comprovam recebimento humano. O redirect explícito de bootstrap foi `https://accounts.wapilot.com.br/sign-up`, conforme a [documentação oficial de convites Clerk](https://clerk.com/docs/guides/users/inviting); os Paths canônicos do produto foram mantidos. A resposta usou o wrapper da Frontend API `/v1/tickets/accept`; nenhum link/ticket portador foi persistido, visitado ou exposto. GPT Terra confirmou o formulário de login do Portal e a recusa do signup restrito sem ticket; essa inspeção não executou aceitação.
+
+A aceitação/verificação foi solicitada às pessoas e continua aguardando confirmação. Cada pessoa precisa receber e aceitar seu convite e concluir a verificação. O operador então relê o usuário pelo ID na instância production: e-mail primário verificado igual ao canônico D1, conta não banida/excluída/bloqueada e vínculo ainda não usado por outra linha. Busca por e-mail apenas localiza candidatos. Não marcar e-mail como verificado administrativamente, não inferir entrega por resposta de envio e não registrar convite real, OTP, cookie ou sessão em evidências.
+
+## Escrita condicionada e comparação final
+
+Após os read-backs, preparar SQL privado revisado usando o [formato do runbook](../CLERK-OPERATIONS.md#vínculo-deliberado-dos-usuários-existentes), com literais corretamente escapados. Nenhum SQL preenchido ou valor real de vínculo pertence ao Git ou à issue. A atualização deve atingir somente `clerk_user_id` e `updated_at`, condicionada a ID/e-mail esperados, `status='active'`, vínculo nulo e ausência de pendência.
+
+Uma alteração por vínculo novo é esperada. Vínculo idêntico já conferido permite seguir sem repetir a escrita; zero mudanças inesperadas, conflito ou vínculo diferente exigem nova leitura e reconciliação. Não sobrescrever vínculo nem mudar e-mail, estado, propriedade ou padrão para contornar a condição.
+
+Reler o schema, a unicidade, as contas e conexões depois da migration e de cada vínculo. Comparar o inventário privado: mesmos IDs, estados, propriedade, padrão, nomes, instâncias, hashes/tamanhos das cifras e zero violações referenciais. `updated_at` alterado nas linhas vinculadas é esperado. Não regravar credenciais, gerar QR, refazer pareamento ou tocar em grants para provar preservação.
+
+## Gates e continuidade
+
+| Gate da #64 | Estado neste registro |
+| --- | --- |
+| Inventário atual e referência privada de integridade | Conferido: 2 ativos, 0 desativados, 3 conexões, 2 padrões, 0 violações de FK |
+| Barreira `0010` efetiva; aplicação exclusiva de `0011` ou schema já conferido | Concluído: dois triggers conferidos, somente `0011` aplicada, registro/schema/índice relidos e inventário preservado |
+| Bootstrap individual sem duplicação; recebimento e verificação reais | Dois convites criados uma vez e relidos pendentes; recebimento, aceitação e verificação humanas ainda não confirmados |
+| Read-back das identidades e SQL privado revisado | Pendente; nenhum valor de vínculo presumido |
+| Vínculo de todos os ativos e comparação final do inventário | Pendente |
+| Autenticação dos dois administradores no Clerk production | Pendente; Portal e Worker são provas separadas |
+
+Após os convites, nenhum vínculo ou pendência D1 foi preenchido: a migration não foi usada para simular o fluxo de convite do produto. A revisão Access `cce19d4b…` continuava ativa; a candidata Clerk `ed29ef2e…` permanecia inativa. Esta etapa não promove tráfego nem retira Access. Revalidar as versões antes do corte #65. Sessão no Portal não comprova login no Worker: dashboard, consentimento, bearer/refresh anteriores e grant novo pertencem à conferência canônica da #65. Não há indisponibilidade planejada nesta preparação; não foi realizada medição contínua de disponibilidade por este complemento.
+
+No retorno para Access, manter a migration aditiva, os vínculos, estados D1, KV e revogações. Não restaurar snapshot antigo, reativar conta ou aceitar dois provedores automaticamente. Qualquer ativo adicional sem vínculo impede o corte até resolução ou decisão explícita de adiá-lo.
+
+Validação documental: conferência da #64/#59, do runbook, da preparação #63 e dos resumos sanitizados fornecidos pelo responsável. TDD e Ponytail consultadas; somente documentação, sem lógica nova, source, fixtures ou configuração alterados. Links relativos e `git diff --check` conferidos. Testes de runtime/dry-run não são repetidos para esta alteração textual; a #64 permanece aberta e sua conclusão depende das provas operacionais pendentes acima.

@@ -11,7 +11,7 @@ it('blocks an already issued MCP token as soon as the D1 account is disabled', a
   const account = await fixture.issue({ email: 'disabled@example.test', scope: 'mcp:read mcp:write', legacy: '1' });
   expect((await fixture.rpc(account.accessToken, 'tools/list')).response.status).toBe(200);
   await fixture.db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(account.userId).run();
-  for (const [method, params] of [['tools/list', {}], ['tools/call', { name: 'search_contacts', arguments: { query: 'Synthetic' } }], ['tools/call', { name: 'send_message', arguments: { message: { kind: 'text', to: '5511999999999', text: 'Must not send' } } }]] as const) {
+  for (const [method, params] of [['tools/list', {}], ['tools/call', { name: 'search_connections', arguments: { options: {} } }], ['tools/call', { name: 'send_message', arguments: { message: { kind: 'text', text: 'Must not send' }, options: { to: '5511999999999' } } }]] as const) {
     const result = await fixture.rpc(account.accessToken, method, params);
     expect(result.response.status).toBe(403);
     expect(JSON.stringify(result.body)).not.toContain(account.accessToken);
@@ -65,10 +65,10 @@ it('adds unique Clerk links without rewriting existing identities, connection de
     await legacy.db.batch(unstable_splitSqlQuery(migration).map(sql => legacy.db.prepare(sql)));
     await legacy.db.prepare("UPDATE users SET clerk_user_id = 'user_linked' WHERE id = ?").bind(account.userId).run();
     expect((await legacy.db.prepare('SELECT * FROM whatsapp_connections WHERE user_id = ? ORDER BY id').bind(account.userId).all()).results).toEqual(before.results);
-    const listed = await legacy.rpc(account.accessToken, 'tools/call', { name: 'list_connections', arguments: {} }, { 'Mcp-Name': 'list_connections' });
+    const listed = await legacy.rpc(account.accessToken, 'tools/call', { name: 'search_connections', arguments: {} }, { 'Mcp-Name': 'search_connections' });
     expect(listed.response.status).toBe(200);
     expect(listed.body.result.isError).not.toBe(true);
-    expect(listed.body.result.structuredContent.data.map((connection: { id: string }) => connection.id).sort()).toEqual([...account.connections].sort());
+    expect(listed.body.result.structuredContent.data.items.map((connection: { id: string }) => connection.id).sort()).toEqual([...account.connections].sort());
     await expect(legacy.db.prepare("UPDATE users SET clerk_user_id = 'user_linked' WHERE id = 'seed-heitor'").run()).rejects.toThrow(/UNIQUE/);
     expect((await legacy.db.prepare('SELECT id, status, invite_pending_at FROM users WHERE id = ?').bind(account.userId).first())).toMatchObject({ id: account.userId, status: 'active', invite_pending_at: null });
   } finally { await legacy.runtime.dispose(); }

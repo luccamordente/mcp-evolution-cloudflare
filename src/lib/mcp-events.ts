@@ -15,7 +15,7 @@ const eventDefinition = {
     'When the user requests a subscription prompt change, first try to update it using the client\'s subscription-management capabilities. ' +
     'If updating is unsupported or fails, cancel the existing subscription via events/unsubscribe and confirm cancellation before creating a replacement with the updated prompt. ' +
     'Preserve the connection, filters, other instructions, deadline, and stop conditions unless the user requested changes. ' +
-    'After successful recreation, call list_messages once with the same connection and conversation filter and a small limit; process only unhandled received messages from the unsubscribe-subscribe gap, and treat an empty result as inconclusive. ' +
+    'After successful recreation, call search_messages once with options containing the same connectionId and conversationId filter and a small limit; process only unhandled received messages from the unsubscribe-subscribe gap, and treat an empty result as inconclusive. ' +
     'If recreation fails, tell the user that monitoring is inactive.',
   delivery: ['webhook'],
   inputSchema: {

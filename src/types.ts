@@ -126,6 +126,7 @@ export interface Message extends NativeMessage {
   recipient?: string;
   direction?: 'inbound' | 'outbound' | 'unknown';
   timestamp?: string;
+  status?: string;
   type?: string;
   text?: string;
   media?: { mimeType?: string; fileName?: string; size?: number; url?: string; mediaId?: string; gifPlayback?: boolean };

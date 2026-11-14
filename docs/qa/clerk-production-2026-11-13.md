@@ -52,7 +52,7 @@ Formato revisável do upload futuro, com caminhos privados a substituir e execut
 WRANGLER_WRITE_LOGS=false npx wrangler versions upload --profile wapilot --env '' --config /caminho/privado/release.jsonc --keep-vars --strict --secrets-file /caminho/privado/clerk-production-secrets.json
 ```
 
-O comando acima **não foi executado**. Após executá-lo, comparar versão/artefato, nomes de secrets, vars, assets, bindings, observabilidade e metadata da imagem com o plano. Confirmar que a versão ativa/percentual de tráfego continuam no Access e que somente a candidata contém a configuração Clerk. Sem read-back coerente, não promover. A publicação explícita de uma versão para 100% do tráfego pertence ao corte autorizado da #66; não misturar percentuais Access/Clerk no login.
+O comando acima **não foi executado**. Após executá-lo, comparar versão/artefato, nomes de secrets, vars, assets, bindings, observabilidade e metadata da imagem com o plano. Confirmar que a versão ativa/percentual de tráfego continuam no Access e que somente a candidata contém a configuração Clerk. Sem read-back coerente, não promover. A publicação explícita de uma versão para 100% do tráfego pertence ao corte autorizado da #65; não misturar percentuais Access/Clerk no login.
 
 ## Evidência exigida para concluir a #63
 

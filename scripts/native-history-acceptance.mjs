@@ -8,9 +8,18 @@ const root = resolve(import.meta.dirname, '..');
 const backend = join(root, '.scratch', 'evolution-go');
 const dsn = process.env.MESSAGE_HISTORY_TEST_DSN;
 if (!dsn) throw new Error('Set MESSAGE_HISTORY_TEST_DSN to an isolated local PostgreSQL keyword DSN.');
-if (!/(?:^|\s)host=(?:127\.0\.0\.1|localhost|::1)(?:\s|$)/.test(dsn)) {
+const parameters = new Map();
+for (const entry of dsn.trim().split(/\s+/)) {
+  const match = /^(host|port|dbname|user|password|sslmode|connect_timeout)=([^\s'"\\=]+)$/.exec(entry);
+  if (!match || parameters.has(match[1])) {
+    throw new Error('History acceptance requires unique keyword parameters (host, port, dbname, user, password, sslmode, connect_timeout), without quotes or escapes.');
+  }
+  parameters.set(match[1], match[2]);
+}
+if (!['127.0.0.1', 'localhost', '::1'].includes(parameters.get('host'))) {
   throw new Error('History acceptance requires an explicit loopback PostgreSQL host in MESSAGE_HISTORY_TEST_DSN.');
 }
+const providerEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('PG')));
 await access(join(backend, 'pkg/message/acceptance/reading_test.go'));
 const temporary = await mkdtemp(join(tmpdir(), 'wapilot-native-history-'));
 const infoFile = join(temporary, 'server.json');
@@ -19,7 +28,7 @@ const go = process.env.WAPILOT_ACCEPTANCE_GO ?? 'go';
 let backendOutput = '';
 const provider = spawn(go, ['test', './pkg/message/acceptance', '-run', '^TestNativeContentHTTPRoundTrip$', '-count=1', '-timeout=20m', '-args', '-postgres-dsn', dsn], {
   cwd: backend,
-  env: { ...process.env, MESSAGE_CONTENT_FIXTURE_SERVER_ADDR: '127.0.0.1:0', MESSAGE_CONTENT_FIXTURE_SERVER_INFO: infoFile, MESSAGE_CONTENT_FIXTURE_SERVER_STOP: stopFile },
+  env: { ...providerEnv, MESSAGE_CONTENT_FIXTURE_SERVER_ADDR: '127.0.0.1:0', MESSAGE_CONTENT_FIXTURE_SERVER_INFO: infoFile, MESSAGE_CONTENT_FIXTURE_SERVER_STOP: stopFile },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 provider.stdout.on('data', chunk => { backendOutput += chunk; });

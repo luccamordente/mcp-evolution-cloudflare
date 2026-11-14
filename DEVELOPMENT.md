@@ -2,6 +2,8 @@
 
 Instale Node 22+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
 
+Pare `dev:clerk` antes da suíte completa: a fixture HTTPS usa as portas locais 8794, 8795 e 8443. Depois dos testes, reinicie o perfil; seu D1/KV persistido é preservado.
+
 ## TokenSave por worktree
 
 Com o CLI `tokensave` instalado e a integração MCP configurada no agente, rode:

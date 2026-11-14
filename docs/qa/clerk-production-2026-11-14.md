@@ -1,6 +1,6 @@
 # Preparação Clerk production — #63 — 14/11/2026
 
-**Estado: preparação remota da #63 concluída, sujeita à revisão documental final; candidata inativa, sem corte.** Continuação do [registro de 13/11](clerk-production-2026-11-13.md), preservando sua tentativa recusada e a validação histórica da candidata. A criação e o DNS de `wapilot.com.br` já estavam autorizados. O operador aceitou explicitamente os e-mails padrão do Clerk, sem upgrade de plano; a UI WaPilot e as restrições de segurança continuam obrigatórias.
+**Estado: candidata reconciliada de seis ferramentas preparada e relida inativa; #63 aguarda revisão documental final. Sem corte; suplemento ao final.** Continuação do [registro de 13/11](clerk-production-2026-11-13.md), preservando sua tentativa recusada e a validação histórica da candidata. A criação e o DNS de `wapilot.com.br` já estavam autorizados. O operador aceitou explicitamente os e-mails padrão do Clerk, sem upgrade de plano; a UI WaPilot e as restrições de segurança continuam obrigatórias.
 
 ## Criação e read-back efetivos
 
@@ -39,7 +39,7 @@ As Display URLs inicialmente apontavam home, sign-in, aceitação e saída para 
 
 A página de entrada do Account Portal foi carregada sem login e exibiu o formulário WaPilot. Essa inspeção comprova o carregamento público, sem executar convite, login ou redirects autenticados; o fluxo real permanece em #64/#65.
 
-A leitura atual dos deployments encontrou **`cce19d4b-683c-4b18-8937-8ec44d13950e` em 100%**, criada em **14/11 às 12:53:07 UTC**. Portanto, a versão Access `6af1ec15…` registrada em 13/11 não deve ser presumida ativa nem usada como retorno sem nova reconciliação. O read-back das configurações ativas confirmou `observability.redact_query_string=true`, compatibilidade `2026-10-13` e flags `nodejs_compat`/`global_fetch_strictly_public`. Às **13:29:42 UTC**, os probes retornaram health `200`, metadata OAuth `200`, MCP sem bearer `401` com metadata e `no-store`, e `/connections` `302` para Access com `no-store`. São amostras do serviço Access, sem homologar Clerk. As operações desta preparação não promoveram versão para tráfego. O retorno Access atual é essa revisão `cce19d4b…`, de fonte `a29ea1f20c443c497be65dca221eb43f1ef97db3`; sua continuidade autenticada e os demais testes de corte permanecem em #65.
+A leitura histórica dos deployments anterior ao suplemento encontrou **`cce19d4b-683c-4b18-8937-8ec44d13950e` em 100%**, criada em **14/11 às 12:53:07 UTC**. Portanto, a versão Access `6af1ec15…` registrada em 13/11 não deve ser presumida ativa nem usada como retorno sem nova reconciliação. O read-back das configurações ativas confirmou `observability.redact_query_string=true`, compatibilidade `2026-10-13` e flags `nodejs_compat`/`global_fetch_strictly_public`. Às **13:29:42 UTC**, os probes retornaram health `200`, metadata OAuth `200`, MCP sem bearer `401` com metadata e `no-store`, e `/connections` `302` para Access com `no-store`. São amostras do serviço Access, sem homologar Clerk. As operações desta preparação não promoveram versão para tráfego. O retorno Access identificado nessa leitura foi a revisão `cce19d4b…`, de fonte `a29ea1f20c443c497be65dca221eb43f1ef97db3`; sua continuidade autenticada e os demais testes de corte permanecem em #65.
 
 ## Artefato, configuração e secrets preparados
 
@@ -59,9 +59,9 @@ O primeiro upload com `--strict` foi bloqueado pelo guard do Wrangler porque a �
 
 O ajuste existente de workers.dev/previews habilitados foi preservado. URLs de versão não são isolamento e não foram usadas para testes autenticados. Apesar de `WRANGLER_WRITE_LOGS=false`, stdout/stderr brutos foram capturados temporariamente em quatro arquivos privados `0600`, em diretório `0700`, contrariando o procedimento de manter essas saídas somente em memória. Antes do encerramento, os quatro arquivos próprios (`upload-stdout.log`, `upload-stderr.log`, `upload-reviewed-stdout.log` e `upload-reviewed-stderr.log`) foram apagados; restaram somente manifesto e resumos sanitizados/read-backs, sem commit ou exposição dessas saídas no chat. A regra permanente de somente memória permanece inalterada; nenhum valor de secret foi incluído neste registro. Não houve alteração de usuários/convites/grants, D1/KV, migrations, policies, Queues ou Cron, nem deployment de tráfego.
 
-## Gates de preparação e etapas posteriores
+## Gates da preparação inicial e etapas posteriores
 
-| Gate da #63 | Estado em 14/11/2026 |
+| Gate da #63 | Estado na preparação inicial de 14/11/2026 |
 | --- | --- |
 | Production na aplicação/domínio autorizados | Concluído por criação e dois read-backs |
 | Cadastro, métodos e e-mail imutável | Aplicados e relidos; hashes por escopo acima |
@@ -73,8 +73,33 @@ O ajuste existente de workers.dev/previews habilitados foi preservado. URLs de v
 | Versão coerente de código/configuração/secrets | Concluído: candidata `ed29ef2e…` inativa, adições e preservação confirmadas às 14:12 UTC; retorno Access atual identificado |
 | Redaction nos sistemas que receberão convites | Confirmada no Worker ativo e na configuração candidata; reconferir demais sistemas antes do envio real |
 
-O [plano de upload versionado de 13/11](clerk-production-2026-11-13.md#código-configuração-e-secrets-na-mesma-versão) foi executado com a exceção documentada de `--strict` acima. O gate de artefato/configuração/secrets e seu read-back está concluído. A #63 está preparada remotamente e aguarda revisão documental final; este registro não altera o estado da issue no GitHub. Bootstrap/vínculos e recebimento real (#64), continuidade autenticada e corte (#65), e estabilização (#66) continuam pendentes.
+O [plano de upload versionado de 13/11](clerk-production-2026-11-13.md#código-configuração-e-secrets-na-mesma-versão) foi executado com a exceção documentada de `--strict` acima. O gate de artefato/configuração/secrets e seu read-back está concluído. A #63 está preparada remotamente e aguarda revisão documental final; este registro não altera o estado da issue no GitHub. Naquele checkpoint, bootstrap/vínculos e recebimento real (#64), continuidade autenticada e corte (#65), e estabilização (#66) continuavam pendentes; o suplemento abaixo atualiza a preparação e referencia o progresso parcial da #64.
 
-Não houve alteração de billing ou Access, aplicação de migration, convite, usuário, grant, push ou mudança de tráfego. A criação da candidata inativa não é o corte. Os **838 testes aprovados e 15 pulados** e o dry-run de 13/11 permanecem evidência histórica; a validação final desta candidata está registrada acima.
+Na preparação inicial descrita acima, não houve alteração de billing ou Access, aplicação de migration, convite, usuário, grant, push ou mudança de tráfego. A criação da candidata inativa não é o corte. Os **838 testes aprovados e 15 pulados** e o dry-run de 13/11 permanecem evidência histórica; a validação final desta candidata está registrada acima.
 
 Validação documental: revisão das fontes operacionais e do relato sanitizado das operações efetivas, links relativos e `git diff --check`. A skill TDD foi consultada; não há mudança de runtime nem lógica nova que justifique teste de texto. Este complemento documental não repetiu testes, dry-run ou consultas ao backend de mensagens; registra as validações e operações realizadas pelo responsável pela preparação.
+
+
+## Reconciliação com a publicação paralela de seis ferramentas
+
+A baseline `cce19d4b…`/`a29ea1f…` das 14:12 UTC e a primeira candidata `ed29ef2e…`/`c3e555d` acima permanecem evidências históricas. Uma publicação paralela legítima de Heitor criou a versão **`8e9211a5-c451-4bc5-ab22-192556e1963d`** às 14:12:07 UTC e seu deployment às **14:12:10 UTC**, fonte `8c82f3af3842700b7bacb9e85262dbfe341c59c9`, tag `api6-8c82f3a`. Ela acrescentou `search_contacts` ao catálogo, totalizando seis ferramentas; não foi uma publicação da operação #63/#64.
+
+O read-back operacional às **14:47 UTC** confirmou `8e9211a5…` em **100%**, com `observability.redact_query_string=true`, nenhuma alteração/adição/remoção de bindings em relação a `cce19d4b…`, configuração de runtime igual e nenhum binding Clerk. Essa versão/source é o retorno Access atual, sujeito a nova leitura antes do corte. A primeira candidata Clerk continuava sem tráfego.
+
+A fonte Clerk foi reconciliada em **`fe2d8ed49add022c8da7f2c52cc5253d8056f944`**, equivalente ao conteúdo das revisões `72d463…`/`be9df1a…`, preservando budgets e autenticação. O catálogo HTTP/stdio passa a incluir `search_contacts`, com schemas compartilhados; não reduz limites ou proteções para incorporar a sexta ferramenta. A validação operacional reportou **846 testes aprovados e 15 pulados, 56 arquivos aprovados e um pulado**, além de **66 testes focados aprovados**. Dois revisores GPT Sol xhigh não encontraram pendências de código; identificaram referências de retorno atuais que este suplemento e os runbooks corrigem. Esses testes validam o código/fixtures, sem homologar Clerk production ou continuidade real de grants.
+
+O dry-run da fonte `fe2d8ed4…`, tag `clerk-59-fe2d8ed4`, terminou às **14:51:28 UTC**, exit code `0`: **8.745,03 KiB bruto / 3.164,60 KiB gzip**, sem build Docker. O hash da configuração privada revisada foi `bda30a37a2b568b86f23ef3693ccf89d2f3fe4fa2ef41375a33d85b10a1778c5`; nenhum valor secreto foi incluído neste registro. O preflight anterior ao upload, às 14:52:43 UTC, confirmou `8e9211a5…` em 100%, os recursos esperados e redaction habilitada.
+
+O upload versionado terminou às **14:52:53 UTC**, exit code `0`, criando **`353fcb1e-5210-413e-b880-7caf4fe41e02`**. Stdout/stderr brutos ficaram somente em memória, com `WRANGLER_WRITE_LOGS=false`. O read-back às **14:53:43 UTC** confirmou:
+
+| Item | Resultado da candidata reconciliada |
+| --- | --- |
+| Fonte/tag | `fe2d8ed49add022c8da7f2c52cc5253d8056f944` / `clerk-59-fe2d8ed4` |
+| Versão candidata final | `353fcb1e-5210-413e-b880-7caf4fe41e02`, inativa |
+| Deployment com tráfego | `8e9211a5-c451-4bc5-ab22-192556e1963d` em 100% |
+| Bindings existentes | `existingBindingChanges=[]` |
+| Adições exatas | Somente `CLERK_PUBLISHABLE_KEY` pública correspondente à production e `CLERK_SECRET_KEY` do tipo `secret_text` |
+| Runtime, handlers e exports | Iguais aos alvos revisados; sem alteração da imagem/configuração preservadas |
+| Redaction | `observability.redact_query_string=true` |
+
+A primeira candidata `ed29ef2e…` é histórica e foi suplantada para o futuro corte pela versão reconciliada; não foi apagada. Às **14:46 UTC**, os probes públicos retornaram health `200`, metadata OAuth `200` com recurso canônico `https://app.wapilot.com.br/mcp`, e `POST /mcp` sem bearer `401` com challenge OAuth. São amostras públicas do Access vigente, sem comprovar continuidade autenticada. O upload não promoveu tráfego nem alterou vínculos, grants ou proteção Access. A #63 aguarda confirmação dos revisores de que as referências documentais foram corrigidas; este suplemento não fecha a issue. O [checkpoint #64](clerk-identity-linking-2026-11-14.md) registra Lucca vinculado após verificação e Heitor ainda com convite pendente e sem vínculo; não houve login no Worker ou corte.

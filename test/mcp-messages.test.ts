@@ -663,6 +663,32 @@ describe('get_message complete retained message', () => {
     expect(result.structuredContent.data).toMatchObject({ message: { id: 'message-1', text: '', type: 'text/plain' } });
   });
 
+  it('preserves contact cards and location/audio metadata without exposing arbitrary embedded data', async () => {
+    const { message, fetcher, auditBindings } = await messageTool();
+    const cards = ['BEGIN:VCARD\nFN:Exemplo Árvore\nTEL:+12025550123\nEND:VCARD', 'BEGIN:VCARD\nFN:Outro\nTEL:+12025550124\nEND:VCARD'];
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: {
+      ...retainedMessage, attributes: { encodingFormat: 'text/vcard', body: { medias: [
+        ...cards.map(content => ({ encodingFormat: 'text/vcard', content })),
+        { encodingFormat: 'application/geo+json', latitude: 0, longitude: 0, accuracyMeters: 0, speed: 0, degrees: 0 },
+        { encodingFormat: 'audio/ogg', waveform: 'AAEC' },
+        { encodingFormat: 'text/vcard', content: { private: 'private-object' } },
+        { encodingFormat: 'application/octet-stream', content: 'private-bytes' },
+      ] } },
+    } }));
+    const { result } = await message({ messageId: 'message-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ message: { medias: [
+      { encodingFormat: 'text/vcard', content: cards[0] },
+      { encodingFormat: 'text/vcard', content: cards[1] },
+      { latitude: 0, longitude: 0, accuracyMeters: 0, speed: 0, degrees: 0 },
+      { waveform: 'AAEC' },
+      { encodingFormat: 'text/vcard' },
+      { encodingFormat: 'application/octet-stream' },
+    ] } });
+    expect(JSON.stringify(result)).not.toContain('private-');
+    expect(JSON.stringify(auditBindings)).not.toContain('VCARD');
+  });
+
   it('returns attachment metadata without downloading files, exposing URLs or returning embedded content', async () => {
     const { message, fetcher, auditBindings, run, toMarkdown } = await messageTool();
     fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: {
@@ -1282,4 +1308,29 @@ it('returns unsupported update metadata through get_message without inventing mi
   const { result } = await message({messageId:'message-1'});
   expect(result.isError).not.toBe(true);
   expect(result.structuredContent.data).toMatchObject({message:{type:'application/vnd.whatsapp.update',update:{state:'unsupported',reason:'unsupported_subtype'}}});
+});
+
+describe('native history diagnostics', () => {
+  it.each(['unsupported_action', 'native_media_unavailable', 'duplicate_poll_options'])('reports partial native content for %s', async reason => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/vnd.whatsapp.interactive', body: { interactive: { kind: 'native', text: 'Retained part' } } }, meta: { content: { version: 1, state: 'partial', reason, rawMessage: 'private' } } } }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1' } });
+    expect(result.isError).not.toBe(true);
+    expect(result).toMatchObject({ structuredContent: { data: { message: { contentPartial: true, contentDiagnostic: { state: 'partial', reason } } } } });
+    expect(JSON.stringify(result)).not.toContain('private');
+  });
+  it.each(['missing_original_secret', 'decryption_failed'])('preserves safe unavailable diagnosis for %s', async reason => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/vnd.whatsapp.event-response', body: {} }, meta: { content: { version: 1, state: 'unavailable', reason, targetId: 'event' } } } }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1' } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { contentUnavailable: true, contentUnavailableReason: reason, contentDiagnostic: { version: 1, state: 'unavailable', reason, targetId: 'event' } } } });
+  });
+  it('omits unknown provider diagnostic reasons', async () => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, meta: { content: { version: 1, state: 'partial', reason: 'private-provider-input' } } } }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1' } });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.stringify(result)).not.toContain('private-provider-input');
+    expect(result).toMatchObject({ structuredContent: { data: { message: { contentPartial: true, contentDiagnostic: { version: 1, state: 'partial' } } } } });
+  });
 });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
@@ -127,6 +128,23 @@ it('maps approved interactive downloads and callback destinations without mixing
   const message = { kind: 'carousel', to: recipient, cards: [{ header: { imageUrl: 'https://media.example.test/card.jpg' }, body: { text: 'Oferta' }, buttons: [{ kind: 'url', label: 'Ver', url: 'https://example.test/product' }] }] };
   expect((await rpc('tools/call', { name: 'send_message', arguments: { message } })).result.isError).not.toBe(true);
   expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ data: { attributes: { cards: [{ header: message.cards[0].header, body: { text: 'Oferta' }, buttons: [{ type: 'URL', displayText: 'Ver', id: 'https://example.test/product' }] }] } } });
+});
+
+it('allows storage carousel cards with production config and rejects other origins before dispatch', async () => {
+  const { vars } = z.object({ vars: z.object({ SEND_MEDIA_ORIGINS: z.string().optional() }) }).parse(JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')));
+  env.SEND_MEDIA_ORIGINS = vars.SEND_MEDIA_ORIGINS;
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'CAROUSEL' } }));
+  const message = { kind: 'carousel', to: recipient, cards: [1, 2].map(index => ({ header: { imageUrl: 'https://storage.neurau.com.br/synthetic-card.jpg' }, body: { text: `Cartão ${index}` } })) };
+  const sent = await rpc('tools/call', { name: 'send_message', arguments: { message } });
+  expect(sent.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'CAROUSEL' } } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(String(fetcher.mock.calls[0][0])).toBe('https://provider.invalid/send/carousel');
+  expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ data: { attributes: { cards: message.cards } } });
+
+  message.cards[1].header.imageUrl = 'https://storage.neurau.com.br.unapproved.invalid/card.jpg';
+  const rejected = await rpc('tools/call', { name: 'send_message', arguments: { message } });
+  expect(rejected.result).toMatchObject({ isError: true, structuredContent: { data: { outcome: 'failed', error: { code: 'media_origin_not_allowed' } } } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
 it.each(['pending', 'unknown', 'completed'])('fences a %s legacy action key and keeps its status queryable', async state => {

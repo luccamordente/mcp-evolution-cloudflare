@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { eventRuntime } from './helpers/mcp-events-runtime';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
-import { readFile } from 'node:fs/promises';
-import { unstable_splitSqlQuery } from 'wrangler';
 
 let fixture: Awaited<ReturnType<typeof eventRuntime>>;
 beforeAll(async () => { fixture = await eventRuntime(async () => { throw new Error('Unauthorized external action'); }); });

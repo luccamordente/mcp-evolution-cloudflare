@@ -160,7 +160,6 @@ export function classifyMcpError(error: unknown, operation: string): McpToolErro
     return { code: error.code, status: error.status, retryable: false, operation, message, hint: 'Keep the same connectionId and messageId. Use physical page positions beginning at 1. Request fewer pages or smaller regions for limits; do not treat processing failure as a blank page. Do not retry automatically.' };
   }
   if (error instanceof DocumentReadingError) {
-    if (operation === 'get_message_document') return { code: error.code, status: error.status, retryable: false, operation, message, hint: 'Use a retained PDF message from search_messages in the same connection. The client needs binary resource transfer and local PDF tools. Do not retry automatically.' };
     return { code: error.code, status: error.status, retryable: false, operation, message, hint: 'Use a retained PDF message from search_messages in the same connection. WaPilot extracts text only, without OCR; scanned pages and visual content may be missing. Do not retry document reading automatically.' };
   }
   if (error instanceof AudioTranscriptionError) {
@@ -313,17 +312,13 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       const format = o.encodingFormat;
       if (format && !(format === 'text/plain' && (pdf || mime.startsWith('audio/') || mime === 'text/plain') || format === 'image/*' && (pdf || mime.startsWith('image/')) || format === 'application/pdf' && pdf)) throw new OptionsError('incompatible_encoding_format', `WaPilot message MIME is ${mime}. Supported formats: ${pdf ? 'text/plain, image/*, application/pdf' : mime.startsWith('audio/') || mime === 'text/plain' ? 'text/plain' : mime.startsWith('image/') ? 'image/*' : 'metadata only'}.`);
       if (message.contentUnavailable || (message.text === undefined && !message.media && !message.medias?.length && !hasNativeContent(message) && message.update?.state !== 'unsupported')) throw new MessageReadError('message_content_unavailable', 404, 'WaPilot found the message but its content is unavailable.', message.messageType, message.contentUnavailableReason, message.contentDiagnostic);
-      const { media, medias, ...metadata } = withSource(message, own);
-      const data: Record<string, unknown> = { connectionId: id, messageId, message: { ...metadata, ...(media ? { media: { mimeType: media.mimeType, fileName: media.fileName, size: media.size, mediaId: media.mediaId } } : {}), ...(medias ? { medias: medias.map(({ url: _url, content, ...item }) => ({ ...item, ...(item.encodingFormat === 'text/vcard' && typeof content === 'string' ? { content } : {}) })) } : {}) } };
+      const data: Record<string, unknown> = { connectionId: id, messageId, message: messageForClient(message, own) };
       if (format) data.mimeType = mime;
       const binary: CallToolResult['content'] = [];
       if (includes.includes('metadata')) Object.assign(data, await inspectMessageDocument(c, env, messageId, { cursor: o.cursor, bookmarkCursor: o.bookmarkCursor, limit: Math.min(o.limit, 5) }, ctx.mcpReq.signal));
       if (includes.includes('quoted') && message.quotedId) {
         const quoted = await c.getMessage(message.quotedId, ctx.mcpReq.signal);
-        if (quoted) {
-          const { media: qm, medias: qms, ...rest } = withSource(quoted, own);
-          data.quoted = { ...rest, ...(qm ? { media: { mimeType: qm.mimeType, fileName: qm.fileName, size: qm.size } } : {}), ...(qms ? { medias: qms.map(({ url: _url, content, ...item }) => ({ ...item, ...(item.encodingFormat === 'text/vcard' && typeof content === 'string' ? { content } : {}) })) } : {}) };
-        } else data.quoted = null;
+        data.quoted = quoted ? messageForClient(quoted, own) : null;
       }
       for (const [include, kind] of [['poll-responses', 'votes'], ['event-responses', 'eventResponses']] as const) {
         if (includes.includes(include)) data[include] = await c.searchMessageResponses(messageId, kind, o.offset, o.limit);
@@ -430,4 +425,13 @@ export function withSource(message: Message, ownNumber?: string): Message {
     return rest;
   }
   return message;
+}
+
+function messageForClient(message: Message, ownNumber?: string) {
+  const { media, medias, ...metadata } = withSource(message, ownNumber);
+  return {
+    ...metadata,
+    ...(media ? { media: { mimeType: media.mimeType, fileName: media.fileName, size: media.size, mediaId: media.mediaId } } : {}),
+    ...(medias ? { medias: medias.map(({ url: _url, content, ...item }) => ({ ...item, ...(item.encodingFormat === 'text/vcard' && typeof content === 'string' ? { content } : {}) })) } : {}),
+  };
 }

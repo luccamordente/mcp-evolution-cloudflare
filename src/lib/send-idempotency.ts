@@ -40,7 +40,7 @@ export async function idempotentSend(db: D1Database, input: {
     }
   } catch (error) {
     if (error instanceof SendOperationError) throw error;
-    if (error instanceof Error && error.message.includes('send_legacy_action_exists')) throw new SendOperationError('send_legacy_action_exists', 'WaPilot has an active action with this key from before the send tool upgrade. Look up its original operation. Do not resend or change the key.');
+    if (error instanceof Error && error.message.includes('send_legacy_action_exists')) throw new SendOperationError('send_legacy_action_exists', 'WaPilot has an active action with this key from before the send tool upgrade. Do not resend or change the key; an unconfirmed earlier action requires manual review.');
     throw new SendOperationError('send_idempotency_unavailable', 'WaPilot could not reserve this action safely. No send was started.');
   }
   let result: SendMessageResult | undefined;

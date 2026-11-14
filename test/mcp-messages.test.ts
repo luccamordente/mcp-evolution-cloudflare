@@ -1,4 +1,4 @@
-import { migrateToolArguments, migrateToolCall } from './helpers/tool-arguments';
+import { messageArguments, sendArguments } from './helpers/mcp-arguments';
 import { readFileSync } from 'node:fs';
 import { decode } from 'fast-png';
 import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -72,7 +72,6 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
   const env = { DB: db as unknown as D1Database, AI: { run, toMarkdown }, TOKEN_ENCRYPTION_KEY: encryptionKey, EVOLUTION_BASE_URL: 'https://evolution.invalid', EVOLUTION_GLOBAL_API_KEY: 'global-secret', IMAGE_STORAGE_ORIGINS: 'https://storage.example.test', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test', DOCUMENT_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' } as Env;
   const handler = createMcpHandler(() => createMcpServer(env, { id: 'claim-user-a', email: 'a@example.test', claims: {} }, trustedLocalScopes), { legacy: 'reject', responseMode: 'json' });
   async function rpc<T = { isError?: boolean; content: Array<{ type: string; text: string }>; structuredContent: { data: unknown }; _meta?: { sendReceipt?: { text: string; to: string; connectionName?: string; connectionId?: string; state: string; sentAt?: string } } }>(method: string, params: Record<string, unknown> = {}, signal?: AbortSignal) {
-    params = migrateToolCall(params);
     const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
       method: 'POST',
       signal,
@@ -86,18 +85,18 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
     const body = await response.text();
     return { status: response.status, ...(body ? JSON.parse(body) : {}) } as { status: number; result: T };
   }
-  return { fetcher, rpc, auditBindings, run, toMarkdown, env, message: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message', arguments: migrateToolArguments("get_message", args) }), document: (args: Record<string, unknown>, signal?: AbortSignal) => rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document", args) }, signal), audio: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("transcribe_message_audio", args) }), image: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("get_message_image", args) }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: "search_messages", arguments: migrateToolArguments("list_messages", args) }) };
+  return { fetcher, rpc, auditBindings, run, toMarkdown, env, message: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message', arguments: messageArguments(args, {}) }), document: (args: Record<string, unknown>, signal?: AbortSignal) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"text/plain"}) }, signal), audio: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"text/plain"}) }), image: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"image/*"}) }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: "search_messages", arguments: { options: args } }) };
 }
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('PDF elapsed deadline checkpoints', () => {
   it.each([
-    ['read_message_document_pages', 'FPDF_RenderPageBitmap', {pages: [1, 3]}, 'document-matrix.pdf', [0]],
-    ['inspect_message_document', 'FPDFText_GetText', {limit: 3}, 'document-matrix.pdf', [0]],
-    ['inspect_message_document', 'FPDFBookmark_GetTitle', {limit: 1}, 'document-outline.pdf', [0]],
-    ['read_message_document_pages', 'FPDF_LoadMemDocument', {pages: [1, 3]}, 'document-matrix.pdf', []],
-  ] as const)('stops %s before starting a second page after synchronous work exhausts the budget', async (name, expensiveStep, selection, fixture, expectedLoadedPages) => {
+    [{ encodingFormat: 'image/*' }, 'FPDF_RenderPageBitmap', {pages: [1, 3]}, 'document-matrix.pdf', [0]],
+    [{ include: ['metadata'] }, 'FPDFText_GetText', {limit: 3}, 'document-matrix.pdf', [0]],
+    [{ include: ['metadata'] }, 'FPDFBookmark_GetTitle', {limit: 1}, 'document-outline.pdf', [0]],
+    [{ encodingFormat: 'image/*' }, 'FPDF_LoadMemDocument', {pages: [1, 3]}, 'document-matrix.pdf', []],
+  ] as const)('stops %s before starting a second page after synchronous work exhausts the budget', async (processingOptions, expensiveStep, selection, fixture, expectedLoadedPages) => {
     const { rpc, fetcher, env } = await messageTool();
     env.MAX_MEDIA_BYTES = '8388608';
     fetcher.mockImplementation(async url => {
@@ -122,7 +121,7 @@ describe('PDF elapsed deadline checkpoints', () => {
       }
       return { exports };
     });
-    const { result } = await rpc('tools/call', {name, arguments: {messageId: 'message-1', ...selection}});
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { ...processingOptions, ...selection } } });
     expect(result).toMatchObject({isError: true, structuredContent: {data: {connectionId, messageId: 'message-1', error: {code: 'wapilot_timeout'}}}});
     expect(loadedPages).toEqual(expectedLoadedPages);
     expect(expensiveCalls).toBe(1);
@@ -130,25 +129,25 @@ describe('PDF elapsed deadline checkpoints', () => {
 });
 
 describe('PDF operational failure identity', () => {
-  it.each(['inspect_message_document', 'read_message_document_pages'])('keeps identity on an invalid PDF for %s', async name => {
+  it.each([{ include: ['metadata'] }, { encodingFormat: 'image/*' }])('keeps identity on an invalid PDF for %s', async processingOptions => {
     const {rpc, fetcher} = await messageTool();
     fetcher.mockImplementation(async () => new Response('%PDF-1.7\ninvalid'))
       .mockResolvedValueOnce(Response.json({jsonapi: {version: '1.1'}, data: retainedPdf()}))
       .mockResolvedValueOnce(Response.json({jsonapi: {version: '1.1'}, data: retainedPdf()}));
-    expect((await rpc('tools/call', {name, arguments: {messageId: 'message-1', connectionId: workConnectionId}})).result).toMatchObject({isError: true, structuredContent: {data: {connectionId: workConnectionId, messageId: 'message-1', error: {code: 'pdf_invalid'}}}});
+    expect((await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { ...processingOptions, connectionId: workConnectionId } } })).result).toMatchObject({isError: true, structuredContent: {data: {connectionId: workConnectionId, messageId: 'message-1', error: {code: 'pdf_invalid'}}}});
   });
 
-  it.each(['get_message_document', 'inspect_message_document', 'read_message_document_pages', 'read_message_document'])('preserves resolved identity for %s failures', async name => {
+  it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { encodingFormat: 'image/*' }, { encodingFormat: 'text/plain' }])('preserves resolved identity for %s failures', async processingOptions => {
     const { rpc, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: null }));
-    const {result} = await rpc('tools/call', {name, arguments: {messageId: 'message-1'}});
+    const {result} = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { ...processingOptions } } });
     expect(result).toMatchObject({isError: true, structuredContent: {data: {connectionId, messageId: 'message-1', error: {code: 'message_not_found'}}}});
     expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent);
   });
 
-  it.each(['get_message_document', 'inspect_message_document', 'read_message_document_pages', 'read_message_document'])('does not echo an unauthorized identity for %s', async name => {
+  it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { encodingFormat: 'image/*' }, { encodingFormat: 'text/plain' }])('does not echo an unauthorized identity for %s', async processingOptions => {
     const { rpc, fetcher } = await messageTool();
-    const { result } = await rpc('tools/call', {name, arguments: {connectionId: foreignConnectionId, messageId: 'foreign-message'}});
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'foreign-message', options: { ...processingOptions, connectionId: foreignConnectionId } } });
     expect(result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'connection_not_found'}}}});
     expect(result.structuredContent.data).not.toHaveProperty('connectionId');
     expect(result.structuredContent.data).not.toHaveProperty('messageId');
@@ -157,16 +156,16 @@ describe('PDF operational failure identity', () => {
   });
 });
 
-describe('inspect_message_document HTTP MCP output', () => {
+describe('PDF inspection HTTP MCP output', () => {
   it.each([{}, { messageId: 'x', cursor: '-1:0' }, { messageId: 'x', cursor: '1:NaN' }, { messageId: 'x', limit: 6 }, { messageId: 'x', bookmarkCursor: 2000 }, { messageId: 'x', url: 'https://attacker.example' }])('rejects invalid inspection arguments before download: %j', async args => {
     const { rpc, fetcher } = await messageTool();
-    expect((await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("inspect_message_document", args) })).result.isError).toBe(true);
+    expect((await rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"include":["metadata"]}) })).result.isError).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('rejects a foreign inspection connection before external calls', async () => {
     const { rpc, fetcher } = await messageTool();
-    expect((await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("inspect_message_document", { connectionId: foreignConnectionId, messageId: 'message-1' }) })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
+    expect((await rpc('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { connectionId: foreignConnectionId, include: ["metadata"] } } })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -174,7 +173,7 @@ describe('inspect_message_document HTTP MCP output', () => {
     const { rpc, fetcher, env } = await messageTool();
     env.MAX_MEDIA_BYTES = '8388608';
     fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(readFileSync('test/fixtures/document-inspection.pdf')) : Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    const call = (cursor?: string) => rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("inspect_message_document", { messageId: 'message-1', limit: 1, ...(cursor ? { cursor } : {}) }) });
+    const call = (cursor?: string) => rpc<any>('tools/call', { name: "get_message", arguments: messageArguments({ messageId: 'message-1', limit: 1, ...(cursor ? { cursor } : {}) }, {"include":["metadata"]}) });
     const first = (await call()).result.structuredContent.data;
     expect(first.pages[0]).toMatchObject({ page: 1, label: 'i', textOffset: 0, nextTextOffset: 4000 });
     expect(first.nextCursor).toBe('1:4000');
@@ -193,11 +192,11 @@ describe('inspect_message_document HTTP MCP output', () => {
     const { rpc, fetcher, env } = await messageTool();
     env.MAX_MEDIA_BYTES = '8388608';
     fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(readFileSync('test/fixtures/document-outline.pdf')) : Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    const first = (await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("inspect_message_document", { messageId: 'message-1' }) })).result.structuredContent.data;
+    const first = (await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { include: ["metadata"] } } })).result.structuredContent.data;
     expect(first.bookmarks).toHaveLength(100);
     expect(first.bookmarks[99]).toMatchObject({title: 'Entry 099', page: 1});
     expect(first.nextBookmarkCursor).toBe(100);
-    const second = (await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("inspect_message_document", { messageId: 'message-1', bookmarkCursor: first.nextBookmarkCursor }) })).result.structuredContent.data;
+    const second = (await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { bookmarkCursor: first.nextBookmarkCursor, include: ["metadata"] } } })).result.structuredContent.data;
     expect(second.bookmarks).toHaveLength(5);
     expect(second.bookmarks[0]).toMatchObject({title: 'Entry 100', page: 1});
     expect(second.nextBookmarkCursor).toBeNull();
@@ -208,7 +207,7 @@ describe('inspect_message_document HTTP MCP output', () => {
     const { rpc, fetcher, env } = await messageTool();
     env.MAX_MEDIA_BYTES = '8388608';
     fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(readFileSync('test/fixtures/document-matrix.pdf')) : Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    expect((await rpc('tools/call', {name: "get_message", arguments: migrateToolArguments("inspect_message_document", {messageId: 'message-1', cursor})})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'pdf_page_unavailable', retryable: false}}}});
+    expect((await rpc('tools/call', {name: "get_message", arguments: { messageId: 'message-1', options: { cursor, include: ["metadata"] } }})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'pdf_page_unavailable', retryable: false}}}});
   });
 
   it('enforces elapsed inspection time even when synchronous work prevents the timer from firing', async () => {
@@ -222,7 +221,7 @@ describe('inspect_message_document HTTP MCP output', () => {
       }
       return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
     });
-    expect((await rpc('tools/call', {name: "get_message", arguments: migrateToolArguments("inspect_message_document", {messageId: 'message-1'})})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'wapilot_timeout', retryable: false}}}});
+    expect((await rpc('tools/call', {name: "get_message", arguments: { messageId: 'message-1', options: { include: ["metadata"] } }})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'wapilot_timeout', retryable: false}}}});
   });
 
   it('reports an invalid original as invalid rather than an empty page', async () => {
@@ -230,14 +229,14 @@ describe('inspect_message_document HTTP MCP output', () => {
     fetcher.mockImplementation(async () => new Response('%PDF-1.7\nnot a valid PDF'))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    expect((await rpc('tools/call', {name: "get_message", arguments: migrateToolArguments("inspect_message_document", {messageId: 'message-1'})})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'pdf_invalid'}}}});
+    expect((await rpc('tools/call', {name: "get_message", arguments: { messageId: 'message-1', options: { include: ["metadata"] } }})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'pdf_invalid'}}}});
   });
 
   it('maps real pages with bounded text and stable continuation without visual coverage claims', async () => {
     const { rpc, fetcher, env } = await messageTool();
     env.MAX_MEDIA_BYTES = '8388608';
     fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(readFileSync('test/fixtures/document-matrix.pdf')) : Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("inspect_message_document", { messageId: 'message-1', limit: 3 }) });
+    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { limit: 3, include: ["metadata"] } } });
     expect(result.structuredContent.data).toMatchObject({ connectionId, messageId: 'message-1', totalPages: 24, nextCursor: '4:0', format: 'text', pages: [
       { page: 1, width: 600, height: 800, orientation: 'portrait', textStatus: 'available', coverage: 'text-only' },
       { page: 2, textStatus: 'none', text: '', coverage: 'text-only' },
@@ -247,7 +246,7 @@ describe('inspect_message_document HTTP MCP output', () => {
     expect(result.structuredContent.data.pages[2].text).toContain('Physical page 3');
     expect(result.structuredContent.data.bookmarks).toEqual([]);
     expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent);
-    const next = await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("inspect_message_document", { messageId: 'message-1', cursor: result.structuredContent.data.nextCursor, limit: 1 }) });
+    const next = await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { cursor: result.structuredContent.data.nextCursor, limit: 1, include: ["metadata"] } } });
     expect(next.result.structuredContent.data.pages[0].page).toBe(4);
     expect(next.result.structuredContent.data.nextCursor).toBe('5:0');
   });
@@ -255,21 +254,21 @@ describe('inspect_message_document HTTP MCP output', () => {
 
 
 
-describe('read_message_document_pages HTTP MCP output', () => {
+describe('PDF pages HTTP MCP output', () => {
   it('returns a native detail crop in visible page coordinates', async () => {
     const { rpc, fetcher, env } = await messageTool(); env.MAX_MEDIA_BYTES = '8388608';
     fetcher.mockImplementation(async () => new Response(readFileSync('test/fixtures/document-pages.pdf')))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
     const crop = { x: 0, y: 0.4, width: 0.4, height: 0.6 };
-    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', preset: 'detail', crop }) });
+    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { preset: 'detail', crop, encodingFormat: "image/*" } } });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data.pages[0]).toMatchObject({ page: 1, width: 2400, height: 2400, crop });
     expect(decode(Buffer.from(result.content[1].data, 'base64')).width).toBe(2400);
   });
   it.each([{ x: 0, y: 0, width: 0, height: 1 }, { x: -0.1, y: 0, width: 1, height: 1 }, { x: 0.5, y: 0.5, width: 0.6, height: 0.6 }])('rejects invalid crop before download %j', async crop => {
     const { rpc, fetcher } = await messageTool();
-    expect((await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', crop }) })).result.isError).toBe(true);
+    expect((await rpc('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { crop, encodingFormat: "image/*" } } })).result.isError).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -279,7 +278,7 @@ describe('read_message_document_pages HTTP MCP output', () => {
     fetcher.mockImplementation(async () => new Response(readFileSync('test/fixtures/document-limits.pdf')))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', pages: [1, 2, 3], preset: 'preview' }) });
+    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { pages: [1, 2, 3], preset: 'preview', encodingFormat: "image/*" } } });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data).toMatchObject({ requestedPages: [1, 2, 3], deliveredPages: [1, 3], failedPages: [2], complete: false });
     expect(result.structuredContent.data.pages[1]).toMatchObject({ page: 2, status: 'failed', code: 'pdf_limit' });
@@ -292,7 +291,7 @@ describe('read_message_document_pages HTTP MCP output', () => {
     fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/')
       ? new Response(readFileSync('test/fixtures/document-limits.pdf'))
       : Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', ...selection }) });
+    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: messageArguments({ messageId: 'message-1', ...selection }, {"encodingFormat":"image/*"}) });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: {
       connectionId, messageId: 'message-1', requestedPages: [2], deliveredPages: [], failedPages: [2], complete: false,
       pages: [{ page: 2, status: 'failed', code: 'pdf_limit' }],
@@ -305,7 +304,7 @@ describe('read_message_document_pages HTTP MCP output', () => {
 
   it.each([{ pages: [] }, { pages: [1, 2, 3, 4] }, { pages: [1, 1] }, { page: 1, pages: [1] }, { pages: [0] }, { preset: 'unknown' }])('rejects invalid batch before external calls %j', async selection => {
     const { rpc, fetcher } = await messageTool();
-    const { result } = await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', ...selection }) });
+    const { result } = await rpc('tools/call', { name: "get_message", arguments: messageArguments({ messageId: 'message-1', ...selection }, {"encodingFormat":"image/*"}) });
     expect(result.isError).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -317,7 +316,7 @@ describe('read_message_document_pages HTTP MCP output', () => {
       ? Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() })
       : new Response(readFileSync('test/fixtures/document-matrix.pdf')));
     for (const pages of [[3, 2], [24]]) {
-      const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', pages, preset: 'preview' }) });
+      const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { pages, preset: 'preview', encodingFormat: "image/*" } } });
       expect(result.isError).not.toBe(true);
       expect(result.structuredContent.data).toMatchObject({ connectionId, requestedPages: pages, deliveredPages: pages, failedPages: [], preset: 'preview' });
       expect(result.content.filter((block: any) => block.type === 'image')).toHaveLength(pages.length);
@@ -331,7 +330,7 @@ describe('read_message_document_pages HTTP MCP output', () => {
     fetcher.mockImplementation(async () => new Response(readFileSync('test/fixtures/document-pages.pdf')))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1' }) });
+    const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { encodingFormat: "image/*" } } });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data).toMatchObject({ connectionId, messageId: 'message-1', totalPages: 1, pages: [{ page: 1, width: 1600, height: 1066, status: 'delivered' }] });
     const image = result.content.find((block: any) => block.type === 'image');
@@ -343,27 +342,27 @@ describe('read_message_document_pages HTTP MCP output', () => {
   });
   it.each([0, -1, 1.5, '1'])('rejects invalid page %j before remote calls', async page => {
     const { rpc, fetcher } = await messageTool();
-    expect((await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', page }) })).result.isError).toBe(true);
+    expect((await rpc('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { page, encodingFormat: "image/*" } } })).result.isError).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
   });
   it('denies a foreign connection before fetching or rendering', async () => {
     const { rpc, fetcher } = await messageTool();
-    const { result } = await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("read_message_document_pages", { messageId: 'message-1', connectionId: foreignConnectionId }) });
+    const { result } = await rpc('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { connectionId: foreignConnectionId, encodingFormat: "image/*" } } });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
 
-describe('get_message_document HTTP MCP output', () => {
+describe('PDF original HTTP MCP output', () => {
   it.each([[{ connectionId: foreignConnectionId, messageId: 'message-1' }, 1, 'connection_not_found'], [{ messageId: 'message-1' }, 0, 'no_default_connection'], [{ messageId: 'message-1' }, 2, 'multiple_default_connections']])('rejects inaccessible original before remote access: %j', async (args, count, code) => {
     const { rpc, fetcher } = await messageTool(Number(count));
-    expect((await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("get_message_document", args) })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code } } } });
+    expect((await rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"application/pdf"}) })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code } } } });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
   it.each([{}, { messageId: ' ' }, { messageId: 'x'.repeat(201) }, { messageId: 'message-1', url: 'https://attacker.example' }, { messageId: 'message-1', filePath: '/etc/passwd' }, { messageId: 'message-1', dataBase64: 'AAAA' }, { messageId: 'message-1', userId: 'db-user-b' }])('rejects invalid original arguments: %j', async args => {
     const { rpc, fetcher } = await messageTool();
-    expect((await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("get_message_document", args) })).result.isError).toBe(true);
+    expect((await rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"application/pdf"}) })).result.isError).toBe(true);
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -380,16 +379,12 @@ describe('get_message_document HTTP MCP output', () => {
     fetcher.mockImplementation(async () => new Response(String(body), { status: Number(status), headers: kind === 'announced size' ? { 'content-length': '1025' } : {} }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: message }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: message }));
-    const { result } = await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("get_message_document", { messageId: 'message-1' }) });
+    const { result } = await rpc('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { encodingFormat: "application/pdf" } } });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code } } } });
     expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private|attacker|instance-secret|global-secret/);
   });
 
-  it('keeps original download out of the local stdio catalog', async () => {
-    const local = await messageTool(1, ['mcp:read']);
-    const listed = await local.rpc<{tools: Array<{name: string}>}>('tools/list');
-    expect(listed.result.tools.some(tool => tool.name === 'get_message_document')).toBe(false);
-  });
+
 
   it.each(['deadline', 'client'])('cancels a stalled original download: %s', async kind => {
     vi.useFakeTimers();
@@ -400,7 +395,7 @@ describe('get_message_document HTTP MCP output', () => {
     const downloading = new Promise<void>(resolve => { started = resolve; });
     fetcher.mockImplementation((_url, init) => new Promise((_resolve, reject) => { started(); init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true }); }));
     const controller = new AbortController();
-    const pending = rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("get_message_document", { messageId: 'message-1' }) }, controller.signal);
+    const pending = rpc('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { encodingFormat: "application/pdf" } } }, controller.signal);
     await downloading;
     if (kind === 'client') controller.abort();
     else await vi.advanceTimersByTimeAsync(60_001);
@@ -416,7 +411,7 @@ describe('get_message_document HTTP MCP output', () => {
     fetcher.mockImplementation(async () => new Response(bytes))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/document.pdf?signature=private-link') }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/document.pdf?signature=private-link') }));
-    const { result } = await rpc<{content: Array<{type: string; text?: string; resource?: {blob: string; mimeType: string; uri: string}}> ; structuredContent: {data: unknown}}>('tools/call', { name: "get_message", arguments: migrateToolArguments("get_message_document", { connectionId: workConnectionId, messageId: 'message-1' }) });
+    const { result } = await rpc<{content: Array<{type: string; text?: string; resource?: {blob: string; mimeType: string; uri: string}}> ; structuredContent: {data: unknown}}>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { connectionId: workConnectionId, encodingFormat: "application/pdf" } } });
     expect(result.structuredContent.data).toMatchObject({ connectionId: workConnectionId, messageId: 'message-1', mimeType: 'application/pdf', size: bytes.length });
     expect(JSON.parse(result.content[0].text!)).toEqual(result.structuredContent);
     const resource = result.content.find(item => item.type === 'resource')?.resource;
@@ -445,7 +440,7 @@ describe('production PDF capabilities preserved with GIF sending', () => {
     const pdf = Buffer.from('%PDF-1.7\noriginal fixture');
     fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(pdf)
       : Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
-    const { result } = await rpc('tools/call', { name: "get_message", arguments: migrateToolArguments("get_message_document", { messageId: 'message-1', connectionId: workConnectionId }) });
+    const { result } = await rpc('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { connectionId: workConnectionId, encodingFormat: "application/pdf" } } });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data).toMatchObject({ connectionId: workConnectionId, messageId: 'message-1', mimeType: 'application/pdf', size: pdf.length });
     expect(result.content).toContainEqual({ type: 'resource', resource: { uri: `wapilot://documents/${workConnectionId}/message-1`, mimeType: 'application/pdf', blob: pdf.toString('base64') } });
@@ -454,9 +449,9 @@ describe('production PDF capabilities preserved with GIF sending', () => {
     expect(JSON.stringify({ result, auditBindings })).not.toMatch(/storage\.example|instance-secret|signature=/);
   });
 
-  it.each(['inspect_message_document', 'read_message_document_pages', 'get_message_document'])('keeps connection ownership checks for %s', async name => {
+  it.each([{ include: ['metadata'] }, { encodingFormat: 'image/*' }, { encodingFormat: 'application/pdf' }])('keeps connection ownership checks for %s', async processingOptions => {
     const { rpc, fetcher } = await messageTool();
-    const { result } = await rpc('tools/call', { name, arguments: { messageId: 'message-1', connectionId: foreignConnectionId } });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { ...processingOptions, connectionId: foreignConnectionId } } });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -465,10 +460,10 @@ describe('production PDF capabilities preserved with GIF sending', () => {
 
 
 describe('text send receipt MCP boundary', () => {
-  it.each(['send_message'])('discovers a static, read-only presentation for %s without credentials or network access', async name => {
+  it.each(['send_message'])('discovers a static, read-only presentation for %s without credentials or network access', async toolName => {
     const { rpc, fetcher } = await messageTool();
     const { result } = await rpc<{ tools: Array<{ name: string; _meta?: { ui: { resourceUri: string; visibility: string[] } }; annotations: { readOnlyHint: boolean } }> }>('tools/list');
-    const tool = result.tools.find(item => item.name === name)!;
+    const tool = result.tools.find(item => item.name === toolName)!;
     expect(tool.annotations.readOnlyHint).toBe(false);
     expect(tool._meta?.ui).toEqual({ resourceUri: 'ui://wapilot/send-receipt-v3.html', visibility: ['model'] });
     const { result: resource } = await rpc<{ contents: Array<{ text: string; mimeType: string; _meta: { ui: { csp: { resourceDomains: string[]; connectDomains: string[] } } } }> }>('resources/read', { uri: tool._meta!.ui.resourceUri });
@@ -485,7 +480,7 @@ describe('text send receipt MCP boundary', () => {
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-1', meta: { chat: '5511999999999' } } }));
     const text = '  Olá 👋\n*Negrito* _Itálico_ ~Tachado~\n```literal *código*```\n`literal _inline_`\n- Item\n* Outro item\n1. Primeiro\n> Citação\n<script>alert(1)</script>  ';
     const startedAt = Date.now();
-    const { result } = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: '5511999999999', text } }) });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: '5511999999999', text } }) });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent.data).toEqual({ connectionId, accepted: true, messageId: 'sent-1', conversationId: '5511999999999', jid: '5511999999999', outcome: 'accepted', deliveryStatus: 'unavailable', readStatus: 'unavailable' });
     expect(result._meta?.sendReceipt).toEqual({ text, to: '5511999999999', connectionId, connectionName: 'Personal', state: 'accepted', sentAt: expect.any(String) });
@@ -508,7 +503,7 @@ describe('text send receipt MCP boundary', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).data.attributes.body.text).toBe(text);
     expect(JSON.stringify(auditBindings)).not.toMatch(/Literal|script|instance-secret/);
-    const second = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { connectionId: workConnectionId, message: { kind: 'text', to: 'other-chat', text: 'Outro texto' } }) });
+    const second = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ connectionId: workConnectionId, message: { kind: 'text', to: 'other-chat', text: 'Outro texto' } }) });
     expect(second.result._meta?.sendReceipt).toMatchObject({ text: 'Outro texto', to: 'other-chat', connectionId: workConnectionId });
     expect(result._meta?.sendReceipt?.text).toBe(text);
     expect(new Headers(fetcher.mock.calls[1][1]?.headers).get('apikey')).toBe('work-instance-secret');
@@ -518,14 +513,14 @@ describe('text send receipt MCP boundary', () => {
     const { rpc, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'reply-sent' } }));
     const text = '  Minha resposta 👋\n> Uma citação no novo texto  ';
-    const { result } = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { connectionId: selectedConnectionId, message: { kind: 'text', to: 'destino', text, replyTo: { messageId: 'original-id', participant: 'autor@s.whatsapp.net' } } }) });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ connectionId: selectedConnectionId, message: { kind: 'text', to: 'destino', text, replyTo: { messageId: 'original-id', participant: 'autor@s.whatsapp.net' } } }) });
     expect(result).toMatchObject({ structuredContent: { data: { accepted: true, messageId: 'reply-sent' } }, _meta: { sendReceipt: { state: 'accepted', text, to: 'destino', connectionName: 'Personal', connectionId: selectedConnectionId ?? connectionId, isReply: true } } });
     expect(result.content.map(item => item.text).join('\n')).toContain('Em resposta a uma mensagem');
     expect(result.content.map(item => item.text).join('\n')).toContain(text);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).data).toMatchObject({ attributes: { body: { text } }, relationships: { recipient: { data: { id: 'destino' } }, quoted: { data: { type: 'message', id: 'original-id', meta: { participant: 'autor@s.whatsapp.net' } } } } });
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe(selectedConnectionId ? 'work-instance-secret' : 'instance-secret');
-    const fresh = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: 'outro-destino', text: 'Mensagem independente' } }) });
+    const fresh = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: 'outro-destino', text: 'Mensagem independente' } }) });
     expect(fresh.result._meta?.sendReceipt).toMatchObject({ text: 'Mensagem independente', to: 'outro-destino', state: 'accepted' });
     expect(fresh.result._meta?.sendReceipt).not.toHaveProperty('isReply');
     expect(result._meta?.sendReceipt).toMatchObject({ text, isReply: true });
@@ -536,7 +531,7 @@ describe('text send receipt MCP boundary', () => {
     fetcher.mockResolvedValue(kind === 'timeout'
       ? Response.json({ errors: [{ detail: 'private-provider-error' }] }, { status: 504 })
       : Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'reply-sent' } }));
-    const { result } = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { connectionId: kind === 'foreign' ? foreignConnectionId : undefined, message: { kind: 'text', to: 'destino', text: 'Minha resposta', replyTo: { messageId: 'original-id' } } }) });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ connectionId: kind === 'foreign' ? foreignConnectionId : undefined, message: { kind: 'text', to: 'destino', text: 'Minha resposta', replyTo: { messageId: 'original-id' } } }) });
     const state = kind === 'audit' ? 'accepted' : kind === 'timeout' ? 'unknown' : 'failed';
     expect(result._meta?.sendReceipt).toMatchObject({ state, isReply: true, text: 'Minha resposta', to: 'destino' });
     expect(result.isError === true).toBe(kind !== 'audit');
@@ -551,7 +546,7 @@ describe('text send receipt MCP boundary', () => {
     { scopes: ['mcp:read'], code: 'insufficient_scope' },
   ])('confirms rejection before any write while preserving authorization error codes: %j', async ({ defaultCount, args, scopes, code }) => {
     const { rpc, fetcher } = await messageTool(defaultCount ?? 1, undefined, { scopes });
-    const { result } = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { ...args, message: { kind: 'text', to: 'destino', text: 'Não enviar' } }) });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ ...args, message: { kind: 'text', to: 'destino', text: 'Não enviar' } }) });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code, retryable: false } } }, _meta: { sendReceipt: { state: 'failed', text: 'Não enviar', to: 'destino' } } });
     expect(result._meta?.sendReceipt?.connectionName).toBeUndefined();
     expect(result.content.map(item => item.text).join('\n')).toContain('Falha confirmada');
@@ -564,7 +559,7 @@ describe('text send receipt MCP boundary', () => {
       if (!status) throw new Error('private-network-error');
       return Response.json(kind === 'invalid-success' ? { jsonapi: { version: '1.1' }, data: {} } : { jsonapi: { version: '1.1' }, errors: [{ detail: 'private-provider-body https://private.example' }] }, { status: Number(status) });
     });
-    const { result } = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: 'destino', text: 'Meu texto' } }) });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: 'destino', text: 'Meu texto' } }) });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { retryable: false } } }, _meta: { sendReceipt: { state: 'unknown', connectionName: 'Personal' } } });
     expect(result.content.map(item => item.text).join('\n')).toContain('Não foi possível confirmar o envio');
     expect(JSON.stringify({ result, auditBindings })).not.toMatch(/private-|Evolution|instance-secret|global-secret/);
@@ -577,7 +572,7 @@ describe('text send receipt MCP boundary', () => {
     fetcher.mockImplementation(async (_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new Error('private-abort')), { once: true });
     }));
-    const pending = rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: 'destino', text: 'Talvez enviada' } }) });
+    const pending = rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: 'destino', text: 'Talvez enviada' } }) });
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(8001);
     const { result } = await pending;
@@ -588,7 +583,7 @@ describe('text send receipt MCP boundary', () => {
   it('preserves observed acceptance despite later audit failure', async () => {
     const { rpc, fetcher, auditBindings } = await messageTool(1, undefined, { auditFails: true });
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'sent-before-failure' } }));
-    const { result } = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: 'destino', text: 'Conteúdo privado' } }) });
+    const { result } = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: 'destino', text: 'Conteúdo privado' } }) });
     expect(result.isError).not.toBe(true);
     expect(result).toMatchObject({ structuredContent: { data: { accepted: true, messageId: 'sent-before-failure' } }, _meta: { sendReceipt: { state: 'accepted' } } });
     expect(JSON.stringify(auditBindings)).not.toMatch(/private-|Conteúdo privado|instance-secret/);
@@ -597,7 +592,7 @@ describe('text send receipt MCP boundary', () => {
 
   it('keeps trusted local read permissions separate from HTTP write scopes', async () => {
     const { rpc, fetcher } = await messageTool(1, ['mcp:read'], { scopes: ['mcp:write'] });
-    expect((await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: 'destino', text: 'Não enviar' } }) })).result).toMatchObject({ isError: true, _meta: { sendReceipt: { state: 'failed' } } });
+    expect((await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: 'destino', text: 'Não enviar' } }) })).result).toMatchObject({ isError: true, _meta: { sendReceipt: { state: 'failed' } } });
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
@@ -754,7 +749,7 @@ describe('get_message complete retained message', () => {
   });
 });
 
-describe('read_message_document HTTP MCP output', () => {
+describe('PDF text HTTP MCP output', () => {
   it('rejects a foreign connection before downloading or converting the document', async () => {
     const { document, fetcher, toMarkdown } = await messageTool();
     expect((await document({ connectionId: foreignConnectionId, messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'connection_not_found' } } } });
@@ -932,7 +927,7 @@ describe('read_message_document HTTP MCP output', () => {
   });
 });
 
-describe('transcribe_message_audio HTTP MCP output', () => {
+describe('audio transcription HTTP MCP output', () => {
 
 
   it.each([false, true])('returns only the transcript and message context for fromMe=%s', async (fromMe) => {
@@ -991,7 +986,7 @@ describe('transcribe_message_audio HTTP MCP output', () => {
   });
 });
 
-describe('get_message_image native MCP output', () => {
+describe('image content native MCP output', () => {
   it('advertises an image-reading tool and returns actual pixels without private URLs, captions or credentials', async () => {
     const { rpc, image, fetcher, auditBindings } = await messageTool();
     const listed = await rpc<{ tools: Array<{ name: string; annotations: { readOnlyHint: boolean }; inputSchema: { required: string[]; additionalProperties: boolean } }> }>('tools/list');
@@ -1032,7 +1027,7 @@ describe('get_message_image native MCP output', () => {
   });
 });
 
-describe('list_messages retained conversation search', () => {
+describe('search_messages retained conversation search', () => {
 
 
   it('combines a contact number, text and limit in the selected connection request', async () => {
@@ -1109,7 +1104,7 @@ describe('list_messages retained conversation search', () => {
   });
 });
 
-describe('list_messages encrypted update outcomes', () => {
+describe('search_messages encrypted update outcomes', () => {
   it('returns decoded edits with their target and discards private update fields', async () => {
     const { call, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: [{
@@ -1231,7 +1226,7 @@ describe('native history diagnostics', () => {
   it.each(['unsupported_action', 'native_media_unavailable', 'duplicate_poll_options'])('reports partial native content for %s', async reason => {
     const { rpc, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/vnd.whatsapp.interactive', body: { interactive: { kind: 'native', text: 'Retained part' } } }, meta: { content: { version: 1, state: 'partial', reason, rawMessage: 'private' } } } }));
-    const { result } = await rpc('tools/call', { name: 'get_message', arguments: migrateToolArguments("get_message", { messageId: 'message-1' }) });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: {  } } });
     expect(result.isError).not.toBe(true);
     expect(result).toMatchObject({ structuredContent: { data: { message: { contentPartial: true, contentDiagnostic: { state: 'partial', reason } } } } });
     expect(JSON.stringify(result)).not.toContain('private');
@@ -1239,13 +1234,13 @@ describe('native history diagnostics', () => {
   it.each(['missing_original_secret', 'decryption_failed'])('preserves safe unavailable diagnosis for %s', async reason => {
     const { rpc, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'application/vnd.whatsapp.event-response', body: {} }, meta: { content: { version: 1, state: 'unavailable', reason, targetId: 'event' } } } }));
-    const { result } = await rpc('tools/call', { name: 'get_message', arguments: migrateToolArguments("get_message", { messageId: 'message-1' }) });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: {  } } });
     expect(result).toMatchObject({ isError: true, structuredContent: { data: { contentUnavailable: true, contentUnavailableReason: reason, contentDiagnostic: { version: 1, state: 'unavailable', reason, targetId: 'event' } } } });
   });
   it('omits unknown provider diagnostic reasons', async () => {
     const { rpc, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, meta: { content: { version: 1, state: 'partial', reason: 'private-provider-input' } } } }));
-    const { result } = await rpc('tools/call', { name: 'get_message', arguments: migrateToolArguments("get_message", { messageId: 'message-1' }) });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: {  } } });
     expect(result.isError).not.toBe(true);
     expect(JSON.stringify(result)).not.toContain('private-provider-input');
     expect(result).toMatchObject({ structuredContent: { data: { message: { contentPartial: true, contentDiagnostic: { version: 1, state: 'partial' } } } } });

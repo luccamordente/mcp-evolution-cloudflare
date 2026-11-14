@@ -91,6 +91,97 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
+describe('unified get_message total media deadline', () => {
+  it.each([
+    { encodingFormat: 'text/plain' },
+    { encodingFormat: 'image/*' },
+    { encodingFormat: 'application/pdf' },
+    { include: ['metadata'] },
+  ])('counts the initial lookup in the PDF budget: %j', async options => {
+    const { rpc, fetcher, env, toMarkdown } = await messageTool();
+    env.MAX_MEDIA_BYTES = '8388608';
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        now = 60_001;
+        return new Response(readFileSync('test/fixtures/document-pages.pdf'));
+      }
+      now = 7_000;
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
+    });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { connectionId, messageId: 'message-1', error: { code: 'wapilot_timeout', status: 504, retryable: false } } } });
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('shares one PDF budget across metadata inspection and conversion', async () => {
+    const { rpc, fetcher, env, toMarkdown } = await messageTool();
+    env.MAX_MEDIA_BYTES = '8388608';
+    let now = 0, downloads = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        now = ++downloads === 1 ? 35_000 : 60_001;
+        return new Response(readFileSync('test/fixtures/document-pages.pdf'));
+      }
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
+    });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: ['metadata'], encodingFormat: 'text/plain' } } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504 } } } });
+    expect(downloads).toBe(2);
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('stops a stalled conversion at the original deadline after metadata work and clears timers', async () => {
+    const { rpc, fetcher, env, toMarkdown } = await messageTool();
+    env.MAX_MEDIA_BYTES = '8388608';
+    vi.useFakeTimers();
+    const start = Date.now();
+    let lookups = 0;
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        vi.setSystemTime(start + 35_000);
+        return new Response(readFileSync('test/fixtures/document-pages.pdf'));
+      }
+      if (++lookups === 1) vi.setSystemTime(start + 7_000);
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
+    });
+    let started!: () => void;
+    const converting = new Promise<void>(resolve => { started = resolve; });
+    toMarkdown.mockImplementation(() => { started(); return new Promise(() => {}); });
+    let completed = false;
+    const pending = rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: ['metadata'], encodingFormat: 'text/plain' } } }).then(result => { completed = true; return result; });
+    await converting;
+    expect(toMarkdown).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(completed).toBe(true);
+    expect((await pending).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504, retryable: false } } } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('counts the initial lookup and download in the audio inference budget', async () => {
+    const { rpc, fetcher, run } = await messageTool();
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        now = 20_000;
+        return new Response('synthetic audio');
+      }
+      now = 7_000;
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/voice.ogg', 'audio/ogg') });
+    });
+    run.mockImplementation(async () => { now = 300_001; return { text: 'Late transcript' }; });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { encodingFormat: 'text/plain' } } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504, retryable: false } } } });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain('Late transcript');
+  });
+});
+
 describe('PDF elapsed deadline checkpoints', () => {
   it.each([
     ['read_message_document_pages', 'FPDF_RenderPageBitmap', {pages: [1, 3]}, 'document-matrix.pdf', [0]],

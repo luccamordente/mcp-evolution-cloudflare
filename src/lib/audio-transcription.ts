@@ -13,17 +13,21 @@ export class AudioTranscriptionError extends Error {
   ) { super(message); }
 }
 
-export async function transcribeMessageAudio(client: EvolutionGoClient, env: Pick<Env, 'AI' | 'AUDIO_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, parentSignal: AbortSignal): Promise<string> {
+export async function transcribeMessageAudio(client: EvolutionGoClient, env: Pick<Env, 'AI' | 'AUDIO_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, parentSignal: AbortSignal, expiresAt = Date.now() + AUDIO_TRANSCRIPTION_TIMEOUT_MS): Promise<string> {
   if (!env.AI) throw new AudioTranscriptionError('transcription_unavailable', 503, 'WaPilot audio transcription is unavailable.');
   const deadline = new AbortController();
-  const timeout = setTimeout(() => deadline.abort(), AUDIO_TRANSCRIPTION_TIMEOUT_MS);
+  const timeout = setTimeout(() => deadline.abort(), Math.max(0, expiresAt - Date.now()));
   const signal = AbortSignal.any([parentSignal, deadline.signal]);
+  const checkDeadline = () => {
+    if (Date.now() >= expiresAt) deadline.abort();
+    signal.throwIfAborted();
+  };
   try {
-    signal.throwIfAborted();
+    checkDeadline();
     const audio = await client.getMessageAudio(messageId, approvedMediaOrigins(env.AUDIO_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL), Math.min(Number(env.MAX_MEDIA_BYTES ?? MAX_AUDIO_BYTES), MAX_AUDIO_BYTES), signal);
-    signal.throwIfAborted();
+    checkDeadline();
     const result: unknown = await env.AI.run('@cf/openai/whisper-large-v3-turbo', { audio, task: 'transcribe' }, { signal });
-    signal.throwIfAborted();
+    checkDeadline();
     if (!result || typeof result !== 'object' || !('text' in result) || typeof result.text !== 'string') {
       throw new AudioTranscriptionError('transcription_failed', 502, 'WaPilot received an invalid transcription response.');
     }

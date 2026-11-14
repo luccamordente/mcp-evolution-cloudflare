@@ -1,22 +1,29 @@
 # Ferramentas WaPilot
 
-O catálogo HTTP e o catálogo stdio anunciam exatamente cinco ferramentas. Argumentos comuns ficam em `options`; omitir `options.connectionId` usa a conexão padrão do usuário. Os UUIDs de conexão são internos e cada leitura resolve a propriedade da conexão. Não use IDs de instância como UUIDs de conexão.
+O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Argumentos comuns ficam em `options`; omitir `options.connectionId` usa a conexão padrão do usuário. Os UUIDs de conexão são internos e cada leitura resolve a propriedade da conexão. Não use IDs de instância como UUIDs de conexão.
 
 | Ferramenta | Argumentos | Fonte interna |
 | --- | --- | --- |
 | `search_connections` | `options?: {query, include: ['status'], offset, limit}` | D1 do usuário; `/instance/status` somente quando solicitado |
+| `search_contacts` | `query: string, options?: {connectionId, offset, limit}` | `/user/contacts`; busca por nome/telefone e deduplicação por ID/JID |
 | `search_groups` | `options?: {connectionId, query, include: ['participants'], offset, limit}` | `/group/list`; filtro por nome/JID antes da paginação local |
 | `search_messages` | `options?: {connectionId, conversationId, text, offset, limit}` | `/message/search`; filtros aplicados no provedor |
 | `get_message` | `messageId?: string, options?: GetMessageOptions` | `/message/status`, mídia e relações autorizadas |
 | `send_message` | `message, options` | Rotas de envio existentes; veja [SEND-MESSAGE.md](SEND-MESSAGE.md) |
 
-Não há ferramentas separadas de contatos, status, galeria, respostas ou mídia. A UI de comprovante de envio permanece disponível; a galeria não é publicada.
+Não há ferramentas separadas de status, galeria, respostas ou mídia. A UI de comprovante de envio permanece disponível; a galeria não é publicada.
 
 ## Busca e paginação
 
 `offset` é inteiro não negativo. `search_connections` e `search_groups` usam limite padrão 50, máximo 100. `query` filtra conexões por nome amigável, telefone ou ID de instância; grupos por nome ou JID. Participantes só aparecem quando solicitados. As respostas incluem `items` e `hasMore`.
 
 `search_messages` usa limite padrão 25, entre 1 e 50, e exige `offset + limit <= 200`. `conversationId` aceita número ou JID de contato/grupo, com espaços externos removidos e entre 1 e 200 caracteres. Como o provedor limita cada busca a 50, o cliente percorre páginas com `before` até preencher a janela e aplica o offset. Não envia um parâmetro `offset` ao provedor. A busca não cria um snapshot: alterações no histórico entre chamadas podem deslocar resultados. A retenção do provedor determina a disponibilidade; vazio não comprova ausência de mensagens. Timestamps empatados dependem das limitações do cursor temporal existente.
+
+`search_contacts` restaura a busca por nome, nome de exibição, telefone ou JID e a deduplicação por ID/JID. `query` é obrigatório, com espaços externos removidos e entre 1 e 200 caracteres. `options.connectionId` seleciona uma conexão autorizada; omitir usa a padrão. `offset` começa em 0 e `limit` usa padrão 50, entre 1 e 100. A paginação ocorre depois do filtro e da deduplicação, sobre os contatos retornados pelo provedor. A resposta contém `connectionId`, `items` e `hasMore`. Exemplo:
+
+```json
+{"query": "Ana", "options": {"offset": 0, "limit": 25}}
+```
 
 ## Leitura unificada
 

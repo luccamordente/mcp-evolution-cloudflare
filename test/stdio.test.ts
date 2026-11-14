@@ -79,7 +79,7 @@ it('serves the shared tools and resources with a persistent default connection o
   }
   const first = await open();
   expect(first.client.getServerCapabilities()).not.toHaveProperty('events');
-  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toEqual(['search_connections', 'search_groups', 'search_messages', 'get_message', 'send_message']);
+  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toEqual(['search_connections', 'search_contacts', 'search_groups', 'search_messages', 'get_message', 'send_message']);
   const resources = await first.client.listResources();
   expect(resources.resources.map(resource => resource.uri)).toEqual(['ui://wapilot/send-receipt-v3.html']);
   expect((await first.client.readResource({ uri: resources.resources[0].uri })).contents).toHaveLength(1);
@@ -88,7 +88,7 @@ it('serves the shared tools and resources with a persistent default connection o
   expect(connections).toHaveLength(1);
   expect(connections[0].isDefault).toBe(1);
   expect((await first.client.callTool({ name: "search_connections", arguments: migrateToolArguments("connection_status", {}) })).isError).not.toBe(true);
-  for (const tool of [{ name: "search_groups", arguments: migrateToolArguments("list_groups", {}) }, { name: "search_messages", arguments: migrateToolArguments("list_messages", {}) }]) {
+  for (const tool of [{ name: "search_contacts", arguments: { query: "Fixture" } }, { name: "search_groups", arguments: migrateToolArguments("list_groups", {}) }, { name: "search_messages", arguments: migrateToolArguments("list_messages", {}) }]) {
     const result = await first.client.callTool(tool);
     expect(result.isError).not.toBe(true);
     expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(1);

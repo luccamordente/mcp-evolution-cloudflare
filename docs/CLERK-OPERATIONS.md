@@ -12,6 +12,8 @@ A inspeção pública desktop anterior à aplicação, feita com Terra, montou a
 
 Os testes HTTP usam o Worker real em workerd, D1/KV locais, SDK Backend real e JWT/JWKS/Backend API sintéticos. Cobrem usuários ativos, ausentes, pendentes e desativados; cookies separados, handshake, CSRF, respostas JSON das APIs e ausência de diagnósticos brutos em headers. Grants legados continuam listáveis/revogáveis por sessão Clerk, com preservação de IDs, padrão, propriedade e cifras das conexões nas fixtures.
 
+A [preparação production da #63 em 13/11/2026](qa/clerk-production-2026-11-13.md) registra o domínio escolhido `wapilot.com.br`, preservando a origem `https://app.wapilot.com.br`, os read-backs e o fluxo versionado de código/configuração/secrets. A criação e o DNS foram autorizados, mas o Clerk recusou o clone por `app:custom_email_template` incompatível com o plano. Produção segue ausente; DNS/certificados, restrições, portal e secrets permanecem gates antes dos vínculos e do corte.
+
 ## Vínculo deliberado dos usuários existentes
 
 1. Com autorização para o ambiente alvo, confira a aplicação/instância Clerk, o D1 e o KV existentes e a revisão publicada. Registre somente identificadores, contagens e comparações de integridade; não exporte tokens de conexão ou props dos grants. Antes de aplicar migrations, confirme `0010_unified_send_fence.sql` já aplicada e somente `0011_clerk_identity.sql` pendente e aprovada. Ela é aditiva e não altera conexões. Interrompa diante de outra migration ou inventário divergente.

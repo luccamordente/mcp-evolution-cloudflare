@@ -1,6 +1,6 @@
 # Preflight do corte Clerk — 15/11/2026 UTC
 
-Este registro complementa os checkpoints históricos de [preparação](clerk-production-2026-11-14.md) e [vínculo](clerk-identity-linking-2026-11-14.md). As leituras externas abaixo foram realizadas e reportadas pelo responsável operacional; a reconciliação local não operou serviços ou credenciais.
+Este registro complementa os checkpoints históricos de [preparação](clerk-production-2026-11-14.md) e [vínculo](clerk-identity-linking-2026-11-14.md). As leituras externas abaixo foram realizadas e reportadas pelo responsável operacional; a reconciliação e esta atualização documental não operaram serviços ou credenciais. O [registro do corte executado](#corte-executado-em-produção) sucede os checkpoints históricos de preparação.
 
 ## Checkpoint histórico inicial conferido pelo responsável
 
@@ -32,3 +32,32 @@ A integração do contrato foi congelada em `8051f942a99fd08d65586b9c131e58441f4
 O código/configuração foi congelado em `093e63e9c2fd74e2cfca03824ffe4f2329423245`. O MIME inválido do provedor é normalizado na projeção pública, preservando o texto disponível em JSON e os erros parciais das opções incompatíveis, sem refletir o valor bruto. A configuração mantém logs sanitizados da aplicação e redação de query, mas desabilita logs automáticos de invocação e traces para não registrar capacidades de anexos no path. Isso é configuração do artefato local, sem afirmação de alteração live.
 
 Os testes dos achados reproduziram cinco falhas antes do ajuste. Após a correção, typecheck e **321 testes focados** passaram. O novo `npm run check -- -- --maxWorkers=1` passou com exit code 0: assets, tipos e **950 testes aprovados e 15 pulados**, 56 arquivos aprovados e um pulado, em 175,70 segundos de Vitest. Não houve mudança de código após esse congelamento, aplicação remota de migrations ou publicação nesta etapa.
+
+
+## Corte executado em produção
+
+O PR #71 foi integrado ao `main` em **2026-11-15T16:33:44Z**, fonte `47c05b498fc2104854d996b5b85efaef176a1216`, com árvore equivalente à candidata revisada `a145fcd…`. A janela operacional começou às **16:38:24 UTC**, com orçamento de 30 minutos. O comando de publicação terminou com exit code 0 às 16:38:27 UTC, e o read-back confirmou Clerk `1b4fab97-3e69-485c-94c9-5ce4096c0aac` em **100%**. O retorno Access seguro `726e4a6c-7314-4878-af52-748097205deb`, fonte `cdd4a73ca5d4035e47e6a1320e5e30b82a6ecab7`, foi preparado inativo, preservando o contrato `97d2554…`, a barreira D1 ativa e a proteção de logs. A publicação paralela `f5c7ee20…` tornou-se checkpoint histórico.
+
+O responsável moveu os quatro paths `/connections`, `/admin`, `/api` e `/authorize`, nas mesmas três aplicações Access, para `/__access-retorno-20261115/{connections,admin,api,authorize}`. O read-back e a navegação posterior passaram. Os mesmos IDs das aplicações e as políticas Allow para os dois e-mails operacionais, com PIN e sessão de 24 horas, foram relidos. Não houve comparação independente dos valores AUD antes/depois; não se declara essa comparação específica. As aplicações/policies e secrets de retorno não foram excluídos. **Disable builds** permaneceu marcado; reativar Builds não fez parte do corte.
+
+### Provas reais após a publicação
+
+Às **16:42:40 UTC**, probes públicos amostrados passaram sem desafio Access: `/healthz` e metadata OAuth retornaram 200; `/mcp` sem bearer retornou 401 `no-store`; navegação HTML em `/connections` e `/admin` retornou 302 para `/sign-in`; APIs retornaram JSON 401 `no-store`, inclusive com `Accept: text/html`. A sessão de navegador Clerk não autenticou `/mcp` (401).
+
+GPT Terra e o operador confirmaram a sessão de Lucca e acesso autorizado antes e depois da mudança do gateway: painel com uma conexão própria e visão administrativa com dois usuários ativos/três conexões. APIs autenticadas retornaram JSON 200 `no-store`. Nova aba, renovação após mais de 60 segundos pelo SDK (`getToken` com `skipCache: true`, registrando somente sucesso booleano), nova leitura de API e recarga passaram. Navegação funcional desktop/móvel e acionamento por Enter passaram. A captura móvel teve possível artefato de cabeçalho duplicado; não foi declarada homologação visual completa.
+
+O refresh final pré-janela, às **16:37:33 UTC**, usou o mesmo grant descartável, sem registrar novo cliente, e confirmou uma conexão e os escopos preservados. Às **16:42:53 UTC**, bearer anterior ao corte, refresh original e leitura MCP continuaram funcionando, com os três escopos `mcp:read`, `mcp:write` e `offline_access`, sem alteração no inventário da conexão. Um novo consentimento PKCE pelo navegador Clerk, no mesmo cliente, criou grant distinto e passou na leitura com os mesmos três escopos. Essas provas autenticadas usaram somente leituras, sem envio de mensagens nem status live.
+
+Às **16:43:59 UTC**, os dois grants próprios de teste foram revogados. Os três bearers observados retornaram 401 e os dois refresh tokens retornaram 400 `invalid_grant`; os outros seis grants permaneceram intactos. Os read-backs D1 às **16:40:00** e **16:42:53 UTC** confirmaram dois usuários ativos, um vinculado e três conexões, com IDs, propriedade, cifras e padrões preservados e zero violações de FK. `0011` e `0012` já estavam aplicadas antes do corte; não houve operação remota de dados/migrations nesta janela.
+
+O read-back ativo confirmou `observability.enabled=true`, `logs.enabled=true`, `logs.invocation_logs=false`, `traces.enabled=false`, `redact_query_string=true`, `logpush=false` e zero tail consumers. Isso confirma a configuração observada da versão publicada; não é prova contínua sobre todas as requisições ou sistemas de logging externos.
+
+### Pendências e limites do aceite
+
+A saída pela UI passou: `/sign-in` apareceu em pt-BR e uma nova aba em `/connections` redirecionou para `/sign-in`, sem desafio Access. O read-back final de versão, inventário e logs passou. A janela terminou às **2026-11-15T16:46:15.143Z**, após **471 segundos (7 min 51 s)**; a estabilização de 24 horas permanece até pelo menos **2026-11-16T16:46:15.143Z**. Cinco arquivos privados com tokens descartáveis foram removidos após os três bearers retornarem 401 e os dois refresh tokens retornarem 400; somente os metadados públicos do cliente permanecem.
+
+A conta Clerk de Heitor foi criada e teve o e-mail primário verificado às **14:58:39 UTC**; sua linha D1 permanece ativa e sem vínculo por adiamento explícito. A #64 continua aberta para vínculo e homologação deliberados; não se trata de convite ainda pendente. O corte não declara homologação pessoal de Heitor.
+
+Com o logout confirmado, a #65 pode ser concluída com esse adiamento explícito. #59, #64 e #66 permanecem abertas. A #66 mantém a janela de retorno de 24 horas: preservar Access/secrets, acompanhar a versão e só decidir sua retirada ao final pelo procedimento autorizado. Nenhuma issue foi fechada por esta atualização documental.
+
+Os **950 testes locais aprovados/15 pulados** descritos acima são evidência sintética separada dos read-backs reais, provas OAuth e navegação relatados nesta seção. Os probes e inventários são amostras nos instantes indicados; não demonstram indisponibilidade zero, medição contínua ou compatibilidade visual universal. As evidências operacionais foram lidas somente nos seis registros sanitizados autorizados (`cut-window`, `public-after-paths`, `oauth-continuity-complete`, `oauth-revocation-result`, `midcut-state` e `final-prewindow-renewal`), sem publicar tokens, cookies, URLs privadas ou identificadores pessoais operacionais.

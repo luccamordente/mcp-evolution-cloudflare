@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { sha256 } from './db';
 import { approvedMediaOrigins } from './media-origins';
+import { OptionsError } from './mcp-options';
 import type { Env } from '../types';
 import type { SendReceipt } from './send-receipt';
 
@@ -110,18 +111,28 @@ const sharedSend = {
   customMessageId: customId.customMessageId, formatJid: chat.formatJid,
 };
 const sharedKeys = { to: true, replyTo: true, mentions: true, delayMs: true, customMessageId: true, formatJid: true, mimeType: true } as const;
-const variants = outgoingMessageSchema.options.filter(variant => !variant.shape.kind.value.startsWith('status_')).map(variant => {
+const kindDescriptions = {
+  text: 'Send plain text.', link: 'Send text with an HTTPS link preview.', image: 'Send JPEG, PNG, or WebP image bytes.', video: 'Send MP4 video bytes.',
+  voice_note: 'Send audio bytes as a WhatsApp voice note.', document: 'Send application/* file bytes with an optional filename.', gif: 'Send GIF or MP4 looping media.',
+  event: 'Send a WhatsApp event with timezone-aware start and optional end and location.', poll: 'Send a poll with distinct answer options.', list: 'Send a selectable list with sections and rows.',
+  location: 'Send a named geographic location.', contact: 'Send a contact card with name and phone.', sticker: 'Send a sticker from an approved HTTPS URL.',
+  buttons: 'Send action buttons with compatible optional media header.', carousel: 'Send a sequence of media cards.', forward: 'Forward a retained message identified in message.source.',
+} satisfies Record<Exclude<z.infer<typeof outgoingMessageSchema>['kind'], 'status_text' | 'status_image' | 'status_video'>, string>;
+const variants = outgoingMessageSchema.options.flatMap(variant => {
+  const kind = variant.shape.kind.value;
+  if (kind === 'status_text' || kind === 'status_image' || kind === 'status_video') return [];
   const keys = Object.fromEntries(Object.keys(variant.shape).filter(key => key in sharedKeys).map(key => [key, true]));
   if ('mimeType' in variant.shape) keys.source = true;
-  return z.object(Object.fromEntries(Object.entries(variant.shape).filter(([key]) => !(key in keys)))).strict();
+  return [z.object(Object.fromEntries(Object.entries(variant.shape).filter(([key]) => !(key in keys)))).strict().describe(kindDescriptions[kind])];
 });
 export const sendMessageInput = z.object({
-  message: z.union(variants),
+  message: z.union(variants).describe('Choose message.kind from the advertised variants and supply its content fields. Recipient, connection, media bytes, and shared send fields belong in options. Forwarding keeps its source identifiers in message.source.'),
   options: z.object({
     ...sharedSend,
-    mediaSource: source.optional(), mimeType: mime.optional(),
-    connectionId: z.string().uuid().optional(),
-    idempotencyKey: identifier.optional().describe('Opaque action key. Reuse identical arguments and key for 24 hours; never change keys to retry an unconfirmed send.'),
+    to: sharedSend.to.describe('Recipient number, individual JID, or group JID. Resolve people with search_contacts and groups with search_groups. Use status only with text, image, or video.'),
+    mediaSource: source.optional().describe('Original attachment bytes as {kind: base64, dataBase64}; omit any data URL prefix. Required by image, video, voice_note, document, and gif; other kinds use their own fields.'), mimeType: mime.optional(),
+    connectionId: z.string().uuid().optional().describe('Internal UUID from search_connections. Omit to use the default connection.'),
+    idempotencyKey: identifier.optional().describe('Unique key for one intended send, deduplicated for 24 hours with identical arguments on the same connection. Preserve the key and arguments. Check get_message after an unconfirmed outcome; never automatically resend or change the key to bypass uncertainty.'),
   }).strict(),
 }).strict();
 export function expandSendMessage(input: z.infer<typeof sendMessageInput>): OutgoingMessage {
@@ -132,7 +143,7 @@ export function expandSendMessage(input: z.infer<typeof sendMessageInput>): Outg
     const { to: _to, ...status } = candidate;
     return outgoingMessageSchema.parse({ ...status, kind: `status_${kind}` });
   }
-  if (envelope.to === 'status') throw new Error('WaPilot Status supports text, image and video only.');
+  if (envelope.to === 'status') throw new OptionsError('invalid_options', 'WaPilot Status supports text, image and video only. Choose one of those message kinds or use a person or group in options.to.');
   return outgoingMessageSchema.parse(candidate);
 }
 export type OutgoingMessage = z.infer<typeof outgoingMessageSchema>;

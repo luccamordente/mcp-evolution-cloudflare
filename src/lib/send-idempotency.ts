@@ -10,7 +10,7 @@ const storedAcceptance = z.object({
 });
 
 export class SendOperationError extends Error {
-  constructor(public readonly code: 'idempotency_conflict' | 'send_in_progress' | 'send_result_unknown' | 'send_idempotency_unavailable' | 'send_legacy_action_exists', message: string) { super(message); }
+  constructor(public readonly code: 'idempotency_conflict' | 'send_in_progress' | 'send_result_unknown' | 'send_idempotency_unavailable' | 'send_action_conflict', message: string) { super(message); }
 }
 
 export async function idempotentSend(db: D1Database, input: {
@@ -40,7 +40,7 @@ export async function idempotentSend(db: D1Database, input: {
     }
   } catch (error) {
     if (error instanceof SendOperationError) throw error;
-    if (error instanceof Error && error.message.includes('send_legacy_action_exists')) throw new SendOperationError('send_legacy_action_exists', 'WaPilot has an active action with this key from before the send tool upgrade. Do not resend or change the key; an unconfirmed earlier action requires manual review.');
+    if (error instanceof Error && error.message.includes('send_action_conflict')) throw new SendOperationError('send_action_conflict', 'WaPilot cannot reserve this key because another active send action already owns it. Reconcile the earlier action before considering another send; do not change the key to bypass the conflict.');
     throw new SendOperationError('send_idempotency_unavailable', 'WaPilot could not reserve this action safely. No send was started.');
   }
   let result: SendMessageResult | undefined;
@@ -68,10 +68,10 @@ export async function getSendStatus(db: D1Database, input: {userId: string; conn
     const row = await db.prepare(`SELECT state, result_json AS resultJson, expires_at AS expiresAt FROM send_operations
       WHERE user_id = ?1 AND connection_id = ?2 AND operation = ?3 AND idempotency_key = ?4 AND expires_at > ?5`)
       .bind(input.userId, input.connectionId, input.operation, input.key, Date.now()).first<{state: string; resultJson: string | null; expiresAt: number}>();
-    if (!row) return { outcome: 'not_found', hint: 'WaPilot has no active record for this key. This does not prove that a message was not sent.' };
+    if (!row) return { outcome: 'not_found', hint: 'WaPilot has no active record for this key; records expire after 24 hours. Verify the same connection and key. If a messageId or customMessageId is known, use get_message with that ID; otherwise inspect search_messages in the intended conversation and reconcile with the user. No record does not prove non-delivery. Do not automatically resend or change keys.' };
     if (row.state === 'completed' && row.resultJson) return { ...storedAcceptance.parse(JSON.parse(row.resultJson)), outcome: 'accepted', expiresAt: row.expiresAt, deliveryStatus: 'unavailable', readStatus: 'unavailable' };
-    return { outcome: row.state === 'pending' ? 'pending' : 'unknown', expiresAt: row.expiresAt, hint: 'Do not resend automatically or change the action key. Pending records may also represent an interrupted request.' };
+    return { outcome: row.state === 'pending' ? 'pending' : 'unknown', expiresAt: row.expiresAt, hint: 'Do not resend automatically or change the action key. Pending records may also represent an interrupted request. Wait at least 5 seconds and repeat this status lookup once with the same connection and key. If a messageId or customMessageId is known, read it with get_message. If uncertainty remains, reconcile with the user; partial history cannot prove that dispatch did not occur.' };
   } catch {
-    throw new SendOperationError('send_idempotency_unavailable', 'WaPilot could not look up this action safely. No send was started.');
+    throw new SendOperationError('send_idempotency_unavailable', 'WaPilot could not look up this action safely. Earlier dispatch remains unconfirmed; this lookup does not send messages.');
   }
 }

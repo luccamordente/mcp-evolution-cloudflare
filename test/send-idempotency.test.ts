@@ -15,8 +15,6 @@ let connectionId: string;
 let sent: number;
 
 async function call(name: string, args: Record<string, unknown>, principal = user, scopes = ['mcp:read', 'mcp:write']) {
-  if (name === 'get_send_status') { name = 'get_message'; const { operation: _operation, ...options } = args; args = { options }; }
-  else if (name === 'send_message') args = sendArguments(args);
   const handler = createMcpHandler(() => createMcpServer(env, principal), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST',

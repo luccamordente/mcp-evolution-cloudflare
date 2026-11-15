@@ -1,6 +1,14 @@
 # Vínculo de identidades production — #64 — 14/11/2026
 
-**Estado: Lucca autenticou no Portal, identidade verificada e vínculo D1 conferido; Heitor permanece com convite pendente e sem vínculo. A #64 continua aberta. Sem corte.** Este registro complementa a [preparação #63](clerk-production-2026-11-14.md) e o [procedimento de vínculo](../CLERK-OPERATIONS.md#vínculo-deliberado-dos-usuários-existentes), seguindo a [#64](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/64) e os gates da [#59](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/59). As operações externas e seus read-backs cabem ao responsável pela execução; este complemento documental não opera credenciais ou serviços.
+**Checkpoint de vínculo: Lucca autenticou no Portal, identidade verificada e vínculo D1 conferido; Heitor permanece com convite pendente e sem vínculo. A #64 continua aberta; o adiamento explícito de Heitor e a autorização posterior para corte/PR/main estão registrados abaixo.** Este registro complementa a [preparação #63](clerk-production-2026-11-14.md) e o [procedimento de vínculo](../CLERK-OPERATIONS.md#vínculo-deliberado-dos-usuários-existentes), seguindo a [#64](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/64) e os gates da [#59](https://github.com/luccamordente/mcp-evolution-cloudflare/issues/59). As operações externas e seus read-backs cabem ao responsável pela execução; este complemento documental não opera credenciais ou serviços.
+
+## Autorização posterior para corte e integração
+
+Na retomada de 14/11/2026, o operador autorizou retomar a publicação Clerk, abrir o PR e fazer merge no `main`. Também decidiu explicitamente que Heitor aceitará o convite depois. Essa decisão adia o gate pessoal de Heitor para o corte autorizado; não comprova recebimento, aceitação, verificação, vínculo ou homologação da sua conta e não conclui a #64 inteira.
+
+Preservar a linha D1 existente de Heitor ativa e sem vínculo até o read-back do e-mail primário verificado na instância production. Não desativar, recriar, preencher pendência ou forjar verificação para contornar esse adiamento. Enquanto faltar o vínculo, o navegador Clerk deve negar acesso; grants OAuth legados da conta ativa continuam sujeitos à autorização D1 existente. Após a aceitação, realizar o vínculo deliberado e a conferência pessoal pendentes pelo procedimento habitual.
+
+A autorização de corte não transforma as versões abaixo em estado atual. A referência `8e9211a5…` e a candidata `353fcb1e…` são checkpoints históricos; outras publicações e o cleanup de MCP no `main` exigem novo read-back de versão, configuração, bindings e imagem, reconciliação do artefato Clerk e retorno compatível antes da promoção. A integração de código preserva o catálogo de seis ferramentas, as remoções da galeria e as proteções de mídia. Este complemento registra autorização e escopo, sem afirmar deploy, PR, merge ou continuidade autenticada executados.
 
 ## Inventário anterior ao vínculo
 

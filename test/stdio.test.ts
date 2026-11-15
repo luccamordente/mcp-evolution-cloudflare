@@ -84,7 +84,7 @@ it('serves the shared tools and resources with a persistent default connection o
   }
   const first = await open();
   expect(first.client.getServerCapabilities()).not.toHaveProperty('events');
-  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toContain('search_connections');
+  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toEqual(['search_connections', 'search_contacts', 'search_groups', 'search_messages', 'get_message', 'send_message']);
   const resources = await first.client.listResources();
   expect(resources.resources.map(resource => resource.uri)).toEqual(['ui://wapilot/send-receipt-v3.html']);
   expect((await first.client.readResource({ uri: resources.resources[0].uri })).contents).toHaveLength(1);

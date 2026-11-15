@@ -332,20 +332,25 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
         const binary: CallToolResult['content'] = [];
         if (includes.includes('metadata')) Object.assign(data, await inspectMessageDocument(c, env, messageId, { cursor: o.cursor, bookmarkCursor: o.bookmarkCursor, limit: Math.min(o.limit, 5) }, signal, expiresAt));
         if (includes.includes('quoted') && message.quotedId) {
+          checkDeadline();
           const quoted = await c.getMessage(message.quotedId, signal);
           data.quoted = quoted ? messageForClient(quoted, own) : null;
         }
         for (const [include, kind] of [['poll-responses', 'votes'], ['event-responses', 'eventResponses']] as const) {
-          if (includes.includes(include)) data[include] = await c.searchMessageResponses(messageId, kind, o.offset, o.limit);
+          if (includes.includes(include)) {
+            checkDeadline();
+            data[include] = await c.searchMessageResponses(messageId, kind, o.offset, o.limit, signal);
+          }
         }
         if (format === 'text/plain') data.text = pdf ? await readMessageDocument(c, env, messageId, signal, expiresAt) : mime.startsWith('audio/') ? await transcribeMessageAudio(c, env, messageId, signal, expiresAt) : message.text;
         if (format === 'image/*') {
+          checkDeadline();
           if (pdf) {
             const { images, ...pages } = await readDocumentPages(c, env, messageId, { pages: o.pages ?? [o.page ?? 1], preset: o.preset, crop: o.crop }, signal, expiresAt);
             Object.assign(data, pages);
             binary.push(...images);
             if (!images.length) return { ...ok(data), isError: true };
-          } else binary.push({ type: 'image', ...await c.getMessageImage(messageId, approvedMediaOrigins(env.IMAGE_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL), Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024)) });
+          } else binary.push({ type: 'image', ...await c.getMessageImage(messageId, approvedMediaOrigins(env.IMAGE_STORAGE_ORIGINS, env.EVOLUTION_BASE_URL), Number(env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024), signal) });
         }
         if (format === 'application/pdf') {
           const { blob, size } = await getMessageDocumentOriginal(c, env, messageId, signal, expiresAt);

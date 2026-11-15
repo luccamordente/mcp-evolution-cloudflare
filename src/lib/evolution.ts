@@ -542,13 +542,13 @@ export class EvolutionGoClient {
     return { items: rows.slice(options.offset, options.offset + options.limit), hasMore };
   }
 
-  async searchMessageResponses(messageId: string, kind: ResponseKind, offset: number, limit: number) {
+  async searchMessageResponses(messageId: string, kind: ResponseKind, offset: number, limit: number, signal?: AbortSignal) {
     const rows: Awaited<ReturnType<EvolutionGoClient['listMessageResponses']>>['items'] = [];
     let cursor: string | undefined;
     const seen = new Set<string>();
     let page;
     do {
-      page = await this.listMessageResponses(messageId, kind, Math.min(100, offset + limit - rows.length), cursor);
+      page = await this.listMessageResponses(messageId, kind, Math.min(100, offset + limit - rows.length), cursor, signal);
       rows.push(...page.items);
       if (!page.hasMore || !page.nextCursor || seen.has(page.nextCursor)) break;
       seen.add(page.nextCursor);
@@ -616,14 +616,14 @@ export class EvolutionGoClient {
     }
   }
 
-  async listMessageResponses(messageId: string, kind: ResponseKind, limit = 100, cursor?: string) {
-    const message = await this.getMessage(messageId);
+  async listMessageResponses(messageId: string, kind: ResponseKind, limit = 100, cursor?: string, signal?: AbortSignal) {
+    const message = await this.getMessage(messageId, signal);
     const path = message?.responseLinks?.[kind];
     if (!path) throw new EvolutionApiError(404, 'WaPilot response relationship is unavailable for this message.');
     const query = new URLSearchParams({ 'page[limit]': String(limit) });
     const cursorKey = 'page[cursor]';
     if (cursor) query.set(cursorKey, cursor);
-    const parsed = responsePageSchema.safeParse(await this.request<unknown>(`${path}?${query}`, { redirect: 'manual' }));
+    const parsed = responsePageSchema.safeParse(await this.request<unknown>(`${path}?${query}`, { redirect: 'manual', signal }));
     if (!parsed.success) throw new EvolutionApiError(502, 'WaPilot received an invalid message response page.');
     const page = parsed.data;
     if (page.data.length > limit) throw new EvolutionApiError(502, 'WaPilot received an oversized message response page.');
@@ -750,11 +750,12 @@ export class EvolutionGoClient {
   }
 
   /** Read a retained image without exposing its signed URL or forwarding API credentials. */
-  async getMessageImage(messageId: string, approvedOrigins: string[], maxBytes: number): Promise<{ data: string; mimeType: string }> {
+  async getMessageImage(messageId: string, approvedOrigins: string[], maxBytes: number, signal?: AbortSignal): Promise<{ data: string; mimeType: string }> {
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new MessageImageError(500, 'WaPilot image size limit is invalid.');
     let message: Message | undefined;
-    try { message = await this.getMessage(messageId); }
+    try { message = await this.getMessage(messageId, signal); }
     catch (error) {
+      signal?.throwIfAborted();
       if (error instanceof EvolutionApiError) {
         if (error.timeoutSource) throw error;
         throw new EvolutionApiError(error.status, `WaPilot could not retrieve the requested message (HTTP ${error.status}).`);
@@ -777,9 +778,11 @@ export class EvolutionGoClient {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+    const downloadSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
-      const response = await this.fetcher(image.url, { redirect: 'manual', credentials: 'omit', signal: controller.signal });
+      downloadSignal.throwIfAborted();
+      const response = await this.fetcher(image.url, { redirect: 'manual', credentials: 'omit', signal: downloadSignal });
       if (response.status === 408 || response.status === 504) throw new EvolutionApiError(response.status, `Image storage returned a timeout response (HTTP ${response.status}) to WaPilot.`, undefined, 'upstream');
       if (!response.ok) throw new MessageImageError(response.status >= 400 ? response.status : 502, `WaPilot could not load the image from storage (HTTP ${response.status}).`);
       if (Number(response.headers.get('content-length')) > maxBytes) throw new MessageImageError(413, `Media exceeds configured limit of ${maxBytes} bytes`);
@@ -789,6 +792,7 @@ export class EvolutionGoClient {
       let size = 0;
       while (true) {
         const { value, done } = await reader.read();
+        downloadSignal.throwIfAborted();
         if (done) break;
         size += value.byteLength;
         if (size > maxBytes) throw new MessageImageError(413, `Media exceeds configured limit of ${maxBytes} bytes`);
@@ -801,6 +805,7 @@ export class EvolutionGoClient {
       if (!valid) throw new MessageImageError(415, 'WaPilot received content that does not match the expected image format.');
       return { data: bytes.toString('base64'), mimeType: image.mimeType };
     } catch (error) {
+      signal?.throwIfAborted();
       if (controller.signal.aborted) throw new EvolutionApiError(504, `WaPilot stopped waiting for image storage after ${DEFAULT_REQUEST_TIMEOUT_MS} ms (WaPilot timeout).`, undefined, 'wapilot');
       if (error instanceof MessageImageError || error instanceof EvolutionApiError) throw error;
       throw new MessageImageError(502, 'WaPilot could not load the image from storage.');

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, resolve } from 'node:path';
 
@@ -18,16 +18,25 @@ it('copies the main stdio configuration when Git creates a worktree, with privat
     await writeFile(resolve(main, '.git/hooks/post-checkout'), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(helper)} "$(git rev-parse --show-toplevel)"\n`, { mode: 0o755 });
     const fixture = 'LOCAL_INSTANCE_TOKEN=fixture-only\n';
     await writeFile(resolve(main, '.env.stdio'), fixture);
-    git('worktree', 'add', '--detach', child);
+    const copied = spawnSync('git', ['-C', main, 'worktree', 'add', '--detach', child], { encoding: 'utf8' });
+    expect(copied.status).toBe(0);
+    expect(copied.stdout + copied.stderr).toContain('Configuração stdio copiada da worktree principal.');
+    expect(copied.stdout + copied.stderr).not.toContain('fixture-only');
     expect(await readFile(resolve(child, '.env.stdio'), 'utf8')).toBe(fixture);
     expect((await stat(resolve(child, '.env.stdio'))).mode & 0o777).toBe(0o600);
     await writeFile(resolve(child, '.env.stdio'), 'worktree-specific');
-    execFileSync(process.execPath, [helper, child], { stdio: 'pipe' });
+    expect(execFileSync(process.execPath, [helper, child], { stdio: 'pipe', encoding: 'utf8' }))
+      .toContain('Configuração stdio existente mantida (.env.stdio).');
     expect(await readFile(resolve(child, '.env.stdio'), 'utf8')).toBe('worktree-specific');
     expect(await readFile(resolve(main, '.env.stdio'), 'utf8')).toBe(fixture);
     await rm(resolve(main, '.env.stdio'));
+    expect(execFileSync(process.execPath, [helper, child], { stdio: 'pipe', encoding: 'utf8' }))
+      .toContain('Configuração stdio existente mantida (.env.stdio).');
+    expect(await readFile(resolve(child, '.env.stdio'), 'utf8')).toBe('worktree-specific');
     await rm(resolve(child, '.env.stdio'));
-    execFileSync(process.execPath, [helper, child], { stdio: 'pipe' });
+    const missing = spawnSync(process.execPath, [helper, child], { encoding: 'utf8' });
+    expect(missing.status).toBe(0);
+    expect(missing.stderr).toContain('.env.stdio ausente na worktree principal; configure a partir de .env.stdio.example.');
     await expect(stat(resolve(child, '.env.stdio'))).rejects.toMatchObject({ code: 'ENOENT' });
   } finally { await rm(root, { recursive: true, force: true }); }
 });

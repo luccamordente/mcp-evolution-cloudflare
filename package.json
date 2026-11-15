@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:local": "node scripts/dev-local.mjs",
-    "dev:clerk": "npm run build:gallery && npm run build:auth && node scripts/dev-clerk.mjs",
+    "dev:clerk": "npm run build:receipt && npm run build:auth && node scripts/dev-clerk.mjs",
     "dev:stdio": "node scripts/dev-stdio.mjs",
     "prototype:connections": "python3 -m http.server 4173 --directory prototype",
     "deploy": "wrangler deploy",
@@ -16,11 +16,11 @@
     "test:acceptance:history": "node scripts/native-history-acceptance.mjs",
     "test:acceptance:send": "node scripts/send-acceptance-backend.mjs",
     "test:acceptance:gif": "node scripts/acceptance-gif.mjs",
+    "check": "npm run check:auth && npm run check:receipt && npm run typecheck && npm test",
+    "build:receipt": "node scripts/build-receipt.mjs",
+    "check:receipt": "node scripts/build-receipt.mjs --check",
     "build:auth": "node scripts/build-auth.mjs",
-    "check:auth": "node scripts/build-auth.mjs --check",
-    "check": "npm run check:auth && npm run check:gallery && npm run typecheck && npm test",
-    "build:gallery": "node scripts/build-gallery.mjs",
-    "check:gallery": "node scripts/build-gallery.mjs --check"
+    "check:auth": "node scripts/build-auth.mjs --check"
   },
   "keywords": [],
   "author": "",

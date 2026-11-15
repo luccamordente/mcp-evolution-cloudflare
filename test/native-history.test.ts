@@ -1,4 +1,3 @@
-import { migrateToolCall } from './helpers/tool-arguments';
 import { z } from 'zod';
 import { nativeMessageSchema, responsePageSchema } from '../src/lib/native-message';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -83,9 +82,8 @@ let local: Awaited<ReturnType<typeof createTestD1>>;
 let env: Env;
 let connectionId: string;
 async function call(name: string, args: Record<string, unknown>) {
-  const migrated = migrateToolCall({ name, arguments: { connectionId, ...args } });
-  name = String(migrated.name);
-  args = migrated.arguments as Record<string, unknown>;
+  const options = z.record(z.string(), z.unknown()).parse(args.options ?? {});
+  args = { ...args, options: { connectionId, ...options } };
   const handler = createMcpHandler(() => createMcpServer(env, principal), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST', headers: { 'content-type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name },
@@ -104,10 +102,10 @@ describe.runIf(Boolean(backendUrl))('H-A8 real MCP and Go HTTP history', () => {
   });
   afterAll(async () => local?.dispose());
   it('reads structured-only messages and follows both authenticated relationships across pages', async () => {
-    const listing = await call('list_messages', { limit: 50 });
+    const listing = await call("search_messages", { options: { limit: 50 } });
     expect(listing.result?.isError, JSON.stringify(listing)).not.toBe(true);
     for (const kind of ['interactive', 'interactiveResponse', 'poll', 'event', 'eventResponse'] as const) {
-      const result = await call('get_message', { messageId: `synthetic-${kind}` });
+      const result = await call('get_message', { messageId: `synthetic-${kind}`, options: {  } });
       expect(result.result?.isError, JSON.stringify(result)).not.toBe(true);
       expect(result.result.structuredContent.data.message?.[kind]).toBeDefined();
       expect(JSON.stringify(result)).not.toContain('messageSecret');
@@ -117,7 +115,7 @@ describe.runIf(Boolean(backendUrl))('H-A8 real MCP and Go HTTP history', () => {
       const ids = new Set<string>();
       let pages = 0;
       do {
-        const result = await call('list_message_responses', { messageId, relationship, limit: 100, offset: ids.size });
+        const result = await call("get_message", { messageId, options: { limit: 100, offset: ids.size, include: [relationship === 'votes' ? 'poll-responses' : 'event-responses'] } });
         expect(result.result?.isError, JSON.stringify(result)).not.toBe(true);
         const page = z.object({ items: z.array(z.object({ id: z.string() })), meta: z.object({ coverage: z.string() }), hasMore: z.boolean() }).parse(result.result.structuredContent.data[relationship === 'votes' ? 'poll-responses' : 'event-responses']);
         expect(page.meta?.coverage).toBe('observed');

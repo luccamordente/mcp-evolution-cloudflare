@@ -1,5 +1,5 @@
+import { sendArguments } from './helpers/mcp-arguments';
 import { getSendStatus } from '../src/lib/send-idempotency';
-import { migrateToolArguments } from './helpers/tool-arguments';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
@@ -40,7 +40,7 @@ describe('unified send_message acceptance', () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'POLL', meta: { chat: '5511999999999' } } }));
     const catalog = await rpc('tools/list');
     expect(catalog.result.tools?.map((tool: { name: string }) => tool.name).filter((name: string) => /^(send_|reply_to_message|forward_message)/.test(name))).toEqual(['send_message']);
-    const sent = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { connectionId, message: {
+    const sent = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ connectionId, message: {
       kind: 'poll', to: '5511999999999', question: 'Qual horário?', options: ['10h', '14h'], maxAnswers: 1, replyTo: { messageId: 'SOURCE' },
     } }) });
     expect(sent.result).toMatchObject({ structuredContent: { data: { connectionId, outcome: 'accepted', messageId: 'POLL' } } });
@@ -72,7 +72,7 @@ const cases = [
 it.each(cases)('serializes the $message.kind signature through the public MCP boundary', async ({ message, route, attributes }) => {
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'SENT' } }));
   env.SEND_MEDIA_ORIGINS = 'https://media.example.test';
-  const sent = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message }) });
+  const sent = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message }) });
   expect(sent.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'SENT' } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(String(fetcher.mock.calls[0][0])).toBe(`https://provider.invalid${route}`);
@@ -104,21 +104,21 @@ it.each([
   { kind: 'video_note', to: recipient, mimeType: 'video/mp4', source: base64Source },
 ])('rejects invalid or unimplemented signature $kind before dispatch', async message => {
   const fetcher = vi.spyOn(globalThis, 'fetch');
-  const result = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message }) });
+  const result = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message }) });
   expect(result.result.isError).toBe(true);
   expect(fetcher).not.toHaveBeenCalled();
 });
 
 it('checks write permission before attachment decoding or origin checks', async () => {
   const fetcher = vi.spyOn(globalThis, 'fetch');
-  const result = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'image', to: recipient, mimeType: 'image/png', source: { kind: 'base64', dataBase64: 'invalid!!' } } }) }, ['mcp:read']);
+  const result = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'image', to: recipient, mimeType: 'image/png', source: { kind: 'base64', dataBase64: 'invalid!!' } } }) }, ['mcp:read']);
   expect(result.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'insufficient_scope' }, outcome: 'failed' } } });
   expect(fetcher).not.toHaveBeenCalled();
 });
 
 it('rejects unapproved downloads without sending or leaking their URL', async () => {
   const fetcher = vi.spyOn(globalThis, 'fetch');
-  const result = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'sticker', to: recipient, url: 'https://unapproved.invalid/private-file' } }) });
+  const result = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'sticker', to: recipient, url: 'https://unapproved.invalid/private-file' } }) });
   expect(result.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'media_origin_not_allowed' }, outcome: 'failed' } } });
   expect(JSON.stringify(result)).not.toContain('unapproved.invalid');
   expect(fetcher).not.toHaveBeenCalled();
@@ -128,7 +128,7 @@ it('maps approved interactive downloads and callback destinations without mixing
   env.SEND_MEDIA_ORIGINS = 'https://media.example.test';
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'CARD' } }));
   const message = { kind: 'carousel', to: recipient, cards: [{ header: { imageUrl: 'https://media.example.test/card.jpg' }, body: { text: 'Oferta' }, buttons: [{ kind: 'url', label: 'Ver', url: 'https://example.test/product' }] }] };
-  expect((await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message }) })).result.isError).not.toBe(true);
+  expect((await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message }) })).result.isError).not.toBe(true);
   expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ data: { attributes: { cards: [{ header: message.cards[0].header, body: { text: 'Oferta' }, buttons: [{ type: 'URL', displayText: 'Ver', id: 'https://example.test/product' }] }] } } });
 });
 
@@ -137,14 +137,14 @@ it('allows storage carousel cards with production config and rejects other origi
   env.SEND_MEDIA_ORIGINS = vars.SEND_MEDIA_ORIGINS;
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'CAROUSEL' } }));
   const message = { kind: 'carousel', to: recipient, cards: [1, 2].map(index => ({ header: { imageUrl: 'https://storage.neurau.com.br/synthetic-card.jpg' }, body: { text: `Cartão ${index}` } })) };
-  const sent = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message }) });
+  const sent = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message }) });
   expect(sent.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'CAROUSEL' } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(String(fetcher.mock.calls[0][0])).toBe('https://provider.invalid/send/carousel');
   expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ data: { attributes: { cards: message.cards } } });
 
   message.cards[1].header.imageUrl = 'https://storage.neurau.com.br.unapproved.invalid/card.jpg';
-  const rejected = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message }) });
+  const rejected = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message }) });
   expect(rejected.result).toMatchObject({ isError: true, structuredContent: { data: { outcome: 'failed', error: { code: 'media_origin_not_allowed' } } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
@@ -154,7 +154,7 @@ it.each(['pending', 'unknown', 'completed'])('fences a %s legacy action key and 
   await local.db.prepare('INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,result_json,expires_at) VALUES (?,?,?,?,?,?,?,?,?)')
     .bind('legacy', owner.id, connectionId, 'send_text', 'original-key', 'old-hash', state, state === 'completed' ? JSON.stringify({ accepted: true, messageId: 'OLD' }) : null, Date.now() + 86400000).run();
   const fetcher = vi.spyOn(globalThis, 'fetch');
-  const sent = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { idempotencyKey: 'original-key', message: { kind: 'text', to: recipient, text: 'Do not duplicate' } }) });
+  const sent = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ idempotencyKey: 'original-key', message: { kind: 'text', to: recipient, text: 'Do not duplicate' } }) });
   expect(sent.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'send_legacy_action_exists', retryable: false } } } });
   expect(fetcher).not.toHaveBeenCalled();
   const status = await getSendStatus(local.db, { userId: owner.id, connectionId, operation: 'send_text', key: 'original-key' });
@@ -163,7 +163,7 @@ it.each(['pending', 'unknown', 'completed'])('fences a %s legacy action key and 
 
 it('fences an older Worker from reserving a key already used by the unified tool', async () => {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'NEW' } }));
-  await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { idempotencyKey: 'new-key', message: { kind: 'text', to: recipient, text: 'One action' } }) });
+  await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ idempotencyKey: 'new-key', message: { kind: 'text', to: recipient, text: 'One action' } }) });
   const owner = await bootstrapLocalUser(local.db, principal);
   await expect(local.db.prepare('INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES (?,?,?,?,?,?,?,?)')
     .bind('old-worker', owner.id, connectionId, 'send_text', 'new-key', 'old-hash', 'pending', Date.now() + 86400000).run()).rejects.toThrow('send_legacy_action_exists');
@@ -171,7 +171,7 @@ it('fences an older Worker from reserving a key already used by the unified tool
 
 it('rejects link-preview metadata downloads outside approved origins', async () => {
   const fetcher = vi.spyOn(globalThis, 'fetch');
-  const sent = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'link', to: recipient, text: 'https://unapproved.invalid/private' } }) });
+  const sent = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'link', to: recipient, text: 'https://unapproved.invalid/private' } }) });
   expect(sent.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'media_origin_not_allowed' } } } });
   expect(fetcher).not.toHaveBeenCalled();
 });
@@ -181,7 +181,7 @@ it('allows a unified action after the legacy key expires without waiting for cle
   await local.db.prepare('INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES (?,?,?,?,?,?,?,?)')
     .bind('expired', owner.id, connectionId, 'send_media', 'expired-key', 'old-hash', 'unknown', Date.now() - 1).run();
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'AFTER-EXPIRY' } }));
-  const result = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { idempotencyKey: 'expired-key', message: { kind: 'text', to: recipient, text: 'A new action after expiry' } }) });
+  const result = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ idempotencyKey: 'expired-key', message: { kind: 'text', to: recipient, text: 'A new action after expiry' } }) });
   expect(result.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'AFTER-EXPIRY' } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
@@ -195,7 +195,7 @@ it('refuses a direct retained lookup from a different source conversation', asyn
       type: 'message', id: 'SOURCE', attributes: { encodingFormat: 'text/plain', body: { text: 'Retained elsewhere' } }, meta: { chat: '5511777777777' },
     } });
   });
-  const result = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'forward', to: recipient, source: { conversationId: '5511888888888', messageId: 'SOURCE' } } }) });
+  const result = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'forward', to: recipient, source: { conversationId: '5511888888888', messageId: 'SOURCE' } } }) });
   expect(result.result.isError).toBe(true);
   expect(calls).toEqual(['/message/search', '/message/status']);
 });
@@ -203,7 +203,7 @@ it('refuses a direct retained lookup from a different source conversation', asyn
 it.each(['https://media。example.test/page', 'https://media.example.test/~user'])('rejects link previews whose URL spelling changes the backend target: %s', async url => {
   env.SEND_MEDIA_ORIGINS = 'https://media.example.test';
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'UNEXPECTED' } }));
-  const result = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'link', to: recipient, text: `Veja ${url}` } }) });
+  const result = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'link', to: recipient, text: `Veja ${url}` } }) });
   expect(result.result.isError).toBe(true);
   expect(fetcher).not.toHaveBeenCalled();
 });
@@ -212,11 +212,11 @@ it('reuses an event action for equivalent offsets and rejects semantic changes',
   const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'EVENT' } }));
   const message = { kind: 'event', to: '12025550123', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' };
   const args = { idempotencyKey: 'event-action', message };
-  const first = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments('send_message', args) });
+  const first = await rpc('tools/call', { name: 'send_message', arguments: sendArguments(args) });
   expect(first.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'EVENT' } } });
-  const again = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments('send_message', { ...args, message: { ...message, to: '12025550123@s.whatsapp.net', startTime: '2026-11-20T15:00:00-03:00' } }) });
+  const again = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ ...args, message: { ...message, to: '12025550123@s.whatsapp.net', startTime: '2026-11-20T15:00:00-03:00' } }) });
   expect(again.result).toMatchObject({ structuredContent: { data: { outcome: 'accepted', messageId: 'EVENT' } } });
-  const changed = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments('send_message', { ...args, message: { ...message, name: 'Other' } }) });
+  const changed = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ ...args, message: { ...message, name: 'Other' } }) });
   expect(changed.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'idempotency_conflict' } } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
@@ -224,8 +224,8 @@ it('reuses an event action for equivalent offsets and rejects semantic changes',
 it('does not repeat an event with an unknown dispatch result', async () => {
   const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('synthetic timeout'));
   const args = { idempotencyKey: 'unknown-event', message: { kind: 'event', to: '12025550123', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' } };
-  await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments('send_message', args) });
-  const again = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments('send_message', args) });
+  await rpc('tools/call', { name: 'send_message', arguments: sendArguments(args) });
+  const again = await rpc('tools/call', { name: 'send_message', arguments: sendArguments(args) });
   expect(again.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'send_result_unknown' } } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
@@ -233,7 +233,7 @@ it('does not repeat an event with an unknown dispatch result', async () => {
 
 it('denies event creation without write scope before dispatch', async () => {
   const fetcher = vi.spyOn(globalThis, 'fetch');
-  const result = await rpc('tools/call', { name: 'send_message', arguments: migrateToolArguments('send_message', { message: { kind: 'event', to: '12025550123', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' } }) }, ['mcp:read']);
+  const result = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ message: { kind: 'event', to: '12025550123', name: 'Meeting', startTime: '2026-11-20T18:00:00Z' } }) }, ['mcp:read']);
   expect(result.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'insufficient_scope' } } } });
   expect(fetcher).not.toHaveBeenCalled();
 });

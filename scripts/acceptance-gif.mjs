@@ -26,7 +26,7 @@ function run(command, args, cwd, env = process.env, printOutput = true) {
 }
 
 if (!existsSync(join(backend, 'go.mod'))) {
-  throw new Error('Clone neurau/evolution-go into .scratch/evolution-go before running GIF acceptance tests.');
+  throw new Error('GIF acceptance tests require backend fixture sources at .scratch/evolution-go.');
 }
 
 const go = executable('go', ['/usr/local/go/bin']);

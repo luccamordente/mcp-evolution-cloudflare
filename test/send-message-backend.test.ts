@@ -1,4 +1,4 @@
-import { migrateToolArguments } from './helpers/tool-arguments';
+import { sendArguments } from './helpers/mcp-arguments';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { createMcpServer } from '../src/lib/mcp';
-import { bootstrapLocalUser, createConnection } from '../src/lib/db';
+import { createConnection, bootstrapLocalUser } from '../src/lib/db';
 import { createTestD1 } from './helpers/local-d1';
 import type { Env } from '../src/types';
 
@@ -39,7 +39,7 @@ async function send(message: Record<string, unknown>, scopes = ['mcp:read', 'mcp
   const handler = createMcpHandler(() => createMcpServer(env, principal), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST', headers: { 'content-type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'send_message' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'send_message', arguments: migrateToolArguments('send_message', { connectionId, message, idempotencyKey }), _meta: {
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'send_message', arguments: sendArguments({ connectionId, message, idempotencyKey }), _meta: {
       [PROTOCOL_VERSION_META_KEY]: '2026-07-28', [CLIENT_INFO_META_KEY]: { name: 'native-acceptance', version: '1' }, [CLIENT_CAPABILITIES_META_KEY]: {},
     } } }),
   }), { authInfo: { token: 'test', clientId: 'native-acceptance', scopes } });

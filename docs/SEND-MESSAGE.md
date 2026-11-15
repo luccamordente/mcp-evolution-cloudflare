@@ -1,5 +1,8 @@
 # Contrato de `send_message`
 
+O catálogo MCP atual usa somente `search_connections`, `search_contacts`, `search_groups`, `search_messages`, `get_message` e `send_message`. Para os argumentos e limites, consulte [o contrato atual](TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. A consulta operacional por chave usa `get_message` com `options.idempotencyKey`.
+
+
 `send_message` é a única ferramenta MCP de envio. O catálogo HTTP e o catálogo stdio compartilham os schemas de `src/lib/send-message.ts`. O adaptador em `src/lib/evolution.ts` converte cada variante para a rota correspondente do provedor. Campos desconhecidos ou incompatíveis com a variante são rejeitados.
 
 ## Envelope

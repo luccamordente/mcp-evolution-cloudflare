@@ -21,7 +21,7 @@ export interface Env {
   ENVIRONMENT?: string;
   MAX_MEDIA_BYTES?: string;
   SEND_MEDIA_ORIGINS?: string;
-  /** Comma-separated, exact HTTPS storage origins approved for gallery images. */
+  /** Comma-separated, exact HTTPS storage origins approved for retained image downloads. */
   IMAGE_STORAGE_ORIGINS?: string;
   /** Comma-separated, exact HTTPS storage origins approved for audio transcription. */
   AUDIO_STORAGE_ORIGINS?: string;

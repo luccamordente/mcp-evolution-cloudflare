@@ -6,7 +6,7 @@ Execute a aceitação dos dois repositórios com:
 npm run test:acceptance:gif
 ```
 
-O comando exige Node 22+, as dependências npm instaladas, Go compatível com o `go.mod` do backend, FFmpeg e ffprobe. O checkout de `https://github.com/neurau/evolution-go.git` fica em `.scratch/evolution-go`, conforme `AGENTS.md`. A versão desse checkout precisa incluir o suporte a GIF e seus testes.
+O comando exige Node 22+, as dependências npm instaladas, Go compatível com o `go.mod` do backend, FFmpeg e ffprobe. O harness compila fontes do backend em `.scratch/evolution-go`, que precisam incluir o suporte a GIF e seus testes. Essa dependência é exclusiva dos testes de aceitação; consultas à implementação seguem o acesso pelo GitHub descrito em `AGENTS.md`.
 
 O teste do WaPilot executa o handler HTTP MCP e o cliente de mídia reais com D1 e backend simulados. Ele verifica o contrato JSON:API, a autorização de escrita, os metadados do arquivo convertido e a preservação da reprodução em loop no encaminhamento.
 

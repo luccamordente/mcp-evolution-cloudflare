@@ -91,6 +91,70 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('unified get_message total media deadline', () => {
+  it.each(['lookup', 'storage'])('aborts a stalled image %s at the remaining total deadline', async stage => {
+    const { rpc, fetcher } = await messageTool();
+    vi.useFakeTimers();
+    const start = Date.now();
+    let lookups = 0;
+    let started!: () => void;
+    const stalled = new Promise<void>(resolve => { started = resolve; });
+    let upstreamSignal: AbortSignal | undefined;
+    fetcher.mockImplementation(async (url, init) => {
+      if (++lookups === 1) {
+        vi.setSystemTime(start + 55_000);
+        return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/image.png', 'image/png') });
+      }
+      if (stage === 'storage' && !String(url).startsWith('https://storage.example.test/')) return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/image.png', 'image/png') });
+      upstreamSignal = init?.signal as AbortSignal;
+      started();
+      return new Promise<Response>((_, reject) => upstreamSignal!.addEventListener('abort', () => reject(upstreamSignal!.reason), { once: true }));
+    });
+    let completed = false;
+    const pending = rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { encodingFormat: 'image/*' } } }).then(result => { completed = true; return result; });
+    await stalled;
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(upstreamSignal?.aborted).toBe(true);
+    expect(completed).toBe(true);
+    expect((await pending).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504 } } } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['poll-responses', 'event-responses'])('aborts a stalled second %s page at the original deadline', async include => {
+    const { rpc, fetcher } = await messageTool();
+    vi.useFakeTimers();
+    const start = Date.now();
+    const kind = include === 'poll-responses' ? 'votes' : 'eventResponses';
+    const path = kind === 'votes' ? '/polls/message-1/votes' : '/messages/message-1/event-responses';
+    const body = kind === 'votes' ? { poll: { question: 'Choose', options: [{ id: 'a', name: 'A' }] } } : { event: { name: 'Meeting' } };
+    let pages = 0;
+    let started!: () => void;
+    const stalled = new Promise<void>(resolve => { started = resolve; });
+    let upstreamSignal: AbortSignal | undefined;
+    fetcher.mockImplementation(async (url, init) => {
+      if (new URL(String(url)).pathname === '/message/status') {
+        vi.setSystemTime(start + 55_000);
+        return Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { body }, relationships: { [kind]: { links: { related: path } } } } });
+      }
+      if (++pages === 1) return Response.json({ jsonapi: { version: '1.1' }, data: [], links: { next: path + '?page%5Bcursor%5D=next' }, meta: { coverage: 'observed' } });
+      upstreamSignal = init?.signal as AbortSignal;
+      started();
+      return new Promise<Response>((_, reject) => upstreamSignal!.addEventListener('abort', () => reject(upstreamSignal!.reason), { once: true }));
+    });
+    let completed = false;
+    const pending = rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: [include] } } }).then(result => { completed = true; return result; });
+    await stalled;
+    expect(pages).toBe(2);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(upstreamSignal?.aborted).toBe(true);
+    expect(completed).toBe(true);
+    expect((await pending).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504 } } } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each([
     { encodingFormat: 'text/plain' },
     { encodingFormat: 'image/*' },

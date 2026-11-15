@@ -311,7 +311,7 @@ export async function repointUserConnection(env: Env, userId: string, connection
   } catch (error) {
     const upstream = error instanceof EvolutionApiError ? error.status : 500;
     await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'failure', metadata: { previousInstanceId, instanceId, status: upstream, message: safeErrorMessage(error, 'unknown') } });
-    if (upstream === 401 || upstream === 403 || upstream === 404) return [{ error: 'Evolution rejected the instance token' }, 422];
+    if (upstream === 401 || upstream === 403 || upstream === 404) return [{ error: 'O WaPilot não conseguiu validar o acesso a esta conexão.' }, 422];
     return [{ error: safeErrorMessage(error, 'Could not reach Evolution') }, 502];
   }
   const clash = await findConnectionByInstanceId(env.DB, userId, instanceId);

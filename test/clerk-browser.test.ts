@@ -9,6 +9,21 @@ beforeAll(async () => {
 });
 afterAll(async () => { await fixture?.runtime.dispose(); });
 
+it('redirects the root to connections after verifying the active browser session', async () => {
+  const { cookie } = await fixture.session();
+  const response = await fixture.fetch('/', { redirect: 'manual', headers: { cookie, accept: 'text/html' } });
+  expect(response.status).toBe(302);
+  expect(response.headers.get('location')).toBe('/connections');
+  expect(response.headers.get('cache-control')).toBe('no-store');
+});
+
+it('sends root navigation without a session to sign-in with connections as the return', async () => {
+  const response = await fixture.fetch('/?returnTo=https://attacker.invalid&__clerk_ticket=private-ticket', { redirect: 'manual', headers: { accept: 'text/html' } });
+  expect(response.status).toBe(302);
+  expect(response.headers.get('location')).toBe('/sign-in?returnTo=%2Fconnections');
+  expect(response.headers.get('cache-control')).toBe('no-store');
+});
+
 it('uses the Clerk browser session to resolve the existing active D1 account', async () => {
   const { cookie } = await fixture.session();
   const response = await fixture.fetch('/connections/data', { headers: { cookie, accept: 'application/json' } });
@@ -143,13 +158,15 @@ it('rejects bearer compatibility, invalid sessions and credentials from the othe
 
 it('requires a deliberate D1 link and rejects a disabled account on every protected surface', async () => {
   const unlinked = await fixture.session('user_unlinked');
-  const pending = await fixture.fetch('/connections', { headers: { cookie: unlinked.cookie, accept: 'text/html' } });
-  expect(pending.status).toBe(403);
-  expect(await pending.text()).toContain('Sua conta aguarda ativação');
+  for (const path of ['/', '/connections']) {
+    const pending = await fixture.fetch(path, { redirect: 'manual', headers: { cookie: unlinked.cookie, accept: 'text/html' } });
+    expect(pending.status).toBe(403);
+    expect(await pending.text()).toContain('Sua conta aguarda ativação');
+  }
   const { cookie } = await fixture.session();
   await fixture.db.prepare("UPDATE users SET status = 'disabled' WHERE id = 'seed-lucca'").run();
   try {
-    for (const path of ['/connections', '/connections/data', '/connections/activity/foreign', '/api/connections', '/admin', '/admin/data', '/connections/authorizations', '/api/authorizations', '/authorize']) {
+    for (const path of ['/', '/connections', '/connections/data', '/connections/activity/foreign', '/api/connections', '/admin', '/admin/data', '/connections/authorizations', '/api/authorizations', '/authorize']) {
       const response = await fixture.fetch(path, { headers: { cookie, accept: 'application/json' } });
       expect(response.status, path).toBe(403);
       expect(response.headers.get('cache-control')).toBe('no-store');
@@ -157,7 +174,7 @@ it('requires a deliberate D1 link and rejects a disabled account on every protec
   } finally { await fixture.db.prepare("UPDATE users SET status = 'active' WHERE id = 'seed-lucca'").run(); }
 });
 
-it('propagates the SDK handshake and preserves every response cookie', async () => {
+it.each(['/', '/connections'])('propagates the SDK handshake at %s and preserves every response cookie', async path => {
   let directives: string[] = [];
   const handshake = await clerkRuntime(async request => {
     if (new URL(request.url).pathname === '/v1/clients/handshake_payload') return Response.json({ directives });
@@ -166,7 +183,7 @@ it('propagates the SDK handshake and preserves every response cookie', async () 
   try {
     await handshake.db.prepare("UPDATE users SET clerk_user_id = 'user_lucca' WHERE id = 'seed-lucca'").run();
     const session = await handshake.session();
-    const start = await handshake.fetch('/connections', { redirect: 'manual', headers: { cookie: '__session=' + session.token, accept: 'text/html' } });
+    const start = await handshake.fetch(path, { redirect: 'manual', headers: { cookie: '__session=' + session.token, accept: 'text/html' } });
     expect(start.status).toBe(307);
     expect(new URL(start.headers.get('location')!).pathname).toBe('/v1/client/handshake');
     expect(start.headers.get('cache-control')).toBe('no-store');

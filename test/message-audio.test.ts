@@ -108,7 +108,7 @@ describe('retained audio transcription', () => {
   it.each([408, 504])('distinguishes storage HTTP %s from a local timeout', async (status) => {
     const { read, fetcher } = audioTool();
     fetcher.mockResolvedValue(new Response('private upstream body', { status }));
-    await expect(read()).rejects.toMatchObject({ code: 'upstream_timeout', status });
+    await expect(read()).rejects.toMatchObject({ code: 'dependency_timeout', status });
   });
 
   it('sanitizes lookup, storage and inference failures without repeating them', async () => {
@@ -158,7 +158,7 @@ describe('retained audio transcription', () => {
       return new Response(bytes);
     });
     run.mockImplementation((_model, _input, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })));
-    const failure = expect(read()).rejects.toMatchObject({ code: 'wapilot_timeout', status: 504 });
+    const failure = expect(read()).rejects.toMatchObject({ code: 'request_deadline_exceeded', status: 504 });
     await vi.advanceTimersByTimeAsync(AUDIO_TRANSCRIPTION_TIMEOUT_MS - 1);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run.mock.calls[0][2].signal.aborted).toBe(false);
@@ -174,7 +174,7 @@ describe('retained audio transcription', () => {
     fetcher.mockImplementation(async (_url, init) => new Response(new ReadableStream({ start(controller) {
       init?.signal?.addEventListener('abort', () => controller.error(new Error('private storage error')));
     } })));
-    const failure = expect(read()).rejects.toMatchObject({ code: 'wapilot_timeout', status: 504 });
+    const failure = expect(read()).rejects.toMatchObject({ code: 'request_deadline_exceeded', status: 504 });
     await vi.advanceTimersByTimeAsync(AUDIO_TRANSCRIPTION_TIMEOUT_MS);
     await failure;
     expect(run).not.toHaveBeenCalled();

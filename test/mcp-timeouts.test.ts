@@ -12,11 +12,12 @@ describe('MCP timeout attribution', () => {
     const error = await (kind === 'read' ? client.status() : client.sendMessage({ kind: 'text', to: '5511999999999', text: 'Private text' })).catch(error => error);
     const classified = classifyMcpError(error, operation);
 
-    expect(classified).toMatchObject({ code: 'wapilot_timeout', status: 504, retryable: true, operation });
+    expect(classified).toMatchObject({ code: 'request_deadline_exceeded', status: 504, retryable: kind === 'read', operation });
     expect(classified.message).toContain('WaPilot');
     expect(classified.message).toContain('10 ms');
     expect(classified.message).toContain('outcome is unknown');
-    expect(classified.hint).toContain('writes must not be replayed automatically');
+    expect(classified.recovery).toMatchObject({ action: kind === 'read' ? 'retry_read' : 'reconcile_send' });
+    if (kind === 'write') expect(classified.recovery.tool).toBe('get_message');
     expect(JSON.stringify(classified)).not.toMatch(/Evolution|private-token|Private text|evolution.invalid/);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -27,11 +28,11 @@ describe('MCP timeout attribution', () => {
     const error = await client.sendMessage({ kind: 'text', to: '5511999999999', text: 'Private text' }).catch(error => error);
     const classified = classifyMcpError(error, 'send_message');
 
-    expect(classified).toMatchObject({ code: 'upstream_timeout', status, retryable: true, operation: 'send_message' });
+    expect(classified).toMatchObject({ code: 'dependency_timeout', status, retryable: false, operation: 'send_message' });
     expect(classified.message).toContain(`HTTP ${status}`);
     expect(classified.message).toContain('returned a timeout response');
     expect(classified.message).toContain('WaPilot');
-    expect(classified.hint).toContain('writes must not be replayed automatically');
+    expect(classified.recovery).toMatchObject({ action: 'reconcile_send', tool: 'get_message' });
     expect(JSON.stringify(classified)).not.toMatch(/Evolution|sensitive|private-token|Private text/);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -44,7 +45,7 @@ describe('MCP timeout attribution', () => {
       }));
     const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'instance-1', instanceToken: 'private-token', timeoutMs: 10, fetcher });
     const error = await client.status().catch(error => error);
-    expect(classifyMcpError(error, 'search_connections')).toMatchObject({ code: 'wapilot_timeout', status: 504 });
+    expect(classifyMcpError(error, 'search_connections')).toMatchObject({ code: 'request_deadline_exceeded', status: 504 });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

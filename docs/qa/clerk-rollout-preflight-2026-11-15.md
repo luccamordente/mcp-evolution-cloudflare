@@ -25,3 +25,10 @@ A reconciliação local parte de `a8eea67` (PR #69, incluindo #67) e incorpora i
 
 
 A integração do contrato foi congelada em `8051f942a99fd08d65586b9c131e58441f40d2af`, com ajuste documental em `21ce943…`. `npm run check -- -- --maxWorkers=1` passou com exit code 0: assets auth/receipt, tipos e **948 testes aprovados e 15 pulados**, 56 arquivos aprovados e um pulado, em 192,66 segundos de Vitest. As regressões exercitam os prazos compartilhados pelo handler MCP, erros sem MIME privado, recuperação/resultados parciais e recusa de link de anexo após desativação D1 antes de acesso remoto. O teste novo de desativação primeiro reproduziu HTTP 200 indevido e passou após a barreira ativa. Essas provas são locais e sintéticas; não aplicam migrations remotas nem comprovam login, entrega ou homologação em produção.
+
+
+### Ajustes após revisão do contrato
+
+O código/configuração foi congelado em `093e63e9c2fd74e2cfca03824ffe4f2329423245`. O MIME inválido do provedor é normalizado na projeção pública, preservando o texto disponível em JSON e os erros parciais das opções incompatíveis, sem refletir o valor bruto. A configuração mantém logs sanitizados da aplicação e redação de query, mas desabilita logs automáticos de invocação e traces para não registrar capacidades de anexos no path. Isso é configuração do artefato local, sem afirmação de alteração live.
+
+Os testes dos achados reproduziram cinco falhas antes do ajuste. Após a correção, typecheck e **321 testes focados** passaram. O novo `npm run check -- -- --maxWorkers=1` passou com exit code 0: assets, tipos e **950 testes aprovados e 15 pulados**, 56 arquivos aprovados e um pulado, em 175,70 segundos de Vitest. Não houve mudança de código após esse congelamento, aplicação remota de migrations ou publicação nesta etapa.

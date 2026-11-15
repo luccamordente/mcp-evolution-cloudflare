@@ -1,8 +1,8 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
 import { mountSendReceipt } from './send-receipt';
-import { loadGalleryFonts } from './fonts';
+import { loadReceiptFonts } from './fonts';
 
-void loadGalleryFonts();
+void loadReceiptFonts();
 
 const app = new App({ name: 'WaPilot comprovante de envio', version: '1.0.0' }, {}, { autoResize: true });
 const receipt = mountSendReceipt(document.querySelector<HTMLElement>('#receipt')!, app);

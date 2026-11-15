@@ -1,7 +1,6 @@
 import { contentDiagnosticSchema, nativeMessageSchema, hasNativeContent, responsePageSchema, type ResponseKind } from './native-message';
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 import { Buffer } from 'node:buffer';
-import { galleryImage } from './image-gallery';
 import { AudioTranscriptionError } from './audio-transcription';
 import { DocumentReadingError } from './document-reading';
 import { messageUpdateSchema } from './message-update';
@@ -515,13 +514,47 @@ export class EvolutionGoClient {
     return { items, nextCursor, hasMore: Boolean(nextCursor) };
   }
 
-  async listGroups(cursor?: string, limit = 50): Promise<Page<Group>> {
+  async searchGroups(options: { query?: string; offset: number; limit: number; include?: string[] }): Promise<Page<Group>> {
     const payload = await this.request<unknown>('/group/list', { timeoutMs: GROUP_REQUEST_TIMEOUT_MS });
-    const groups = this.page(payload, 'chat', normalizeGroup).items;
-    const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
-    const items = groups.slice(offset, offset + limit);
-    const nextCursor = offset + limit < groups.length ? String(offset + limit) : undefined;
-    return { items, nextCursor, hasMore: Boolean(nextCursor) };
+    const query = options.query?.toLowerCase();
+    const groups = this.page(payload, 'chat', normalizeGroup).items.filter(g => !query || [g.name, g.id, g.jid].some(v => v?.toLowerCase().includes(query)));
+    const items = groups.slice(options.offset, options.offset + options.limit).map(g => {
+      if (options.include?.includes('participants')) return g;
+      const { participants: _participants, ...metadata } = g;
+      return metadata;
+    });
+    return { items, hasMore: options.offset + items.length < groups.length };
+  }
+
+  async searchMessages(options: { text?: string; conversationId?: string; offset: number; limit: number }): Promise<Page<Message>> {
+    const rows: Message[] = [];
+    let cursor: string | undefined;
+    let hasMore = false;
+    const seen = new Set<string>();
+    while (rows.length < options.offset + options.limit) {
+      const page = await this.listMessages(options.text, Math.min(50, options.offset + options.limit - rows.length), options.conversationId, undefined, cursor);
+      rows.push(...page.items);
+      hasMore = page.hasMore;
+      if (!page.hasMore || !page.nextCursor || seen.has(page.nextCursor)) break;
+      seen.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+    return { items: rows.slice(options.offset, options.offset + options.limit), hasMore };
+  }
+
+  async searchMessageResponses(messageId: string, kind: ResponseKind, offset: number, limit: number) {
+    const rows: Awaited<ReturnType<EvolutionGoClient['listMessageResponses']>>['items'] = [];
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    let page;
+    do {
+      page = await this.listMessageResponses(messageId, kind, Math.min(100, offset + limit - rows.length), cursor);
+      rows.push(...page.items);
+      if (!page.hasMore || !page.nextCursor || seen.has(page.nextCursor)) break;
+      seen.add(page.nextCursor);
+      cursor = page.nextCursor;
+    } while (rows.length < offset + limit);
+    return { items: rows.slice(offset, offset + limit), hasMore: page.hasMore, meta: page.meta };
   }
 
   async searchGroups(options: { query?: string; offset: number; limit: number; include?: string[] }): Promise<Page<Group>> {
@@ -772,10 +805,18 @@ export class EvolutionGoClient {
       throw new MessageImageError(502, 'WaPilot could not retrieve the requested message.');
     }
     if (!message || message.id !== messageId) throw new MessageImageError(404, 'WaPilot could not find this message in retained history.');
-    // shortcut: read the first normalized media item; add selection when album items need separate analysis.
-    const image = galleryImage(message, approvedOrigins);
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(image.mimeType)) throw new MessageImageError(415, 'WaPilot visual analysis supports JPEG, PNG and WebP images.');
-    if (image.state !== 'ready') throw new MessageImageError(404, 'WaPilot cannot access a retained image for this message. Missing or unavailable files do not prove deletion.');
+    const mimeType = (message.media?.mimeType ?? message.type ?? '').toLowerCase().trim();
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) throw new MessageImageError(415, 'WaPilot visual analysis supports JPEG, PNG and WebP images.');
+    let url: URL;
+    try {
+      const source = message.media?.url ?? '';
+      url = new URL(source);
+      if (source.length > 8192 || url.protocol !== 'https:' || url.username || url.password || url.hash || !approvedOrigins.includes(url.origin)
+        || /\.(?:svg|html?|xhtml)(?:$|[/?])/i.test(decodeURIComponent(url.pathname))) throw new Error();
+    } catch {
+      throw new MessageImageError(404, 'WaPilot cannot access a retained image for this message. Missing or unavailable files do not prove deletion.');
+    }
+    const image = { url: url.href, mimeType };
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);

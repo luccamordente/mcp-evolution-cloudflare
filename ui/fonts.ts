@@ -2,7 +2,7 @@ import dmSans from './fonts/dm-sans-latin.woff2';
 import manrope from './fonts/manrope-latin.woff2';
 
 /** Register bundled binary fonts without fetching a URL in the host sandbox. */
-export async function loadGalleryFonts(): Promise<boolean> {
+export async function loadReceiptFonts(): Promise<boolean> {
   if (typeof FontFace === 'undefined' || !document.fonts) return false;
   try {
     const faces = [
@@ -13,7 +13,7 @@ export async function loadGalleryFonts(): Promise<boolean> {
     for (const face of faces) document.fonts.add(face);
     return true;
   } catch {
-    // Keep the gallery usable with the host/system fallback if font loading fails.
+    // Keep the receipt usable with the host/system fallback if font loading fails.
     return false;
   }
 }

@@ -254,7 +254,7 @@ describe('Evolution Go route contracts', () => {
         }],
       });
     } });
-    const page = await client.listGroups();
+    const page = await client.searchGroups({ offset: 0, limit: 50, include: ['participants'] });
     expect(calledUrl).toBe('https://evolution.invalid/group/list');
     expect(page.items).toEqual([{
       id: '120363000000000000@g.us',

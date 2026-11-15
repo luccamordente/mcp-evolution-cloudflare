@@ -2,7 +2,7 @@
 
 Audited 2026-11-10 against the checked-out source, installed SDK 2.3.1 and the pinned [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28). This is a local implementation audit, not certification or a production deployment check. See the separate [client audit](MCP-CLIENT-AUDIT.md).
 
-The tool inventory below was updated on 2026-11-11 for unified sending. The authenticated live catalog exposed 15 HTTP tools, including `send_message` with 18 variants. The other protocol findings retain the original audit date. WhatsApp calendar events are separate from MCP Events; see the [native event investigation](NATIVE-WHATSAPP-EVENTS.md).
+The tool inventory below was updated on 2026-11-14 for the consolidated six-tool API and restored contact search. The earlier 2026-11-11 observation recorded 15 HTTP tools before that rewrite. The other protocol findings retain the original audit date. WhatsApp calendar events are separate from MCP Events; see the [native event investigation](NATIVE-WHATSAPP-EVENTS.md).
 
 ## Subscriptions and channels
 
@@ -31,12 +31,12 @@ These are different contracts. [OpenAI MCP Events](https://developers.openai.com
 | Core subscription SSE stream | SDK exposure, contrary to intended policy | SDK machinery; not separately probed | `createMcpHandler` intercepts `subscriptions/listen`, including in JSON response mode; see finding below. |
 | OAuth resource protection and discovery | Yes | N/A | OAuth Provider; `/mcp` requires OAuth bearer, not Access assertion. UI Access is separate. See `src/lib/oauth.ts` and `docs/ARCHITECTURE.md`. |
 | Read/write scopes, user/connection isolation | Yes | Trusted local read/write configuration | HTTP sends require `mcp:write`; Events requires `mcp:read`; connection resolution is scoped to user. |
-| Tools: `tools/list`, `tools/call` | Yes: 15 tools | Yes: 10 tools | Shared factory, five HTTP-only media/PDF tools; inventory below. |
+| Tools: `tools/list`, `tools/call` | Yes: 6 tools | Yes: 6 tools | Shared factory; media processing is selected through get_message options and requires configured capabilities. |
 | Input/output schemas and tool annotations | Yes | Yes | Zod input, `outputSchema`, `structuredContent`, text fallback and read/write annotations in `src/lib/mcp.ts`. |
-| Native image results | Yes | Yes for message images | `get_message_image`; HTTP PDF page rendering also returns native images. Rendering/model vision depends on host. |
-| Embedded binary resources in tool results | Yes for original PDF | No PDF tool | `get_message_document`; host must support receiving binary resource content. |
+| Native image results | Yes | Yes for message images | `get_message` with `options.encodingFormat: "image/*"`; HTTP PDF page rendering also returns native images. Rendering/model vision depends on host. |
+| Embedded binary resources in tool results | Yes for original PDF | Same get_message tool, without configured document origins | `get_message` with `options.encodingFormat: "application/pdf"`; host must support receiving binary resource content. |
 | Native audio output | No | No | Audio transcription returns text, not an audio content block. |
-| Resources: list/read | Yes | Yes | Two registered UI resources; no general message-resource collection. |
+| Resources: list/read | Yes | Yes | One registered receipt UI resource; no general message-resource collection. |
 | Resource templates | Empty catalog | No templates registered | HTTP `resources/templates/list` returned an empty array. |
 | Resource-specific change notifications | No | No application producer | `resources.subscribe` absent; see [resource capabilities](https://modelcontextprotocol.io/specification/2026-07-28/server/resources). |
 | Catalog change notifications | Advertised by SDK; no useful cross-request update path demonstrated | Advertised by shared SDK registration | Observed `tools.listChanged:true`, `resources.listChanged:true`; application catalogs are registered afresh for each request. |
@@ -63,15 +63,14 @@ The pinned revision [deprecates roots, sampling and logging and moves Tasks into
 
 | Group | Tools | HTTP | stdio |
 | --- | --- | --- | --- |
-| Connections and status | `list_connections`, `connection_status`, `get_send_status` | Yes | Yes |
-| Contacts, groups and history | `search_contacts`, `list_groups`, `list_messages`, `get_message` | Yes | Yes |
-| Images and UI | `get_message_image`, `show_image_gallery` | Yes | Yes; UI host-dependent |
-| Documents and transcription | `inspect_message_document`, `read_message_document_pages`, `get_message_document`, `read_message_document`, `transcribe_message_audio` | Yes | No |
-| Sending | `send_message`, discriminated by `message.kind` | Yes, write scope | Yes, trusted local scope |
+| Connections and status | `search_connections` | Yes | Yes |
+| Contacts, groups and history | `search_contacts`, `search_groups`, `search_messages` | Yes | Yes |
+| Message content and media | `get_message`, selected through `options.encodingFormat` and `options.include` | Yes | Same tool; processing depends on configured local capabilities |
+| Sending | `send_message`, with `message` and `options` | Yes, write scope | Yes, trusted local scope |
 
-Tool availability is not proof that configured storage origins, inference bindings or retained message contents are available in production. Original PDFs, native images and MCP Apps also require client support beyond basic tool calls.
+Tool availability does not prove storage origins, inference bindings or retained contents are available. PDFs and images require host support for native content blocks. There is no gallery tool or resource. The receipt remains an MCP Apps resource. The stdio entrypoint disables remote bindings and does not provide the HTTP inference binding.
 
-The retired send tools are no longer registered. `get_send_status` still accepts their operation names only to inspect existing records. See [the send contract](SEND-MESSAGE.md) for quoting, media sources, unsupported event types, and migration limits.
+Retired tool names are not registered or translated at runtime. Operational send lookup uses `get_message.options.idempotencyKey` and never resends. See [the current contract](TOOLS.md) for all six tools and [the send contract](SEND-MESSAGE.md) for outgoing variants.
 
 ## Events behavior
 

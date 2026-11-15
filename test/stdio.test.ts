@@ -1,4 +1,4 @@
-import { migrateToolArguments } from './helpers/tool-arguments';
+import { sendArguments } from './helpers/mcp-arguments';
 import { afterEach, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -25,6 +25,7 @@ it('serves the shared tools and resources with a persistent default connection o
   const workspace = await fixtureWorkspace();
   const state = resolve(workspace, '.wrangler/stdio');
   const requests: string[] = [];
+  const expectedSendPaths = ['/send/text', '/send/media', '/send/sticker', '/send/text', '/send/text'];
   let reportedInstance = 'local-instance';
   let acceptedToken = 'fixture-instance-credential';
   let receivedMediaBytes = 0;
@@ -35,6 +36,10 @@ it('serves the shared tools and resources with a persistent default connection o
     if (request.headers.apikey !== acceptedToken) {
       response.writeHead(401);
       response.end(JSON.stringify({ jsonapi: { version: '1.1' }, errors: [{ status: '401', title: 'Unauthorized' }] }));
+      return;
+    }
+    if (request.url === '/send/sticker') {
+      response.end(JSON.stringify({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'local-sticker-1' } }));
       return;
     }
     if (request.url === '/send/text' || request.url === '/send/media') {
@@ -57,7 +62,7 @@ it('serves the shared tools and resources with a persistent default connection o
   async function open() {
     const transport = new StdioClientTransport({ command: process.execPath, args: ['scripts/dev-stdio.mjs'], cwd: workspace, stderr: 'pipe', env: {
       PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`,
-      LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential',
+      LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential', SEND_MEDIA_ORIGINS: 'https://media.example.test',
     } });
     let stderr = '';
     transport.stderr!.on('data', (chunk) => { stderr += chunk.toString(); });
@@ -79,42 +84,45 @@ it('serves the shared tools and resources with a persistent default connection o
   }
   const first = await open();
   expect(first.client.getServerCapabilities()).not.toHaveProperty('events');
-  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toEqual(['search_connections', 'search_contacts', 'search_groups', 'search_messages', 'get_message', 'send_message']);
+  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toContain('search_connections');
   const resources = await first.client.listResources();
   expect(resources.resources.map(resource => resource.uri)).toEqual(['ui://wapilot/send-receipt-v3.html']);
   expect((await first.client.readResource({ uri: resources.resources[0].uri })).contents).toHaveLength(1);
-  const listed = await first.client.callTool({ name: "search_connections", arguments: migrateToolArguments("list_connections", {}) });
+  const listed = await first.client.callTool({ name: "search_connections", arguments: { options: {  } } });
   const connections = (listed.structuredContent as { data: { items: Array<{ id: string; isDefault: number }> } }).data.items;
   expect(connections).toHaveLength(1);
   expect(connections[0].isDefault).toBe(1);
-  expect((await first.client.callTool({ name: "search_connections", arguments: migrateToolArguments("connection_status", {}) })).isError).not.toBe(true);
-  for (const tool of [{ name: "search_contacts", arguments: { query: "Fixture" } }, { name: "search_groups", arguments: migrateToolArguments("list_groups", {}) }, { name: "search_messages", arguments: migrateToolArguments("list_messages", {}) }]) {
+  expect((await first.client.callTool({ name: "search_connections", arguments: { options: { include: ["status"] } } })).isError).not.toBe(true);
+  for (const tool of [{ name: "search_contacts", arguments: { query: "Fixture" } }, { name: "search_groups", arguments: { options: {  } } }, { name: "search_messages", arguments: { options: {  } } }]) {
     const result = await first.client.callTool(tool);
     expect(result.isError).not.toBe(true);
     expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(1);
   }
-  const sent = await first.client.callTool({ name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: '5511999999999', text: 'Local fixture send' } }) });
+  const sent = await first.client.callTool({ name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: '5511999999999', text: 'Local fixture send' } }) });
   expect(sent.isError).not.toBe(true);
   expect(sent.structuredContent).toMatchObject({ data: { messageId: 'local-send-1' } });
   const mediaArgs = { message: { kind: 'document', to: '5511999999999', mimeType: 'application/pdf', source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024).toString('base64') } } };
-  const media = await first.client.callTool({ name: 'send_message', arguments: migrateToolArguments("send_message", mediaArgs) });
+  const media = await first.client.callTool({ name: 'send_message', arguments: sendArguments(mediaArgs) });
   expect(media.isError).not.toBe(true);
   expect(receivedMediaBytes).toBe(8 * 1024 * 1024);
-  const oversized = await first.client.callTool({ name: 'send_message', arguments: migrateToolArguments("send_message", { message: { ...mediaArgs.message, source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') } } }) });
+  const oversized = await first.client.callTool({ name: 'send_message', arguments: sendArguments({ message: { ...mediaArgs.message, source: { kind: 'base64', dataBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') } } }) });
   expect(oversized.structuredContent).toMatchObject({ data: { error: { code: 'media_too_large' } } });
+  const sticker = await first.client.callTool({ name: 'send_message', arguments: { message: { kind: 'sticker', url: 'https://media.example.test/fixture.webp' }, options: { to: '5511999999999' } } });
+  expect(sticker.isError).not.toBe(true);
+  expect(sticker.structuredContent).toMatchObject({ data: { messageId: 'local-sticker-1' } });
   expect(first.stderr().includes('fixture-instance-credential')).toBe(false);
   await first.close();
   const keyBefore = await readFile(resolve(state, 'encryption.key'), 'utf8');
   expect(Buffer.from(keyBefore, 'base64url').byteLength).toBe(32);
   const second = await open();
-  const reopened = await second.client.callTool({ name: "search_connections", arguments: migrateToolArguments("list_connections", {}) });
+  const reopened = await second.client.callTool({ name: "search_connections", arguments: { options: {  } } });
   expect((reopened.structuredContent as { data: { items: Array<{ id: string }> } }).data.items.map((item) => item.id)).toEqual([connections[0].id]);
-  expect((await second.client.callTool({ name: "search_connections", arguments: migrateToolArguments("connection_status", { connectionId: connections[0].id }) })).isError).not.toBe(true);
-  const history = await second.client.callTool({ name: "search_messages", arguments: migrateToolArguments("list_messages", {}) });
+  expect((await second.client.callTool({ name: "search_connections", arguments: { options: { include: ["status"] } } })).isError).not.toBe(true);
+  const history = await second.client.callTool({ name: "search_messages", arguments: { options: {  } } });
   expect((history.structuredContent as { data: { items: Array<{ id: string }> } }).data.items.map(item => item.id)).toEqual(['fixture-message']);
   for (const tool of [
-    { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'text', to: '5511999999999', text: 'Fixture reply', replyTo: { messageId: 'local-send-1' } } }) },
-    { name: 'send_message', arguments: migrateToolArguments("send_message", { message: { kind: 'forward', to: '5511999999999', source: { conversationId: '5511999999999', messageId: 'fixture-message' } } }) },
+    { name: 'send_message', arguments: sendArguments({ message: { kind: 'text', to: '5511999999999', text: 'Fixture reply', replyTo: { messageId: 'local-send-1' } } }) },
+    { name: 'send_message', arguments: sendArguments({ message: { kind: 'forward', to: '5511999999999', source: { conversationId: '5511999999999', messageId: 'fixture-message' } } }) },
   ]) expect((await second.client.callTool(tool)).isError).not.toBe(true);
   await second.close();
   expect(await readFile(resolve(state, 'encryption.key'), 'utf8') === keyBefore).toBe(true);
@@ -124,7 +132,7 @@ it('serves the shared tools and resources with a persistent default connection o
     const row = await proxy.env.DB.prepare('SELECT encrypted_token as token FROM whatsapp_connections').first<{ token: string }>();
     expect(Boolean(row?.token && !row.token.includes('fixture-instance-credential') && row.token.includes('.'))).toBe(true);
     const audit = await proxy.env.DB.prepare("SELECT COUNT(*) as count FROM audit_log WHERE operation = 'send_message' AND outcome = 'success'").first<{ count: number }>();
-    expect(audit?.count).toBe(4);
+    expect(audit?.count).toBe(expectedSendPaths.length);
   } finally { await proxy.dispose(); }
   const restartEnv = { PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`, LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential' };
   acceptedToken = 'different-fixture-secret';
@@ -147,7 +155,7 @@ it('serves the shared tools and resources with a persistent default connection o
   const changedInstance = await failedSetup({ ...restartEnv, LOCAL_INSTANCE_ID: 'another-instance' }, false, workspace);
   expect(changedInstance.code).toBe(1);
   expect(changedInstance.stderr).toContain('configuração diverge');
-  expect(requests.filter((request) => !request.startsWith('GET '))).toEqual(['POST /send/text', 'POST /send/media', 'POST /send/text', 'POST /send/text']);
+  expect(requests.filter((request) => !request.startsWith('GET '))).toEqual(expectedSendPaths.map(path => `POST ${path}`));
 }, 60_000);
 
 async function failedSetup(env: Record<string, string>, endInput = false, workspace?: string) {

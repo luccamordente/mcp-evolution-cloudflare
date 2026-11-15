@@ -1,5 +1,7 @@
 # Operação de identidades e corte para Clerk
 
+O [preflight de 15/11/2026 UTC](qa/clerk-rollout-preflight-2026-11-15.md) atualiza o retorno corrente para `94ee520f-a4af-4a0c-8be7-8bf7f5cc3f6c`, fonte `33eefb3…`, com cleanup e seis ferramentas, Access em 100%, redaction habilitada e Builds desabilitado. As versões anteriores abaixo são checkpoints históricos. A promoção Clerk exige artefato reconciliado e read-back; manter Builds desabilitado.
+
 Este procedimento prepara a integração da spec #53. A entrega de código não autoriza usar credenciais reais, emitir convites, alterar configuração externa, aplicar migrations remotas ou publicar. A conta permanece bloqueada quando alguma conferência ou revogação estiver pendente.
 
 ## Evidências e gates pendentes

@@ -1,5 +1,7 @@
 # Deploy e configuração
 
+O [preflight de 15/11/2026 UTC](qa/clerk-rollout-preflight-2026-11-15.md) atualiza o retorno corrente para `94ee520f-a4af-4a0c-8be7-8bf7f5cc3f6c`, fonte `33eefb3…`, com cleanup e seis ferramentas, Access em 100%, redaction habilitada e Builds desabilitado. As versões anteriores abaixo são checkpoints históricos. A promoção Clerk exige artefato reconciliado e read-back; manter Builds desabilitado.
+
 A retomada de 14/11 autorizou publicação Clerk, abertura de PR e merge no `main`, com aceitação de Heitor adiada explicitamente. Consulte [a decisão e os limites](qa/clerk-identity-linking-2026-11-14.md#autorização-posterior-para-corte-e-integração): preservar a conta ativa sem vínculo, negar navegador até o vínculo verificado e manter as verificações D1 para grants legados. As versões anteriores neste documento são checkpoints históricos; novo read-back e reconciliação com o cleanup do `main` são necessários antes da promoção. Este registro não afirma publicação ou homologação executadas.
 
 ## Atualização operacional de 14/11/2026

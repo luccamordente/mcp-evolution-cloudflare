@@ -557,49 +557,6 @@ export class EvolutionGoClient {
     return { items: rows.slice(offset, offset + limit), hasMore: page.hasMore, meta: page.meta };
   }
 
-  async searchGroups(options: { query?: string; offset: number; limit: number; include?: string[] }): Promise<Page<Group>> {
-    const payload = await this.request<unknown>('/group/list', { timeoutMs: GROUP_REQUEST_TIMEOUT_MS });
-    const query = options.query?.toLowerCase();
-    const groups = this.page(payload, 'chat', normalizeGroup).items.filter(g => !query || [g.name, g.id, g.jid].some(v => v?.toLowerCase().includes(query)));
-    const items = groups.slice(options.offset, options.offset + options.limit).map(g => {
-      if (options.include?.includes('participants')) return g;
-      const { participants: _participants, ...metadata } = g;
-      return metadata;
-    });
-    return { items, hasMore: options.offset + items.length < groups.length };
-  }
-
-  async searchMessages(options: { text?: string; conversationId?: string; offset: number; limit: number }): Promise<Page<Message>> {
-    const rows: Message[] = [];
-    let cursor: string | undefined;
-    let hasMore = false;
-    const seen = new Set<string>();
-    while (rows.length < options.offset + options.limit) {
-      const page = await this.listMessages(options.text, Math.min(50, options.offset + options.limit - rows.length), options.conversationId, undefined, cursor);
-      rows.push(...page.items);
-      hasMore = page.hasMore;
-      if (!page.hasMore || !page.nextCursor || seen.has(page.nextCursor)) break;
-      seen.add(page.nextCursor);
-      cursor = page.nextCursor;
-    }
-    return { items: rows.slice(options.offset, options.offset + options.limit), hasMore };
-  }
-
-  async searchMessageResponses(messageId: string, kind: ResponseKind, offset: number, limit: number) {
-    const rows: Awaited<ReturnType<EvolutionGoClient['listMessageResponses']>>['items'] = [];
-    let cursor: string | undefined;
-    const seen = new Set<string>();
-    let page;
-    do {
-      page = await this.listMessageResponses(messageId, kind, Math.min(100, offset + limit - rows.length), cursor);
-      rows.push(...page.items);
-      if (!page.hasMore || !page.nextCursor || seen.has(page.nextCursor)) break;
-      seen.add(page.nextCursor);
-      cursor = page.nextCursor;
-    } while (rows.length < offset + limit);
-    return { items: rows.slice(offset, offset + limit), hasMore: page.hasMore, meta: page.meta };
-  }
-
   async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*', cursor?: string): Promise<Page<Message>> {
     const boundedLimit = Math.min(Math.max(limit, 1), 50);
     const query = text?.trim() ?? '';

@@ -39,7 +39,7 @@ export function safeReturnPath(value: string | null, env: Env): string {
 }
 
 function pageNavigation(request: Request): boolean {
-  return request.method === 'GET' && ['/connections', '/admin', '/authorize'].includes(new URL(request.url).pathname) && (request.headers.get('accept') ?? '').includes('text/html');
+  return request.method === 'GET' && ['/', '/connections', '/admin', '/authorize'].includes(new URL(request.url).pathname) && (request.headers.get('accept') ?? '').includes('text/html');
 }
 
 function publicAuthHeaders(headers: Headers): Headers {

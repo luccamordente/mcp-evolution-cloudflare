@@ -304,18 +304,19 @@ export async function repointUserConnection(env: Env, userId: string, connection
     const reportedId = connectionIdFromResponse(status);
     if (reportedId && explicitId && reportedId !== requested) {
       await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'failure', metadata: { previousInstanceId, instanceId: requested, reason: 'instance_mismatch' } });
-      return [{ error: 'Token belongs to a different instance' }, 422];
+      return [{ error: 'A credencial informada não corresponde à conexão selecionada no WaPilot.' }, 422];
     }
     if (reportedId) instanceId = reportedId;
     state = evolutionState(status);
   } catch (error) {
     const upstream = error instanceof EvolutionApiError ? error.status : 500;
-    await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'failure', metadata: { previousInstanceId, instanceId, status: upstream, message: safeErrorMessage(error, 'unknown') } });
+    const message = 'O WaPilot não conseguiu consultar esta conexão. Tente novamente mais tarde.';
+    await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'failure', metadata: { previousInstanceId, instanceId, status: upstream, message } });
     if (upstream === 401 || upstream === 403 || upstream === 404) return [{ error: 'O WaPilot não conseguiu validar o acesso a esta conexão.' }, 422];
-    return [{ error: safeErrorMessage(error, 'Could not reach Evolution') }, 502];
+    return [{ error: message }, 502];
   }
   const clash = await findConnectionByInstanceId(env.DB, userId, instanceId);
-  if (clash && clash.id !== connection.id) return [{ error: 'Another connection already uses this instance' }, 409];
+  if (clash && clash.id !== connection.id) return [{ error: 'Este acesso já está cadastrado em outra conexão do WaPilot.' }, 409];
   const updated = await repointConnection(env.DB, env.TOKEN_ENCRYPTION_KEY, userId, connection.id, { instanceId, token });
   if (!updated) return [{ error: 'Connection not found' }, 404];
   await safeAudit(env, { userId, connectionId: connection.id, operation: 'connection_repoint', outcome: 'success', metadata: { previousInstanceId, instanceId, state } });

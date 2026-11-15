@@ -1,32 +1,44 @@
 import { z } from 'zod';
 
 export class OptionsError extends Error {
-  constructor(public readonly code: 'invalid_options' | 'incompatible_include' | 'unsupported_include' | 'incompatible_encoding_format', message: string) { super(message); }
+  constructor(public readonly code: 'invalid_options' | 'incompatible_include' | 'unsupported_include' | 'incompatible_encoding_format', message: string, public readonly validationIssues?: { path: string; code: string; message: string }[]) { super(message); }
 }
-const connectionId = z.string().uuid().optional();
+export function invalidOptions(error: z.ZodError, prefix = 'options') {
+  const shared = new Set(['to', 'replyTo', 'mentions', 'delayMs', 'customMessageId', 'formatJid', 'mimeType']);
+  const issues = error.issues.slice(0, 8).map(issue => {
+    const [first, ...rest] = issue.path;
+    const path = prefix === 'message' && typeof first === 'string' && (shared.has(first) || first === 'source')
+      ? ['options', first === 'source' ? 'mediaSource' : first, ...rest]
+      : [prefix, ...issue.path];
+    return { path: path.filter(String).join('.'), code: issue.code, message: issue.message };
+  });
+  return new OptionsError('invalid_options', `WaPilot arguments are invalid. ${issues.map(issue => `${issue.path || 'arguments'}: ${issue.message}`).join('; ')}`, issues);
+}
+const connectionId = z.string().uuid().optional().describe('Internal connection UUID returned by search_connections. Omit to use the default connection; never pass a phone number or instance ID.');
 const pagination = { offset: z.number().int().safe().min(0).default(0), limit: z.number().int().min(1).max(100).default(50) };
-export const connectionOptions = z.object({ ...pagination, query: z.string().max(200).optional(), include: z.array(z.literal('status')).optional() }).strict();
+export const connectionOptions = z.object({ ...pagination, query: z.string().max(200).optional().describe('Match connection name, phone number, or instance ID; at most 200 characters.'), include: z.array(z.literal('status')).optional().describe('Include status to check live connection availability for returned connections only.') }).strict();
 export const contactOptions = z.object({ ...pagination, connectionId }).strict();
-export const groupOptions = z.object({ ...pagination, connectionId, query: z.string().max(200).optional(), include: z.array(z.literal('participants')).optional() }).strict();
-export const searchOptions = z.object({ ...pagination, connectionId, conversationId: z.string().trim().min(1).max(200).optional(), text: z.string().max(200).optional(), limit: z.number().int().min(1).max(50).default(25) }).strict().refine(o => o.offset + o.limit <= 200, 'WaPilot search requires offset + limit <= 200. Narrow the conversation or text filter.');
+export const groupOptions = z.object({ ...pagination, connectionId, query: z.string().max(200).optional().describe('Match group name or JID; omit to list groups. At most 200 characters.'), include: z.array(z.literal('participants')).optional().describe('Include participants only when group membership details are needed.') }).strict();
+export const searchOptions = z.object({ ...pagination, connectionId, encodingFormat: z.literal('application/json').optional().describe('Search returns application/json by default; binary retrieval uses get_message.'), include: z.array(z.literal('attachments')).optional().describe('Include attachments for file metadata, zero-based indices, and temporary download links valid for 15 minutes. Links grant access to their bearer; share only with the intended recipient. No transcription or PDF extraction runs during search.'), conversationId: z.string().trim().min(1).max(200).optional().describe('Contact number or individual/group JID to search within; 1..200 characters after trimming. Omit to search across conversations.'), text: z.string().max(200).optional().describe('Text filter, at most 200 characters. Combine with conversationId to narrow retained history.'), limit: z.number().int().min(1).max(50).default(25) }).strict().refine(o => o.offset + o.limit <= 200, 'WaPilot search requires offset + limit <= 200. Narrow the conversation or text filter.');
 export const getOptions = z.object({
   ...pagination, limit: z.number().int().min(1).max(100).default(5), connectionId,
-  idempotencyKey: z.string().trim().min(1).max(200).optional(),
-  encodingFormat: z.enum(['text/plain', 'image/*', 'application/pdf']).optional(),
-  include: z.array(z.enum(['metadata', 'poll-responses', 'event-responses', 'quoted', 'reactions'])).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200).optional().describe('When messageId is unknown, omit it and use the original send key and connection to inspect its recorded outcome. This lookup never sends. Missing or expired records do not prove non-delivery.'),
+  encodingFormat: z.string().regex(/^(?:image\/\*|[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+)$/).optional().describe('Default application/json returns message text, status, and metadata. image/* returns native JPEG/PNG/WebP images or rendered PDF pages. Original MIME or application/octet-stream returns the selected original attachment as a binary resource, without format conversion. text/plain only retrieves an original text file; use include for audio transcription or PDF text.'),
+  include: z.array(z.enum(['attachments', 'transcript', 'document-text', 'metadata', 'poll-responses', 'event-responses', 'quoted', 'reactions'])).optional().describe('attachments: file metadata and bearer download links expiring in 15 minutes. transcript: audio speech transcription; allow 6 minutes. document-text: PDF text without OCR; allow 90 seconds. metadata: PDF pages, dimensions, bookmarks and bounded text chunks. poll-responses/event-responses: available votes/RSVPs on compatible messages. quoted: referenced message when retained. reactions is currently unsupported. Do not automatically repeat processing; text extraction or delivered images do not establish visual inspection.'),
+  attachmentIndex: z.number().int().min(0).optional().describe('Zero-based attachment index for original binary retrieval. Defaults to the first attachment. Obtain indices with include: ["attachments"].'),
   page: z.number().int().min(1).optional(), pages: z.array(z.number().int().min(1)).min(1).max(3).optional(),
-  preset: z.enum(['preview', 'reading', 'detail']).default('reading'),
-  crop: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().positive().max(1), height: z.number().positive().max(1) }).strict().refine(c => c.x + c.width <= 1 && c.y + c.height <= 1, 'Crop must remain inside the page.').optional(),
-  cursor: z.string().regex(/^[1-9]\d{0,3}:\d{1,9}$/).optional(), bookmarkCursor: z.number().int().min(0).max(1900).optional(),
-}).strict().refine(o => !(o.page !== undefined && o.pages !== undefined) && (!o.pages || new Set(o.pages).size === o.pages.length), 'Choose page or distinct pages, not both.').refine(o => !o.crop || !o.pages || o.pages.length === 1, 'A crop requires one page.').refine(o => !o.include?.includes('metadata') || o.limit <= 5, 'PDF metadata limit must be 1..5.').refine(o => !(o.page || o.pages || o.crop) || o.encodingFormat === 'image/*', 'Page options require image/* encoding.');
+  preset: z.enum(['preview', 'reading', 'detail']).default('reading').describe('PDF rendering resolution: preview 640, reading 1600 (default), detail 2400 pixels on the longest edge.'),
+  crop: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().positive().max(1), height: z.number().positive().max(1) }).strict().refine(c => c.x + c.width <= 1 && c.y + c.height <= 1, 'Crop must remain inside the page.').optional().describe('PDF crop in normalized coordinates x,y,width,height inside 0..1. Requires image/* and exactly one page; x+width and y+height must not exceed 1.'),
+  cursor: z.string().regex(/^[1-9]\d{0,3}:\d{1,9}$/).optional().describe('Continue PDF text inspection using the cursor returned by the previous metadata result.'), bookmarkCursor: z.number().int().min(0).max(1900).optional().describe('Continue PDF bookmarks using the returned bookmark cursor; integer 0..1900.'),
+}).strict().refine(o => !(o.page !== undefined && o.pages !== undefined) && (!o.pages || new Set(o.pages).size === o.pages.length), 'Choose page or distinct pages, not both.').refine(o => !o.crop || !o.pages || o.pages.length === 1, 'A crop requires one page.').refine(o => !o.include?.includes('metadata') || o.limit <= 5, 'PDF metadata limit must be 1..5.').refine(o => !(o.page || o.pages || o.crop) || o.encodingFormat === 'image/*', 'Page options require image/* encoding.').refine(o => o.attachmentIndex === undefined || Boolean(o.encodingFormat && o.encodingFormat !== 'application/json' && o.encodingFormat !== 'image/*'), 'attachmentIndex requires an original file encodingFormat.');
 // Advertise the options shape; validate constraints inside the handler so errors
 // have the same product error code across HTTP and stdio.
 function input<T extends z.ZodRawShape>(shape: T) {
   return z.object({ options: z.object(shape).partial().loose().optional() }).strict();
 }
-const loosePagination = { offset: z.number().optional(), limit: z.number().optional() };
-export const searchConnectionsInput = input({ ...connectionOptions.shape, ...loosePagination });
-export const searchContactsInput = input({ ...contactOptions.shape, ...loosePagination }).extend({ query: z.string().trim().min(1).max(200).describe('Contact name or phone number fragment to search for.') });
-export const searchGroupsInput = input({ ...groupOptions.shape, ...loosePagination });
-export const searchMessagesInput = input({ ...searchOptions.shape, ...loosePagination });
-export const getMessageInput = input({ ...getOptions.shape, ...loosePagination, page: z.number().optional(), pages: z.array(z.number()).optional(), crop: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).optional() }).extend({ messageId: z.string().trim().min(1).max(200).optional() });
+const loosePagination = (defaultLimit: number, maxLimit: number) => ({ offset: z.number().optional().describe('Nonnegative integer results to skip; default 0. Keep filters unchanged between pages.'), limit: z.number().optional().describe(`Integer results per page, 1..${maxLimit}; default ${defaultLimit}.`) });
+export const searchConnectionsInput = input({ ...connectionOptions.shape, ...loosePagination(50, 100) });
+export const searchContactsInput = input({ ...contactOptions.shape, ...loosePagination(50, 100) }).extend({ query: z.string().trim().min(1).max(200).describe('Contact name or phone number fragment to search for.') });
+export const searchGroupsInput = input({ ...groupOptions.shape, ...loosePagination(50, 100) });
+export const searchMessagesInput = input({ ...searchOptions.shape, ...loosePagination(25, 50), limit: z.number().optional().describe('Integer results per page, 1..50; default 25. offset + limit must be <= 200; narrow filters beyond this window.') });
+export const getMessageInput = input({ ...getOptions.shape, ...loosePagination(5, 100), limit: z.number().optional().describe('Integer results per included list; default 5, range 1..100. PDF metadata inspection requires 1..5.'), attachmentIndex: z.number().optional().describe(getOptions.shape.attachmentIndex.description ?? ""), page: z.number().optional().describe('Physical PDF page position starting at 1 (default 1). Requires image/*; choose page or pages, not both.'), pages: z.array(z.number()).optional().describe('One to three distinct physical PDF page positions, starting at 1. Requires image/*; a crop requires one page.'), crop: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).optional().describe(getOptions.shape.crop.description ?? '') }).extend({ messageId: z.string().trim().min(1).max(200).optional().describe('Exact retained message ID, including a known customMessageId. Required unless inspecting a send by options.idempotencyKey; when present, lookup uses this ID.') });

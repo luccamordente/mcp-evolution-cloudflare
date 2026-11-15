@@ -648,7 +648,7 @@ export class EvolutionGoClient {
     catch (error) {
       signal.throwIfAborted();
       const status = error instanceof EvolutionApiError ? error.status : 502;
-      const code = error instanceof EvolutionApiError && error.timeoutSource ? (error.timeoutSource === 'wapilot' ? 'wapilot_timeout' : 'upstream_timeout') : 'audio_unavailable';
+      const code = error instanceof EvolutionApiError && error.timeoutSource ? (error.timeoutSource === 'wapilot' ? 'request_deadline_exceeded' : 'dependency_timeout') : 'audio_unavailable';
       throw new AudioTranscriptionError(code, status, 'WaPilot could not retrieve the requested audio message.');
     }
     if (!message || message.id !== messageId) throw new AudioTranscriptionError('audio_unavailable', 404, 'WaPilot could not find this message in retained history.');
@@ -667,7 +667,7 @@ export class EvolutionGoClient {
     try {
       signal.throwIfAborted();
       const response = await this.fetcher(url.href, { redirect: 'manual', credentials: 'omit', signal: AbortSignal.any([signal, controller.signal]) });
-      if (response.status === 408 || response.status === 504) throw new AudioTranscriptionError('upstream_timeout', response.status, `Audio storage returned a timeout response (HTTP ${response.status}) to WaPilot.`);
+      if (response.status === 408 || response.status === 504) throw new AudioTranscriptionError('dependency_timeout', response.status, `Audio storage returned a timeout response (HTTP ${response.status}) to WaPilot.`);
       if (!response.ok) throw new AudioTranscriptionError('audio_unavailable', response.status >= 400 ? response.status : 502, `WaPilot could not load audio from storage (HTTP ${response.status}).`);
       if (Number(response.headers.get('content-length')) > maxBytes) throw new AudioTranscriptionError('media_too_large', 413, `Media exceeds configured limit of ${maxBytes} bytes`);
       reader = response.body?.getReader();
@@ -702,7 +702,7 @@ export class EvolutionGoClient {
     catch (error) {
       signal.throwIfAborted();
       const status = error instanceof EvolutionApiError ? error.status : 502;
-      const code = error instanceof EvolutionApiError && error.timeoutSource ? (error.timeoutSource === 'wapilot' ? 'wapilot_timeout' : 'upstream_timeout') : 'document_unavailable';
+      const code = error instanceof EvolutionApiError && error.timeoutSource ? (error.timeoutSource === 'wapilot' ? 'request_deadline_exceeded' : 'dependency_timeout') : 'document_unavailable';
       throw new DocumentReadingError(code, status, 'WaPilot could not retrieve the requested document message.');
     }
     if (!message || message.id !== messageId) throw new DocumentReadingError('document_unavailable', 404, 'WaPilot could not find this message in retained history.');
@@ -721,7 +721,7 @@ export class EvolutionGoClient {
     try {
       signal.throwIfAborted();
       const response = await this.fetcher(url.href, { redirect: 'manual', credentials: 'omit', signal: AbortSignal.any([signal, controller.signal]) });
-      if (response.status === 408 || response.status === 504) throw new DocumentReadingError('upstream_timeout', response.status, `Document storage returned a timeout response (HTTP ${response.status}) to WaPilot.`);
+      if (response.status === 408 || response.status === 504) throw new DocumentReadingError('dependency_timeout', response.status, `Document storage returned a timeout response (HTTP ${response.status}) to WaPilot.`);
       if (!response.ok) throw new DocumentReadingError('document_unavailable', response.status >= 400 ? response.status : 502, `WaPilot could not load the document from storage (HTTP ${response.status}).`);
       if (Number(response.headers.get('content-length')) > maxBytes) throw new DocumentReadingError('media_too_large', 413, `Media exceeds configured limit of ${maxBytes} bytes`);
       reader = response.body?.getReader();

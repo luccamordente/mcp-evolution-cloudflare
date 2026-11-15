@@ -154,7 +154,7 @@ it.each(['pending', 'unknown', 'completed'])('fences a %s legacy action key and 
     .bind('legacy', owner.id, connectionId, 'send_text', 'original-key', 'old-hash', state, state === 'completed' ? JSON.stringify({ accepted: true, messageId: 'OLD' }) : null, Date.now() + 86400000).run();
   const fetcher = vi.spyOn(globalThis, 'fetch');
   const sent = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ idempotencyKey: 'original-key', message: { kind: 'text', to: recipient, text: 'Do not duplicate' } }) });
-  expect(sent.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'send_legacy_action_exists', retryable: false } } } });
+  expect(sent.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'send_action_conflict', retryable: false } } } });
   expect(fetcher).not.toHaveBeenCalled();
   const status = await getSendStatus(local.db, { userId: owner.id, connectionId, operation: 'send_text', key: 'original-key' });
   expect(status).toMatchObject({ outcome: state === 'completed' ? 'accepted' : state });
@@ -165,7 +165,7 @@ it('fences an older Worker from reserving a key already used by the unified tool
   await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ idempotencyKey: 'new-key', message: { kind: 'text', to: recipient, text: 'One action' } }) });
   const owner = await bootstrapLocalUser(local.db, principal);
   await expect(local.db.prepare('INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES (?,?,?,?,?,?,?,?)')
-    .bind('old-worker', owner.id, connectionId, 'send_text', 'new-key', 'old-hash', 'pending', Date.now() + 86400000).run()).rejects.toThrow('send_legacy_action_exists');
+    .bind('old-worker', owner.id, connectionId, 'send_text', 'new-key', 'old-hash', 'pending', Date.now() + 86400000).run()).rejects.toThrow('send_action_conflict');
 });
 
 it('rejects link-preview metadata downloads outside approved origins', async () => {

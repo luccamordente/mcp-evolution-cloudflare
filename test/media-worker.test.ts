@@ -14,10 +14,16 @@ beforeAll(async () => {
       import { EvolutionGoClient } from './src/lib/evolution';
       import { transcribeMessageAudio } from './src/lib/audio-transcription';
       import { readMessageDocument } from './src/lib/document-reading';
+      import { downloadAttachment } from './src/lib/attachments';
       export default { async fetch(request) {
         const id = new URL(request.url).pathname.slice(1);
         const client = new EvolutionGoClient({ baseUrl: 'https://provider.invalid', instanceId: 'test-instance', instanceToken: 'instance-secret' });
         try {
+          if (id.startsWith('original')) {
+            const message = { id, media: { mimeType: 'video/mp4', url: 'https://storage.example.test/' + id } };
+            const file = await downloadAttachment(message, 0, { EVOLUTION_BASE_URL: 'https://provider.invalid', DOCUMENT_STORAGE_ORIGINS: 'https://storage.example.test', MAX_MEDIA_BYTES: '1024' }, request.signal);
+            return new Response(file.bytes, { headers: { 'Content-Type': file.mimeType } });
+          }
           const result = id.startsWith('audio')
             ? await transcribeMessageAudio(client, {
                 EVOLUTION_BASE_URL: 'https://provider.invalid', AUDIO_STORAGE_ORIGINS: 'https://storage.example.test',
@@ -52,6 +58,16 @@ beforeAll(async () => {
       return new Response(request.url.includes('/audio') ? audio : request.url.includes('/document') ? document : image);
     },
   }));
+});
+
+it('downloads arbitrary original files in workerd without forwarding credentials', async () => {
+  requests = [];
+  const response = await runtime.dispatchFetch('https://worker.invalid/original');
+  expect(response.status).toBe(200);
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(image);
+  expect(response.headers.get('content-type')).toBe('video/mp4');
+  expect(requests).toEqual([{ url: 'https://storage.example.test/original', apiKey: null, authorization: null }]);
+  expect((await runtime.dispatchFetch('https://worker.invalid/original-redirect')).status).toBe(502);
 });
 
 afterAll(async () => { await runtime?.dispose(); });

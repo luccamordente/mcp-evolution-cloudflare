@@ -85,7 +85,7 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
     const body = await response.text();
     return { status: response.status, ...(body ? JSON.parse(body) : {}) } as { status: number; result: T };
   }
-  return { fetcher, rpc, auditBindings, run, toMarkdown, env, message: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message', arguments: messageArguments(args, {}) }), document: (args: Record<string, unknown>, signal?: AbortSignal) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"text/plain"}) }, signal), audio: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"text/plain"}) }), image: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"image/*"}) }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: "search_messages", arguments: { options: args } }) };
+  return { fetcher, rpc, auditBindings, run, toMarkdown, env, message: (args: Record<string, unknown>) => rpc('tools/call', { name: 'get_message', arguments: messageArguments(args, {}) }), document: (args: Record<string, unknown>, signal?: AbortSignal) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"application/json", "include":["document-text"]}) }, signal), audio: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"application/json", "include":["transcript"]}) }), image: (args: Record<string, unknown>) => rpc('tools/call', { name: "get_message", arguments: messageArguments(args, {"encodingFormat":"image/*"}) }), call: (args: Record<string, unknown>) => rpc('tools/call', { name: "search_messages", arguments: { options: args } }) };
 }
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -122,7 +122,7 @@ describe('PDF elapsed deadline checkpoints', () => {
       return { exports };
     });
     const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { ...processingOptions, ...selection } } });
-    expect(result).toMatchObject({isError: true, structuredContent: {data: {connectionId, messageId: 'message-1', error: {code: 'wapilot_timeout'}}}});
+    expect(result).toMatchObject({isError: true, structuredContent: {data: {connectionId, messageId: 'message-1', error: {code: 'request_deadline_exceeded'}}}});
     expect(loadedPages).toEqual(expectedLoadedPages);
     expect(expensiveCalls).toBe(1);
   });
@@ -137,7 +137,7 @@ describe('PDF operational failure identity', () => {
     expect((await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { ...processingOptions, connectionId: workConnectionId } } })).result).toMatchObject({isError: true, structuredContent: {data: {connectionId: workConnectionId, messageId: 'message-1', error: {code: 'pdf_invalid'}}}});
   });
 
-  it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { encodingFormat: 'image/*' }, { encodingFormat: 'text/plain' }])('preserves resolved identity for %s failures', async processingOptions => {
+  it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { encodingFormat: 'image/*' }, { include: ['document-text'] }])('preserves resolved identity for %s failures', async processingOptions => {
     const { rpc, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: null }));
     const {result} = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { ...processingOptions } } });
@@ -145,7 +145,7 @@ describe('PDF operational failure identity', () => {
     expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent);
   });
 
-  it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { encodingFormat: 'image/*' }, { encodingFormat: 'text/plain' }])('does not echo an unauthorized identity for %s', async processingOptions => {
+  it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { encodingFormat: 'image/*' }, { include: ['document-text'] }])('does not echo an unauthorized identity for %s', async processingOptions => {
     const { rpc, fetcher } = await messageTool();
     const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'foreign-message', options: { ...processingOptions, connectionId: foreignConnectionId } } });
     expect(result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'connection_not_found'}}}});
@@ -221,7 +221,7 @@ describe('PDF inspection HTTP MCP output', () => {
       }
       return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
     });
-    expect((await rpc('tools/call', {name: "get_message", arguments: { messageId: 'message-1', options: { include: ["metadata"] } }})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'wapilot_timeout', retryable: false}}}});
+    expect((await rpc('tools/call', {name: "get_message", arguments: { messageId: 'message-1', options: { include: ["metadata"] } }})).result).toMatchObject({isError: true, structuredContent: {data: {error: {code: 'request_deadline_exceeded', retryable: false}}}});
   });
 
   it('reports an invalid original as invalid rather than an empty page', async () => {
@@ -279,7 +279,8 @@ describe('PDF pages HTTP MCP output', () => {
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }))
       .mockResolvedValueOnce(Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() }));
     const { result } = await rpc<any>('tools/call', { name: "get_message", arguments: { messageId: 'message-1', options: { pages: [1, 2, 3], preset: 'preview', encodingFormat: "image/*" } } });
-    expect(result.isError).not.toBe(true);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ partial: true, errors: [{ part: "pages.2", error: { code: "pdf_page_unavailable", recovery: { tool: "get_message" } } }] });
     expect(result.structuredContent.data).toMatchObject({ requestedPages: [1, 2, 3], deliveredPages: [1, 3], failedPages: [2], complete: false });
     expect(result.structuredContent.data.pages[1]).toMatchObject({ page: 2, status: 'failed', code: 'pdf_limit' });
     expect(result.content.filter((block: any) => block.type === 'image')).toHaveLength(2);
@@ -401,7 +402,7 @@ describe('PDF original HTTP MCP output', () => {
     else await vi.advanceTimersByTimeAsync(60_001);
     const response = await pending;
     if (kind === 'client') expect(response.status).toBe(499);
-    else expect(response.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504, retryable: false } } } });
+    else expect(response.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'request_deadline_exceeded', status: 504, retryable: false } } } });
   });
 
   it('delivers identical original bytes in a native resource usable as a temporary file', async () => {
@@ -576,7 +577,7 @@ describe('text send receipt MCP boundary', () => {
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(8001);
     const { result } = await pending;
-    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', retryable: false } } }, _meta: { sendReceipt: { state: 'unknown' } } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'request_deadline_exceeded', retryable: false } } }, _meta: { sendReceipt: { state: 'unknown' } } });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -709,7 +710,7 @@ describe('get_message complete retained message', () => {
     const { message, fetcher, auditBindings } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, errors: [{ detail: 'Evolution Go private-content https://storage.example.test/?signature=private-link token=private-token' }] }, { status }));
     const { result } = await message({ messageId: 'message-1' });
-    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: status === 504 ? 'upstream_timeout' : 'message_unavailable', operation: 'get_message', status, retryable: true } } } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: status === 504 ? 'dependency_timeout' : 'message_unavailable', operation: 'get_message', status, retryable: true } } } });
     expect(JSON.stringify({ result, auditBindings })).not.toMatch(/Evolution|private-|signature|storage\.example|instance-secret|global-secret/);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -791,7 +792,7 @@ describe('PDF text HTTP MCP output', () => {
   it.each(['image/png', 'text/html', 'application/msword'])('rejects non-PDF messages before accessing storage: %s', async mime => {
     const { document, fetcher, toMarkdown } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf(undefined, mime) }));
-    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'incompatible_encoding_format', status: 400 } } } });
+    expect((await document({ messageId: 'message-1' })).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'incompatible_include', status: 400 } } } });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(toMarkdown).not.toHaveBeenCalled();
   });
@@ -807,7 +808,7 @@ describe('PDF text HTTP MCP output', () => {
 
   it.each([
     ['redirect', 302, 'document_unavailable', 502],
-    ['timeout', 504, 'upstream_timeout', 504],
+    ['timeout', 504, 'dependency_timeout', 504],
     ['invalid bytes', 200, 'document_unavailable', 415],
   ])('rejects storage %s without conversion or exposing its body', async (_kind, status, code, expectedStatus) => {
     const { document, fetcher, toMarkdown, auditBindings } = await messageTool();
@@ -879,7 +880,7 @@ describe('PDF text HTTP MCP output', () => {
     else await vi.advanceTimersByTimeAsync(60_000);
     const completed = await response;
     if (kind === 'client') expect(completed.status).toBe(499);
-    else expect(completed.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', retryable: false } } } });
+    else expect(completed.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'request_deadline_exceeded', retryable: false } } } });
     expect(toMarkdown).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -910,7 +911,7 @@ describe('PDF text HTTP MCP output', () => {
     fetcher.mockImplementation(async url => String(url).startsWith('https://storage.example.test/') ? new Response(bytes)
       : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, meta: { ...retainedMessage.meta, fromMe }, attributes: { encodingFormat: 'application/pdf', body: { text: 'private-caption', media: { url: 'https://storage.example.test/contract.pdf?signature=private-link' } } } } }));
     const { result } = await document({ connectionId: workConnectionId, messageId: 'message-1' });
-    expect(result).toMatchObject({ structuredContent: { data: { connectionId: workConnectionId, messageId: 'message-1', text: '# Contrato\nPagamento até 15 de novembro.' } } });
+    expect(result).toMatchObject({ structuredContent: { data: { connectionId: workConnectionId, messageId: 'message-1', documentText: '# Contrato\nPagamento até 15 de novembro.' } } });
     expect(result.isError).not.toBe(true);
     expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(result.structuredContent) }]);
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('work-instance-secret');
@@ -937,7 +938,7 @@ describe('audio transcription HTTP MCP output', () => {
       : Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { encodingFormat: 'audio/ogg', body: { text: 'private-caption', media: { url: 'https://storage.example.test/voice.ogg?signature=private-link' } } }, meta: { chat: '5511999999999', fromMe } } }));
     const { result } = await audio({ connectionId: workConnectionId, messageId: 'message-1' });
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toMatchObject({ data: { connectionId: workConnectionId, messageId: 'message-1', text: 'Reunião amanhã às dez.' } });
+    expect(result.structuredContent).toMatchObject({ data: { connectionId: workConnectionId, messageId: 'message-1', transcript: 'Reunião amanhã às dez.' } });
     expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(result.structuredContent) }]);
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('apikey')).toBe('work-instance-secret');
     expect(run).toHaveBeenCalledTimes(1);
@@ -1077,7 +1078,7 @@ describe('search_messages retained conversation search', () => {
     const { call, fetcher } = await messageTool();
     fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, errors: [{ status: '401', title: 'Unauthorized', detail: 'token=private-value' }], meta: { privatePayload: 'hidden' } }, { status: 401 }));
     const response = await call({ conversationId: '5511999999999' });
-    expect(response.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'evolution_http_error', status: 401, retryable: false, operation: 'search_messages', message: 'token=[redacted]' } } } });
+    expect(response.result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'service_request_failed', status: 401, retryable: false, operation: 'search_messages', message: 'WaPilot could not authorize access to the selected WhatsApp connection (HTTP 401).' } } } });
     expect(JSON.parse(response.result.content[0].text)).toEqual(response.result.structuredContent);
     expect(JSON.stringify(response)).not.toMatch(/private-value|privatePayload|hidden|instance-secret|global-secret/);
   });

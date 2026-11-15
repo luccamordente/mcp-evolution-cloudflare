@@ -19,17 +19,17 @@ describe('MCP tool output schema', () => {
   it('classifies and sanitizes upstream errors without exposing details', () => {
     const error = classifyMcpError(new EvolutionApiError(503, 'upstream token=secret-value', { token: 'secret-value', payload: 'private' }), 'search_contacts');
     expect(error).toMatchObject({
-      code: 'evolution_http_error', status: 503, retryable: true, operation: 'search_contacts',
-      message: 'upstream token=[redacted]',
+      code: 'service_request_failed', status: 503, retryable: true, operation: 'search_contacts',
+      message: 'WaPilot could not complete this operation (HTTP 503).',
     });
-    expect(error.hint).toContain('Retry');
+    expect(error.recovery).toMatchObject({ action: 'retry_read', retryAfterMs: 5000 });
     expect(JSON.stringify(error)).not.toContain('secret-value');
     expect(JSON.stringify(error)).not.toContain('private');
   });
 
   it('does not mark authentication or request errors as retryable', () => {
     expect(classifyMcpError(new EvolutionApiError(401, 'not authorized'), 'send_message')).toMatchObject({
-      code: 'evolution_http_error', status: 401, retryable: false, operation: 'send_message',
+      code: 'service_request_failed', status: 401, retryable: false, operation: 'send_message',
     });
     expect(classifyMcpError(new SendMessageInputError('invalid_base64', 400, 'WaPilot attachment requires valid Base64.'), 'send_message')).toMatchObject({
       code: 'invalid_base64', status: 400, retryable: false, operation: 'send_message',
@@ -64,7 +64,7 @@ describe('MCP tool output schema', () => {
     expect(schema.safeParse({ connectionId: null }).success).toBe(false);
     expect(schema.safeParse({ connectionId: 'not-a-uuid' }).success).toBe(false);
     const connectionDescription = (z.toJSONSchema(schema) as { properties?: { connectionId?: { description?: string } } }).properties?.connectionId?.description;
-    expect(connectionDescription).toBeUndefined();
+    expect(connectionDescription).toContain('Internal connection UUID');
   });
 
   it.each(['5511999999999', '5511999999999@s.whatsapp.net', '120363123456789@g.us'])('accepts conversation identifier %s without requiring a connection UUID', (conversationId) => {

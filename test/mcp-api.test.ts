@@ -58,6 +58,24 @@ for (const [code, scenario] of Object.entries(toolErrorScenarios)) {
     expect(JSON.stringify(result)).not.toContain('private-response');
   });
 }
+it('advertises agent guidance, message variants and option descriptions', async () => {
+  const result = await rpc('tools/list');
+  const tools = z.array(z.object({ name: z.string(), title: z.string().min(1), description: z.string().min(30), inputSchema: z.record(z.string(), z.unknown()) })).parse(result.tools);
+  const send = tools.find(tool => tool.name === 'send_message');
+  const get = tools.find(tool => tool.name === 'get_message');
+  const schema = z.object({ properties: z.object({ message: z.object({ anyOf: z.array(z.object({ description: z.string().min(10), properties: z.object({ kind: z.object({ const: z.string() }) }) })) }), options: z.object({ properties: z.object({ idempotencyKey: z.object({ description: z.string() }) }) }) }) }).parse(send?.inputSchema);
+  const kinds = schema.properties.message.anyOf.map(variant => variant.properties.kind.const);
+  expect(kinds).toHaveLength(16);
+  for (const kind of kinds) expect(send?.description).toContain(kind);
+  expect(schema.properties.options.properties.idempotencyKey.description).toContain('24 hours');
+  const getSchema = z.object({ properties: z.object({ messageId: z.object({ description: z.string() }), options: z.object({ properties: z.object({ encodingFormat: z.object({ description: z.string() }), include: z.object({ description: z.string() }), limit: z.object({ description: z.string() }) }) }) }) }).parse(get?.inputSchema);
+  expect(getSchema.properties.options.properties.include.description).toContain('transcript');
+  expect(getSchema.properties.options.properties.include.description).toContain('15 minutes');
+  expect(getSchema.properties.options.properties.encodingFormat.description).toContain('application/json');
+  expect(getSchema.properties.options.properties.limit.description).toContain('1..5');
+  expect(JSON.stringify(await rpc('server/discover'))).toContain('data.error.recovery');
+});
+
 it('returns the latest retained delivery status without downloading media', async () => {
   expect(await call('get_message', { messageId: 'm1', options: {  } })).toMatchObject({ structuredContent: { data: { connectionId, message: { status: 'Read', text: 'hello' } } } });
   expect(fetcher).toHaveBeenCalledTimes(1);

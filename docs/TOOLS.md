@@ -1,6 +1,6 @@
 # Ferramentas WaPilot
 
-O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Argumentos comuns ficam em `options`; omitir `options.connectionId` usa a conexão padrão do usuário. Os UUIDs de conexão são internos e cada leitura resolve a propriedade da conexão. Não use IDs de instância como UUIDs de conexão.
+O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Títulos, descrições e campos de entrada orientam o agente sobre tipos de envio, limites, processamento e recuperação. As instruções do servidor explicam o envelope de erros e resultados parciais; os tipos de envio continuam derivados do schema, com descrição por variante. Argumentos comuns ficam em `options`; omitir `options.connectionId` usa a conexão padrão do usuário. Os UUIDs de conexão são internos e cada leitura resolve a propriedade da conexão. Não use IDs de instância como UUIDs de conexão.
 
 | Ferramenta | Argumentos | Fonte interna |
 | --- | --- | --- |

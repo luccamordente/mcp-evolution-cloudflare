@@ -6,7 +6,7 @@ export const DOCUMENT_READING_TIMEOUT_MS = 60_000;
 
 export class DocumentReadingError extends Error {
   constructor(
-    public readonly code: 'document_unavailable' | 'document_reading_unavailable' | 'document_conversion_failed' | 'no_document_text' | 'document_text_too_large' | 'media_too_large' | 'wapilot_timeout' | 'upstream_timeout' | 'request_cancelled',
+    public readonly code: 'document_unavailable' | 'document_reading_unavailable' | 'document_conversion_failed' | 'no_document_text' | 'document_text_too_large' | 'media_too_large' | 'request_deadline_exceeded' | 'dependency_timeout' | 'request_cancelled',
     public readonly status: number,
     message: string,
   ) { super(message); }
@@ -41,7 +41,7 @@ export async function readMessageDocument(client: EvolutionGoClient, env: Pick<E
     return text;
   } catch (error) {
     if (parentSignal.aborted) throw new DocumentReadingError('request_cancelled', 499, 'WaPilot document reading was cancelled.');
-    if (deadline.signal.aborted) throw new DocumentReadingError('wapilot_timeout', 504, `WaPilot stopped waiting for document reading after ${DOCUMENT_READING_TIMEOUT_MS} ms (WaPilot timeout).`);
+    if (deadline.signal.aborted) throw new DocumentReadingError('request_deadline_exceeded', 504, `WaPilot stopped waiting for document reading after ${DOCUMENT_READING_TIMEOUT_MS} ms (WaPilot timeout).`);
     if (error instanceof DocumentReadingError) throw error;
     throw new DocumentReadingError('document_conversion_failed', 502, 'WaPilot could not extract text from this PDF.');
   } finally {

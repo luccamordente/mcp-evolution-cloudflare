@@ -4,11 +4,11 @@ import { approvedMediaOrigins } from './media-origins';
 
 export const PDF_TIMEOUT_MS = 60_000;
 export class PdfProcessingError extends Error {
-  constructor(public readonly code: 'pdf_invalid' | 'pdf_limit' | 'pdf_page_unavailable' | 'request_cancelled' | 'wapilot_timeout', public readonly status: number, message: string) { super(message); }
+  constructor(public readonly code: 'pdf_invalid' | 'pdf_limit' | 'pdf_page_unavailable' | 'request_cancelled' | 'request_deadline_exceeded', public readonly status: number, message: string) { super(message); }
 }
 export function checkPdfDeadline(signal: AbortSignal, expiresAt: number) {
   signal.throwIfAborted();
-  if (Date.now() >= expiresAt) throw new PdfProcessingError('wapilot_timeout', 504, 'WaPilot PDF processing exceeded 60 seconds. Request fewer pages.');
+  if (Date.now() >= expiresAt) throw new PdfProcessingError('request_deadline_exceeded', 504, 'WaPilot PDF processing exceeded 60 seconds. Request fewer pages.');
 }
 
 

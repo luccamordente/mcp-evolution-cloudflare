@@ -150,7 +150,9 @@ A operação canônica de idempotência é `send_message`. A chave protege a aç
 
 As antigas ferramentas `send_text`, `send_media`, `reply_to_message` e `forward_message` foram removidas do catálogo e dos handlers. `get_message` com `options.idempotencyKey` ainda aceita esses nomes como `operation` somente para consultar registros operacionais anteriores à migração. Esses registros continuam sujeitos à expiração original de 24 horas.
 
-A migration `0010_unified_send_fence.sql` cria bloqueios atômicos entre os namespaces antigo e novo. Um registro legado ativo impede reservar a mesma chave por `send_message`; uma reserva nova impede um Worker antigo de reservar essa chave no namespace legado. O erro `send_legacy_action_exists` não autoriza reenvio, troca de chave ou cópia de conteúdo. A consulta usa a operação original, sem iniciar outra escrita. A [ordem de publicação](DEPLOY.md#publicação-da-ferramenta-unificada-de-envio) aplica essa migration antes do corte de catálogo e clientes.
+A migration `0010_unified_send_fence.sql` cria bloqueios atômicos entre os namespaces antigo e novo. Um registro legado ativo impede reservar a mesma chave por `send_message`; uma reserva nova impede um Worker antigo de reservar essa chave no namespace legado. O erro `send_action_conflict` não autoriza reenvio, troca de chave ou cópia de conteúdo. A consulta usa a operação original, sem iniciar outra escrita. A [ordem de publicação](DEPLOY.md#publicação-da-ferramenta-unificada-de-envio) aplica essa migration antes do corte de catálogo e clientes.
+
+A migration `0012_send_action_conflict.sql` atualiza o sinal de erro e os nomes dos triggers para o contrato atual, preservando as duas direções do bloqueio e todos os registros existentes. As migrations anteriores permanecem como histórico; o código de execução não mantém aliases de erro antigos.
 
 ## Inventário do provedor e suporte futuro
 

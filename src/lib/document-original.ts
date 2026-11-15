@@ -8,7 +8,7 @@ import { withPdfDownload } from './pdf-policy';
 export async function getMessageDocumentOriginal(client: EvolutionGoClient, env: Pick<Env, 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, parentSignal: AbortSignal) {
   try {
     return await withPdfDownload(client, env, messageId, parentSignal,
-      kind => new DocumentReadingError(kind === 'cancel' ? 'request_cancelled' : 'wapilot_timeout', kind === 'cancel' ? 499 : 504, kind === 'cancel' ? 'WaPilot document download was cancelled.' : `WaPilot stopped waiting for the PDF after ${DOCUMENT_READING_TIMEOUT_MS} ms (WaPilot timeout).`),
+      kind => new DocumentReadingError(kind === 'cancel' ? 'request_cancelled' : 'request_deadline_exceeded', kind === 'cancel' ? 499 : 504, kind === 'cancel' ? 'WaPilot document download was cancelled.' : `WaPilot stopped waiting for the PDF after ${DOCUMENT_READING_TIMEOUT_MS} ms (WaPilot timeout).`),
       async (blob, signal, expiresAt) => {
         const bytes = await blob.arrayBuffer();
         checkPdfDeadline(signal, expiresAt);

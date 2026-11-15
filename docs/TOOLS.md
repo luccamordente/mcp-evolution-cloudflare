@@ -29,18 +29,43 @@ Não há ferramentas separadas de status, galeria, respostas ou mídia. A UI de 
 
 Sem `encodingFormat`, `get_message` devolve `connectionId`, `messageId` e `message`: texto integral, `status` quando informado pelo provedor, conteúdo nativo validado e metadados de anexos. URLs privadas e bytes de anexos não são retornados nesse modo. `status` preserva o valor retido (`Sent`, `Delivered`, `Read`, etc.); ausência do campo não significa falha de entrega. A leitura usa o ID fornecido, inclusive um `customMessageId` conhecido pelo cliente.
 
-| `options.encodingFormat` | Texto | Áudio | Imagem | PDF |
-| --- | --- | --- | --- | --- |
-| omitido | metadados e texto | metadados | metadados | metadados |
-| `text/plain` | texto | transcrição | erro | extração textual sem OCR |
-| `image/*` | erro | erro | imagem MCP nativa | páginas PNG nativas |
-| `application/pdf` | erro | erro | erro | recurso binário MCP incorporado |
+| Pedido | Resultado |
+| --- | --- |
+| `encodingFormat` omitido ou `application/json` | JSON da mensagem, com texto, status e metadados disponíveis; sem download |
+| `include: ["attachments"]` | Representações JSON dos anexos e links temporários para baixar os originais |
+| `include: ["transcript"]` | Campo `transcript` com transcrição do áudio |
+| `include: ["document-text"]` | Campo `documentText` com texto/Markdown do PDF, sem OCR |
+| `encodingFormat: "image/*"` | Imagem MCP nativa ou páginas de PDF renderizadas |
+| `encodingFormat: "application/pdf"` | PDF original como recurso binário incorporado MCP |
+| MIME original ou `encodingFormat: "application/octet-stream"` | Anexo original como recurso binário incorporado MCP |
+
+`encodingFormat` escolhe a representação da resposta da mensagem. Atualmente os formatos binários contêm o anexo selecionado, sem incorporar texto ou outros dados da mensagem nos bytes. Os metadados continuam no JSON que acompanha o recurso. `text/plain` deixou de acionar transcrição/extração: ele só recupera um anexo original com esse MIME. Texto de mensagens permanece em `message.text` no JSON.
+
+`attachmentIndex` seleciona um anexo para retorno binário, começando em 0 (padrão: primeiro). Obtenha os índices por `include: ["attachments"]`. Essa seleção exige um formato de arquivo original; não se aplica a JSON nem à renderização `image/*`. Um MIME específico precisa corresponder ao anexo; `application/octet-stream` aceita qualquer MIME original. A resposta binária anuncia o MIME real. Não há conversão genérica entre formatos.
+
+### Anexos com links temporários
+
+`search_messages` também aceita `options.encodingFormat: "application/json"` e `options.include: ["attachments"]`, com a mesma representação de anexos de `get_message`. A busca não transcreve nem extrai PDFs em lote. Para processar conteúdo, selecione uma mensagem e use `get_message`.
+
+Cada anexo inclui `index`, `mimeType` e os metadados disponíveis, como `fileName`, `fileSize`, duração, dimensões e quantidade de páginas. Campos ausentes são desconhecidos. `downloadAvailable: true` acompanha `downloadUrl` e `expiresAt`; `false` informa que não foi possível emitir um link, por ausência de mídia recuperável, configuração pública ou origem aprovada. Pedir links não baixa os arquivos nem executa IA.
+
+Os links WaPilot expiram em 15 minutos, são credenciais de acesso ao anexo e podem ser usados por quem os receber. Não exponha os links além do destinatário autorizado. Eles não contêm URL privada nem credenciais da conexão. Após expirar, consulte a mensagem novamente. O download depende da retenção e disponibilidade atuais e pode falhar mesmo com um link ainda válido. O cliente precisa suportar arquivos para entregá-los ao usuário.
+
+Exemplos:
+
+```json
+{"messageId":"message-id","options":{"encodingFormat":"application/json","include":["attachments"]}}
+{"options":{"conversationId":"group@g.us","include":["attachments"],"limit":10}}
+{"messageId":"audio-id","options":{"include":["transcript"]}}
+{"messageId":"pdf-id","options":{"include":["document-text","attachments"]}}
+{"messageId":"video-id","options":{"encodingFormat":"video/mp4","attachmentIndex":0}}
+```
 
 Vídeo e figurinha não habilitam conversão textual. Formatos incompatíveis retornam `incompatible_encoding_format`, com MIME e formatos disponíveis. PDF textual não comprova cobertura visual; páginas sem texto não são necessariamente vazias. A transcrição pode levar cinco minutos (cliente: seis minutos); PDF requer até 90 segundos no cliente. Não repita processamento automaticamente.
 
 Para renderizar PDF, use `page` (posição física a partir de 1, padrão 1) ou `pages` (até três posições distintas), `preset: preview | reading | detail` (640, 1600 ou 2400 pixels na maior dimensão) e `crop: {x,y,width,height}` normalizado. O recorte precisa ficar dentro da página e exige uma única página. O resultado identifica páginas entregues e falhas; entrega não comprova que o agente examinou as imagens. O cliente deve consumir os blocos nativos antes de citar evidência visual. O PDF original exige um cliente capaz de receber recursos binários; a limpeza de arquivos temporários pertence ao cliente.
 
-`options.include` aceita:
+`options.include` aceita, além de `attachments`, `transcript` e `document-text`:
 
 - `metadata`: inspeção de PDF com páginas, dimensões, rótulos, bookmarks e trechos de texto. `limit` entre 1 e 5 (padrão 5), `cursor` e `bookmarkCursor` continuam a inspeção. Outros tipos retornam `incompatible_include`.
 - `poll-responses`: votos de enquete via relação autorizada `votes`.
@@ -92,3 +117,61 @@ O contrato de `data` de `message.received` exige `connectionId`, `conversationId
 Somente mensagens live recebidas depois da ativação podem gerar entrega; histórico, mensagens próprias, direção desconhecida, recibos e protocolos são ignorados. Filtros e autorização são conferidos antes de guardar conteúdo e antes de cada envio. Cancelamento, revogação, desativação, remoção da conexão e expiração impedem novas tentativas, sem promessa de cancelar uma requisição já em voo. Nenhuma tentativa começa depois de uma hora do recebimento. O corpo é removido após aceite, vencimento ou invalidação; somente IDs e resultado operacional ficam por até 24 horas. A deduplicação por identificadores também dura 24 horas; não há replay nem deduplicação ilimitada de retransmissões tardias.
 
 O WaPilot faz até seis tentativas dentro dessa hora, com intervalos de 1, 2, 4, 8 e 15 minutos para `408`, `429`, `5xx`, timeout e indisponibilidade transitória. `410`, `413`, redirects e outras falhas permanentes encerram a entrega. Reinício ou recuperação não ampliam prazo nem reiniciam o orçamento. Uma falha local depois do aceite HTTP pode repetir o mesmo `eventId` e corpo; o cliente deve reconhecer duplicatas. O timestamp e a assinatura HTTP são regenerados em cada tentativa, respeitando a janela fixa de rotação do segredo.
+
+## Erros e recuperação pelo agente
+
+Erros das ferramentas retornam `isError: true` e `data.error`. O erro contém `code`, `status`, `operation`, `message`, `retryable`, `hint` e `recovery`. Os códigos públicos descrevem falhas do serviço, sem nomes de implementação nem aliases anteriores. `hint` é a versão textual das instruções de `recovery`.
+
+`isError`, `structuredContent` e `content` fazem parte do resultado padrão de ferramenta MCP. O objeto `data.error` e sua política `recovery` são o contrato de aplicação do WaPilot. O cliente recebe `structuredContent.data.error` e também um bloco `content` de texto com o mesmo JSON serializado. Assim, clientes podem consumir os campos por código ou apresentá-los ao modelo como saída da ferramenta. A política recomenda ações; o servidor não executa a ferramenta indicada nem inicia retries automaticamente.
+
+Uma falha de domínio, como anexo indisponível ou envio não confirmado, permanece no resultado de `tools/call` com `isError: true`, normalmente em uma resposta HTTP 200. `data.error.status` descreve a falha da operação, não o status HTTP do transporte MCP. Falhas do protocolo, como método desconhecido ou envelope inválido, usam o erro JSON-RPC do SDK. Falhas de autenticação de `/mcp` permanecem HTTP 401/403 com o contrato OAuth, fora deste envelope de ferramenta.
+
+`recovery.action` indica a ação recomendada: `correct_arguments`, `select_connection`, `inspect_message`, `retry_read`, `reconcile_send`, `reauthorize`, `contact_operator` ou `stop`. `recovery.tool`, quando presente, indica uma ferramenta atual que pode ajudar; `recovery.steps` explica como montar a próxima chamada. `retryAfterMs` informa a espera mínima sugerida para uma leitura transitória. `retryable: true` não autoriza loops: a orientação é esperar e repetir a leitura uma vez. Não repita automaticamente transcrição, extração de PDF ou envios.
+
+Erros de validação tratados pelo handler acrescentam `validationIssues: [{path, code, message}]`, com caminhos públicos como `options.limit` e `options.mediaSource`. Erros de tipos ou de estrutura recusados antes do handler podem usar a resposta padrão de validação MCP. Nenhuma resposta devolve valores de credenciais ou corpos privados recebidos de serviços externos.
+
+Exemplo de recuperação (campos principais):
+
+```json
+{
+  "code": "incompatible_encoding_format",
+  "status": 400,
+  "operation": "get_message",
+  "message": "WaPilot cannot return audio/ogg for attachment index 0. Available MIME: video/mp4. Request application/json with include: [\"attachments\"].",
+  "retryable": false,
+  "recovery": {
+    "action": "correct_arguments",
+    "tool": "get_message",
+    "steps": [
+      "Request application/json with include: [\"attachments\"] for the same message to inspect attachment indices and MIME types.",
+      "Use the original MIME or application/octet-stream for a file. Use image/* for supported images or PDF pages. Use include: [\"transcript\"] for audio or [\"document-text\"] for PDF text."
+    ]
+  }
+}
+```
+
+| Falha | Próxima ação |
+| --- | --- |
+| Conexão ausente ou padrão ambíguo | `search_connections`; selecionar um UUID explícito |
+| Autorização para envio ausente | Reautorizar o cliente com `mcp:write` |
+| Mensagem ausente | Buscar na conversa e conexão corretas; ausência é inconclusiva |
+| Include ou formato incompatível | Inspecionar JSON e metadados, corrigir o pedido |
+| PDF sem texto ou extração indisponível | Inspeção limitada, páginas como imagens ou arquivo original |
+| Transcrição indisponível ou sem fala reconhecida | Recuperar áudio original, usar uma capacidade disponível ou pedir esclarecimento |
+| Arquivo grande demais | Obter arquivo menor; recortar páginas não reduz o download do PDF original |
+| Link expirado ou adulterado | Gerar outro com `get_message` e `include: ["attachments"]` |
+| Fonte do anexo ausente ou recusada | Pedir outra cópia ou reparo de acesso ao operador; novo link não recria o arquivo |
+| Leitura transitória | Esperar pelo menos 5 segundos e repetir uma vez |
+| Envio pendente ou desconhecido | Consultar `get_message` por ID ou chave; nunca trocar a chave para contornar a incerteza |
+
+### Resultados parciais
+
+`get_message` preserva texto, metadados e partes concluídas quando um include ou formato solicitado falha. A resposta tem `partial: true`, `errors: [{part, error}]`, `error` com a primeira falha e `isError: true`. O agente pode usar os dados presentes e tentar somente a alternativa indicada para a parte indisponível. Não precisa repetir etapas caras já concluídas. Páginas PDF válidas são preservadas; falhas de outras páginas continuam explícitas e não contam como cobertura visual. Cancelamento impede o início de novas etapas.
+
+`search_connections` também preserva registros e status obtidos se uma consulta live falhar. O registro afetado tem `statusUnavailable: true`; isso não significa que a conexão esteja desconectada. Buscas sem resultados retornam uma orientação para ajustar filtros, paginação ou conexão, sem transformar vazio em erro.
+
+Anexos com `downloadAvailable: false` incluem um `error` próprio com código e recuperação. `get_message` e `search_messages` também marcam a resposta como parcial e identificam o anexo em `errors`; os metadados e os demais resultados permanecem disponíveis.
+
+### Estado de envio em falhas
+
+Falhas de envio acrescentam `dispatchState`. `not_started` confirma que a tentativa atual parou antes do despacho; não esclarece tentativas anteriores. `unconfirmed` indica que a ação atual ou uma anterior relacionada à mesma chave pode ter sido despachada. Preserve a conexão, a chave e os argumentos para reconciliação. Se não houver chave nem ID conhecido, inspecione a conversa por `search_messages` e reconcilie com o usuário; histórico parcial não autoriza um reenvio automático.

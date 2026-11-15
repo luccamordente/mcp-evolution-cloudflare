@@ -7,7 +7,7 @@ const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
 export class AudioTranscriptionError extends Error {
   constructor(
-    public readonly code: 'audio_unavailable' | 'transcription_unavailable' | 'transcription_failed' | 'no_speech' | 'media_too_large' | 'wapilot_timeout' | 'upstream_timeout' | 'request_cancelled',
+    public readonly code: 'audio_unavailable' | 'transcription_unavailable' | 'transcription_failed' | 'no_speech' | 'media_too_large' | 'request_deadline_exceeded' | 'dependency_timeout' | 'request_cancelled',
     public readonly status: number,
     message: string,
   ) { super(message); }
@@ -32,7 +32,7 @@ export async function transcribeMessageAudio(client: EvolutionGoClient, env: Pic
     return text;
   } catch (error) {
     if (parentSignal.aborted) throw new AudioTranscriptionError('request_cancelled', 499, 'WaPilot audio transcription was cancelled.');
-    if (deadline.signal.aborted) throw new AudioTranscriptionError('wapilot_timeout', 504, `WaPilot stopped waiting for audio transcription after ${AUDIO_TRANSCRIPTION_TIMEOUT_MS} ms (WaPilot timeout).`);
+    if (deadline.signal.aborted) throw new AudioTranscriptionError('request_deadline_exceeded', 504, `WaPilot stopped waiting for audio transcription after ${AUDIO_TRANSCRIPTION_TIMEOUT_MS} ms (WaPilot timeout).`);
     if (error instanceof AudioTranscriptionError) throw error;
     throw new AudioTranscriptionError('transcription_failed', 502, 'WaPilot could not complete audio transcription.');
   } finally {

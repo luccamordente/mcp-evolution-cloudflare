@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { JSDOM } from 'jsdom';
+import { describe, expect, it, vi } from 'vitest';
 import { connectionsPage } from '../src/ui/connections';
 
 describe('connections workspace page', () => {
@@ -40,6 +41,55 @@ describe('connections workspace page', () => {
     expect(html).not.toContain('class="notice"');
     expect(html).not.toContain('Atualizar estado');
     expect(html).not.toContain('__USER_EMAIL__');
+  });
+});
+
+describe('continuing an existing connection awaiting QR', () => {
+  const qr = 'data:image/png;base64,c3ludGhldGljLXFy';
+
+  function workspace(connectionQr?: string, hash = 'dashboard') {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/connections/data') return Response.json({ connections: [
+        { id: 'one', friendlyName: 'Fixture', state: 'qr', isDefault: true, qr: connectionQr, qrExpiresIn: 17 },
+      ] });
+      if (path === '/connections/authorizations') return Response.json({ authorizations: [] });
+      if (path === '/connections/api/connections/one/qr' && init?.method === 'POST') return Response.json({ qr, expiresIn: 17 });
+      if (path === '/connections/api/connections/one/status') return Response.json({ state: 'qr' });
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${path}`);
+    });
+    const dom = new JSDOM(connectionsPage({ id: 'user-1', email: 'user@example.test', claims: {} }), {
+      url: `https://example.test/connections#${hash}`,
+      runScripts: 'dangerously',
+      beforeParse(window) { window.fetch = fetcher as typeof window.fetch; },
+    });
+    return { dom, fetcher };
+  }
+
+  it.each(['dashboard', 'onboarding'])('does not start pairing on initial #%s loading', async (hash) => {
+    const { dom, fetcher } = workspace(undefined, hash);
+    try {
+      await vi.waitFor(() => expect(dom.window.document.querySelector('#context-label')?.textContent).toBe('Fixture'));
+      expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+      expect((dom.window.document.querySelector('#qr-image') as HTMLImageElement).hidden).toBe(true);
+    } finally { dom.window.close(); }
+  });
+
+  describe.each(['[data-open="one"]', '[data-select="one"]'])('via %s', (selector) => {
+    it.each([false, true])('shows the QR without an extra reload (QR already available: %s)', async (hasQr) => {
+      const { dom, fetcher } = workspace(hasQr ? qr : undefined);
+      try {
+        await vi.waitFor(() => expect(dom.window.document.querySelector(selector)).not.toBeNull());
+        (dom.window.document.querySelector(selector) as HTMLElement).click();
+        const image = dom.window.document.querySelector('#qr-image') as HTMLImageElement;
+        await vi.waitFor(() => expect(image.hidden).toBe(false));
+        expect(image.src).toBe(qr);
+        expect((dom.window.document.querySelector('#qr-placeholder') as HTMLElement).hidden).toBe(true);
+        expect(dom.window.document.querySelector('#countdown')?.textContent).toBe('00:17');
+        const mutations = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+        expect(mutations.map(([path]) => path)).toEqual(hasQr ? [] : ['/connections/api/connections/one/qr']);
+      } finally { dom.window.close(); }
+    });
   });
 });
 

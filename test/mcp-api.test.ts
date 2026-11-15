@@ -166,6 +166,18 @@ it.each([
   expect(JSON.stringify(body)).not.toMatch(/private-response|storage.example.test|synthetic-token/);
 });
 
+it('refuses previously issued attachment links after the account is disabled', async () => {
+  retainAttachments();
+  const result = await call('get_message', { messageId: 'm1', options: { include: ['attachments'] } });
+  const link = attachmentsResult.parse(result.structuredContent?.data).attachments[0].downloadUrl;
+  await local.db.prepare("UPDATE users SET status = 'disabled' WHERE email = ?1").bind(user.email).run();
+  fetcher.mockClear();
+  const response = await app.request(link, {}, env);
+  expect(response.status).toBe(403);
+  expect(await response.json()).toMatchObject({ error: { code: 'attachment_not_found' } });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
 it('reports the reason for a missing file source without losing the message', async () => {
   retainAttachments();
   resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'video/mp4', body: { text: 'caption', media: { fileName: 'missing.mp4', encodingFormat: 'video/mp4' } } } };

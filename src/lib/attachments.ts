@@ -105,6 +105,8 @@ export async function serveAttachment(request: Request, env: Env, token: string)
     if (capability.expiresAt > Date.now() + LINK_TTL_MS) throw new Error();
   } catch (error) { return Response.json({ error: attachmentFailure(error instanceof AttachmentError ? error : new AttachmentError('attachment_link_invalid', 401, 'WaPilot attachment link is invalid or has been changed.'), 'download_attachment') }, { status: 401, headers }); }
   try {
+    const active = await env.DB.prepare("SELECT id FROM users WHERE id = ?1 AND status = 'active'").bind(capability.userId).first();
+    if (!active) throw new AttachmentError('attachment_not_found', 403, 'WaPilot cannot authorize this attachment download.');
     const connection = await getConnection(env.DB, capability.userId, capability.connectionId);
     if (!connection) throw new AttachmentError('attachment_not_found', 404, 'WaPilot cannot find the connection or retained message for this attachment.');
     const client = new EvolutionGoClient({ baseUrl: env.EVOLUTION_BASE_URL, instanceId: connection.instanceId, instanceToken: await revealConnectionToken(env.DB, env.TOKEN_ENCRYPTION_KEY, connection) });

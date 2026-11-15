@@ -411,8 +411,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
         throw new MessageReadError('message_unavailable', status, `WaPilot could not retrieve the requested message (HTTP ${status}).`);
       }
       if (!message) throw new MessageReadError('message_not_found', 404, 'WaPilot could not find this message in retained history.');
-      const mime = (message.media?.mimeType ?? message.type ?? 'text/plain').split(';')[0].toLowerCase();
-      if (!/^[a-z0-9!#$&^_.+-]+(?:\/[a-z0-9!#$&^_.+-]+)?$/.test(mime)) throw new MessageReadError('message_unavailable', 502, 'WaPilot could not read the message because its media type is invalid.');
+      const mime = publicMessageType(message.media?.mimeType ?? message.type ?? 'text/plain');
       const pdf = mime === 'application/pdf';
       const includes = o.include ?? [];
       if (message.contentUnavailable || (message.text === undefined && !message.media && !message.medias?.length && !hasNativeContent(message) && message.update?.state !== 'unsupported')) throw new MessageReadError('message_content_unavailable', 404, 'WaPilot found the message but its content is unavailable.', message.messageType, message.contentUnavailableReason, message.contentDiagnostic);
@@ -584,11 +583,18 @@ export function withSource(message: Message, ownNumber?: string): Message {
   return message;
 }
 
+function publicMessageType(value: string) {
+  const type = value.split(';')[0].trim().toLowerCase();
+  return /^[a-z0-9!#$&^_.+-]+(?:\/[a-z0-9!#$&^_.+-]+)?$/.test(type) ? type : 'application/octet-stream';
+}
+
 function messageForClient(message: Message, ownNumber?: string) {
   const { media, medias, ...metadata } = withSource(message, ownNumber);
   return {
     ...metadata,
-    ...(media ? { media: { mimeType: media.mimeType, fileName: media.fileName, size: media.size, mediaId: media.mediaId } } : {}),
-    ...(medias ? { medias: medias.map(({ url: _url, content, ...item }) => ({ ...item, ...(item.encodingFormat === 'text/vcard' && typeof content === 'string' ? { content } : {}) })) } : {}),
+    ...(metadata.type ? { type: publicMessageType(metadata.type) } : {}),
+    ...(metadata.messageType ? { messageType: publicMessageType(metadata.messageType) } : {}),
+    ...(media ? { media: { mimeType: media.mimeType ? publicMessageType(media.mimeType) : undefined, fileName: media.fileName, size: media.size, mediaId: media.mediaId } } : {}),
+    ...(medias ? { medias: medias.map(({ url: _url, content, ...item }) => ({ ...item, ...(item.encodingFormat ? { encodingFormat: publicMessageType(item.encodingFormat) } : {}), ...(item.encodingFormat === 'text/vcard' && typeof content === 'string' ? { content } : {}) })) } : {}),
   };
 }

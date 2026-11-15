@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest';
 import { z } from 'zod';
 import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
@@ -435,10 +436,23 @@ it('resolves quoted messages on the same connection and redacts attachment URLs'
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
+it('keeps complete message text when its provider MIME is malformed', async () => {
+  resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'private-mime https://private.invalid/file?token=secret-value', body: { text: 'hello' } } };
+  const result = await call('get_message', { messageId: 'm1' });
+  expect(result.isError).not.toBe(true);
+  expect(result).toMatchObject({ structuredContent: { data: { message: { id: 'm1', text: 'hello' } } } });
+  expect(JSON.stringify(result)).not.toMatch(/private-mime|private\.invalid|secret-value/);
+});
+
+it('disables invocation URL logs while retaining sanitized application logs', () => {
+  const config = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
+  expect(config.observability).toMatchObject({ enabled: true, redact_query_string: true, logs: { enabled: true, invocation_logs: false }, traces: { enabled: false } });
+});
+
 it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { include: ['event-responses'] }])('keeps untrusted MIME out of option errors and audit records: %j', async options => {
   resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'private-mime https://private.invalid/file?token=secret-value', body: { text: 'hello' } } };
   const result = await call('get_message', { messageId: 'm1', options });
-  expect(result.isError).toBe(true);
+  expect(result).toMatchObject({ isError: true, structuredContent: { data: { partial: true, message: { id: 'm1', text: 'hello' }, errors: expect.any(Array) } } });
   const audit = await local.db.prepare("SELECT metadata_json FROM audit_log WHERE operation = 'get_message' AND outcome = 'failure'").all();
   expect(audit.results).toHaveLength(1);
   for (const output of [JSON.stringify(result), JSON.stringify(audit.results)]) {

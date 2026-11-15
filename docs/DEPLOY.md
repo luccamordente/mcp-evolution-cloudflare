@@ -357,3 +357,8 @@ Verifique em homologação com um anexo sintético: obtenha o link via `get_mess
 ## Códigos de erro e bloqueio de ações
 
 Antes de publicar o Worker com os códigos expressivos, aplique `0012_send_action_conflict.sql` usando o fluxo autorizado de migrations D1. Ela substitui os dois triggers de reserva por versões que sinalizam `send_action_conflict`, mantendo os bloqueios de deduplicação em ambas as direções e os registros existentes. Não reescreva `0010`, que já pode estar aplicada. Os testes locais aplicam toda a sequência de migrations e conferem os conflitos com a nova sinalização. A migration remota e a publicação não são executadas pela checagem local.
+
+
+### Logs de links temporários de anexos
+
+O contrato `/attachments/:token` contém uma capacidade de 15 minutos no path. Preserve `observability.enabled=true`, `redact_query_string=true` e logs sanitizados da aplicação (`logs.enabled=true`), com `logs.invocation_logs=false` e `traces.enabled=false`: logs automáticos de invocação podem registrar a URL completa, e a redação de query não protege o path. Confira esses campos no read-back da nova versão completa antes da promoção. A configuração no fonte não comprova alteração live.

@@ -1,6 +1,6 @@
 # Deploy e configuração
 
-O [preflight de 15/11/2026 UTC](qa/clerk-rollout-preflight-2026-11-15.md) atualiza o retorno corrente para `94ee520f-a4af-4a0c-8be7-8bf7f5cc3f6c`, fonte `33eefb3…`, com cleanup e seis ferramentas, Access em 100%, redaction habilitada e Builds desabilitado. As versões anteriores abaixo são checkpoints históricos. A promoção Clerk exige artefato reconciliado e read-back; manter Builds desabilitado.
+O [preflight de 15/11/2026 UTC](qa/clerk-rollout-preflight-2026-11-15.md#novo-preflight-após-publicação-paralela) registra a publicação paralela `f5c7ee20-6c31-481b-b24a-fcbfdcda420c` em 100%, fonte `97d2554…`, com seis ferramentas, resultados parciais, recuperação e anexos. O retorno `94ee520f…` e as versões anteriores abaixo são checkpoints históricos. A reconciliação deve preservar esse contrato publicado junto com as barreiras Clerk. A promoção Clerk exige artefato reconciliado e read-back; manter Builds desabilitado.
 
 A retomada de 14/11 autorizou publicação Clerk, abertura de PR e merge no `main`, com aceitação de Heitor adiada explicitamente. Consulte [a decisão e os limites](qa/clerk-identity-linking-2026-11-14.md#autorização-posterior-para-corte-e-integração): preservar a conta ativa sem vínculo, negar navegador até o vínculo verificado e manter as verificações D1 para grants legados. As versões anteriores neste documento são checkpoints históricos; novo read-back e reconciliação com o cleanup do `main` são necessários antes da promoção. Este registro não afirma publicação ou homologação executadas.
 
@@ -153,7 +153,7 @@ O teste com um cliente real MCP e qualquer envio WhatsApp dependem da autentica�
 
 ## Configuração da leitura de PDFs
 
-`get_message` com `options.encodingFormat: "text/plain"` em PDF usa o binding `AI` já declarado no `wrangler.jsonc`, pelo método `toMarkdown`, sem nova chave ou serviço de OCR. Configure `DOCUMENT_STORAGE_ORIGINS` com origens HTTPS exatas aprovadas para PDFs; essa allowlist é independente das de áudio e imagem e exclui a origem de `EVOLUTION_BASE_URL`. Sem configuração válida, o download falha fechado. A alteração de configuração só entra em produção após publicação autorizada.
+`get_message` com `options.include: ["document-text"]` em PDF usa o binding `AI` já declarado no `wrangler.jsonc`, pelo método `toMarkdown`, sem nova chave ou serviço de OCR. Configure `DOCUMENT_STORAGE_ORIGINS` com origens HTTPS exatas aprovadas para PDFs; essa allowlist é independente das de áudio e imagem e exclui a origem de `EVOLUTION_BASE_URL`. Sem configuração válida, o download falha fechado. A alteração de configuração só entra em produção após publicação autorizada.
 
 Atualize o catálogo do cliente após publicar e permita pelo menos **90.000 ms** por chamada. O WaPilot espera até 60.000 ms, aceita até 8 MiB ou `MAX_MEDIA_BYTES` menor e devolve até 200.000 caracteres, sem truncamento. O binding não garante cancelamento remoto de conversão em andamento; evite repetir automaticamente uma chamada interrompida. PDF e texto não são persistidos pelo WaPilot.
 
@@ -161,7 +161,7 @@ A entrega não inclui OCR. Valide separadamente PDFs textuais, digitalizados e m
 
 ## Configuração da transcrição de áudio
 
-O `wrangler.jsonc` declara o binding `ai: { binding: "AI" }` para transcrição de áudio via `get_message` com `options.encodingFormat: "text/plain"` no MCP HTTP. A inferência usa o modelo `@cf/openai/whisper-large-v3-turbo` diretamente pelo binding, sem token REST adicional ou AI Gateway. Cada chamada gera consumo de Workers AI; não há cache nem retry de inferência. O binding só passa a existir no Worker publicado após um deploy autorizado; o perfil stdio não o utiliza nem habilita bindings remotos.
+O `wrangler.jsonc` declara o binding `ai: { binding: "AI" }` para transcrição de áudio via `get_message` com `options.include: ["transcript"]` no MCP HTTP. A inferência usa o modelo `@cf/openai/whisper-large-v3-turbo` diretamente pelo binding, sem token REST adicional ou AI Gateway. Cada chamada gera consumo de Workers AI; não há cache nem retry de inferência. O binding só passa a existir no Worker publicado após um deploy autorizado; o perfil stdio não o utiliza nem habilita bindings remotos.
 
 Configure `AUDIO_STORAGE_ORIGINS` com as origens HTTPS exatas aprovadas para o download de áudios, separadas por vírgula. Use somente origens sem curingas, caminhos, queries ou credenciais; a origem de `EVOLUTION_BASE_URL` é excluída mesmo se cadastrada. Esta allowlist é independente de `IMAGE_STORAGE_ORIGINS` e não concede permissão de download de imagens. A ferramenta exige mensagem e áudio retidos, aplica até 8 MiB (ou `MAX_MEDIA_BYTES`, se menor) e falha explicitamente quando o arquivo não está disponível.
 
@@ -345,3 +345,20 @@ A revisão desde `084d530` identificou a galeria ainda presente no código/build
 O stdio novamente passa a allowlist de envio configurada ao servidor. Sua fixture percorre um envio sintético de figurinha por uma origem aprovada, além das leituras e reinícios já existentes; não há download de mídia pública real ou envio WhatsApp nessa prova. A orientação de recuperação de assinaturas usa `search_messages` com os campos de conexão, conversa e limite dentro de `options`.
 
 A limpeza revisada foi publicada no commit `33eefb3d38c7a4675849903e9545dba2361cd4d2`, versão `94ee520f-a4af-4a0c-8be7-8bf7f5cc3f6c`, deployment `47d5b0a0-a86e-4605-a0b3-09a7727c6704`, confirmado com 100% do tráfego. Passaram `npm run check` (736 testes, 13 condicionais ignorados) e dry-run com a imagem existente. Runtime e bindings foram comparados à versão ativa anterior e ficaram idênticos; nenhuma migration ou imagem foi alterada. O catálogo permanece com seis ferramentas. Uma consulta OAuth autenticada de contatos com filtro sintético retornou vazio; saúde e metadata retornaram 200 e MCP sem bearer retornou 401 com desafio OAuth. Nenhuma mensagem real foi enviada.
+
+## Links temporários de anexos
+
+O download de anexos não exige binding, migration ou segredo novo. Reutiliza `TOKEN_ENCRYPTION_KEY`, o cadastro D1 e as allowlists existentes de leitura. Imagens usam `IMAGE_STORAGE_ORIGINS`, áudio usa `AUDIO_STORAGE_ORIGINS` e os demais tipos usam `DOCUMENT_STORAGE_ORIGINS`. Configure origens HTTPS exatas somente quando aprovadas pelo operador. `MCP_PUBLIC_URL` precisa apontar para o domínio HTTPS público que serve o Worker.
+
+A rota `GET /attachments/:token` deve chegar ao Worker sem login Access: o token autenticado e cifrado é a autorização temporária exclusiva para aquele anexo. Isso não altera a proteção Access da UI nem OAuth de `/mcp`. Os links duram 15 minutos, não são invalidados imediatamente pela revogação de um grant OAuth e devem ser tratados como credenciais temporárias. Evite registrar URLs completas dessa rota em ferramentas de observabilidade externas.
+
+Verifique em homologação com um anexo sintético: obtenha o link via `get_message` ou `search_messages` com `include: ["attachments"]`; confira bytes, MIME, nome e `Cache-Control: no-store`; um token adulterado ou expirado deve retornar 401. O retorno por MIME original é um recurso binário MCP incorporado e depende das capacidades do cliente. Os testes locais usam D1, HTTP e storage simulados; não comprovam disponibilidade de mídia em produção.
+
+## Códigos de erro e bloqueio de ações
+
+Antes de publicar o Worker com os códigos expressivos, aplique `0012_send_action_conflict.sql` usando o fluxo autorizado de migrations D1. Ela substitui os dois triggers de reserva por versões que sinalizam `send_action_conflict`, mantendo os bloqueios de deduplicação em ambas as direções e os registros existentes. Não reescreva `0010`, que já pode estar aplicada. Os testes locais aplicam toda a sequência de migrations e conferem os conflitos com a nova sinalização. A migration remota e a publicação não são executadas pela checagem local.
+
+
+### Logs de links temporários de anexos
+
+O contrato `/attachments/:token` contém uma capacidade de 15 minutos no path. Preserve `observability.enabled=true`, `redact_query_string=true` e logs sanitizados da aplicação (`logs.enabled=true`), com `logs.invocation_logs=false` e `traces.enabled=false`: logs automáticos de invocação podem registrar a URL completa, e a redação de query não protege o path. Confira esses campos no read-back da nova versão completa antes da promoção. A configuração no fonte não comprova alteração live.

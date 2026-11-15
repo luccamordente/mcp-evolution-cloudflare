@@ -13,6 +13,7 @@ import { buildAdminSnapshot, isAdminOperator, type AdminOAuthReader } from './li
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
 import { activateInvitedUser, inviteUser, InvitationError } from './lib/invitations';
 import { z } from 'zod';
+import { serveAttachment } from './lib/attachments';
 
 export type ProvisionInput = { ownerEmail: string; name: string; instanceId: string; phoneNumber?: string };
 type ProvisionRequest = { instances?: Array<{ ownerEmail?: string; name?: string; instanceId?: string; phoneNumber?: string }> };
@@ -21,6 +22,7 @@ const app = new Hono<{ Bindings: Env }>();
 export const MCP_PROTOCOL_VERSION = '2026-07-28' as const;
 
 app.get('/healthz', (c) => c.json({ ok: true, service: 'mcp-evolution-cloudflare', protocol: MCP_PROTOCOL_VERSION }));
+app.get('/attachments/:token', c => serveAttachment(c.req.raw, c.env, c.req.param('token')));
 
 async function requireUiAuth(c: any): Promise<import('./types').AuthenticatedUser | Response> {
   c.header('Cache-Control', 'no-store');

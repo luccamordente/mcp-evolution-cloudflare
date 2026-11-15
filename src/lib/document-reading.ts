@@ -12,16 +12,20 @@ export class DocumentReadingError extends Error {
   ) { super(message); }
 }
 
-export async function readMessageDocument(client: EvolutionGoClient, env: Pick<Env, 'AI' | 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, parentSignal: AbortSignal): Promise<string> {
+export async function readMessageDocument(client: EvolutionGoClient, env: Pick<Env, 'AI' | 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, parentSignal: AbortSignal, expiresAt = Date.now() + DOCUMENT_READING_TIMEOUT_MS): Promise<string> {
   if (!env.AI?.toMarkdown) throw new DocumentReadingError('document_reading_unavailable', 503, 'WaPilot document reading is unavailable.');
   const deadline = new AbortController();
-  const timeout = setTimeout(() => deadline.abort(), DOCUMENT_READING_TIMEOUT_MS);
+  const timeout = setTimeout(() => deadline.abort(), Math.max(0, expiresAt - Date.now()));
   const signal = AbortSignal.any([parentSignal, deadline.signal]);
   let onAbort: (() => void) | undefined;
+  const checkDeadline = () => {
+    if (Date.now() >= expiresAt) deadline.abort();
+    signal.throwIfAborted();
+  };
   try {
-    signal.throwIfAborted();
+    checkDeadline();
     const blob = await downloadPdf(client, env, messageId, signal);
-    signal.throwIfAborted();
+    checkDeadline();
     const aborted = new Promise<never>((_, reject) => {
       onAbort = () => reject(signal.reason);
       signal.addEventListener('abort', onAbort, { once: true });
@@ -31,7 +35,7 @@ export async function readMessageDocument(client: EvolutionGoClient, env: Pick<E
       env.AI.toMarkdown({ name: 'document.pdf', blob }, { conversionOptions: { pdf: { metadata: false, images: { convert: false } } } }),
       aborted,
     ]);
-    signal.throwIfAborted();
+    checkDeadline();
     if (!result || typeof result !== 'object' || !('format' in result) || (result.format !== 'markdown' && result.format !== 'text') || !('data' in result) || typeof result.data !== 'string') {
       throw new DocumentReadingError('document_conversion_failed', 502, 'WaPilot could not extract text from this PDF.');
     }

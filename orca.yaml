@@ -1,2 +1,2 @@
 scripts:
-  setup: node "$ORCA_WORKTREE_PATH/scripts/worktree-setup.mjs"
+  setup: node "$ORCA_WORKTREE_PATH/scripts/worktree-setup.mjs" .env.stdio .env.clerk

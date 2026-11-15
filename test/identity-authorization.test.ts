@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { eventRuntime } from './helpers/mcp-events-runtime';
-import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { readFile } from 'node:fs/promises';
+import { unstable_splitSqlQuery } from 'wrangler';
 
 let fixture: Awaited<ReturnType<typeof eventRuntime>>;
 beforeAll(async () => { fixture = await eventRuntime(async () => { throw new Error('Unauthorized external action'); }); });
@@ -10,7 +11,7 @@ it('blocks an already issued MCP token as soon as the D1 account is disabled', a
   const account = await fixture.issue({ email: 'disabled@example.test', scope: 'mcp:read mcp:write', legacy: '1' });
   expect((await fixture.rpc(account.accessToken, 'tools/list')).response.status).toBe(200);
   await fixture.db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(account.userId).run();
-  for (const [method, params] of [['tools/list', {}], ['tools/call', { name: 'list_contacts', arguments: {} }], ['tools/call', { name: 'send_text', arguments: { to: '5511999999999', text: 'Must not send' } }]] as const) {
+  for (const [method, params] of [['tools/list', {}], ['tools/call', { name: 'search_connections', arguments: { options: {} } }], ['tools/call', { name: 'send_message', arguments: { message: { kind: 'text', text: 'Must not send' }, options: { to: '5511999999999' } } }]] as const) {
     const result = await fixture.rpc(account.accessToken, method, params);
     expect(result.response.status).toBe(403);
     expect(JSON.stringify(result.body)).not.toContain(account.accessToken);
@@ -55,24 +56,22 @@ it('fails temporarily without destroying an active grant when D1 is unavailable'
   expect(fixture.logs.join(' ')).not.toContain('do-not-return');
 });
 
-it('requires an existing active D1 account on the Access browser and consent surfaces', async () => {
-  const { publicKey, privateKey } = await generateKeyPair('RS256');
-  const jwk = { ...await exportJWK(publicKey), kid: 'fixture' };
-  const browser = await eventRuntime(async request => {
-    if (new URL(request.url).hostname === 'access.invalid') return Response.json({ keys: [jwk] });
-    throw new Error('Unauthorized external action');
-  }, '9999', { ENVIRONMENT: 'test', ACCESS_ISSUER: 'https://access.invalid', ACCESS_AUDIENCE: 'browser', ACCESS_JWKS_URL: 'https://access.invalid/jwks', ALLOWED_EMAILS: 'luccamordente@gmail.com,missing@example.test' });
+it('adds unique Clerk links without rewriting existing identities, connection defaults or credentials', async () => {
+  const migration = await readFile('migrations/0011_clerk_identity.sql', 'utf8');
+  const legacy = await eventRuntime(async () => { throw new Error('Unauthorized external action'); }, '0010_unified_send_fence.sql');
   try {
-    const token = async (email: string) => new SignJWT({ email }).setProtectedHeader({ alg: 'RS256', kid: 'fixture' }).setSubject('legacy-access-sub').setIssuer('https://access.invalid').setAudience('browser').setIssuedAt().setExpirationTime('5m').sign(privateKey);
-    const active = await token('luccamordente@gmail.com');
-    expect((await browser.fetch('/connections', { headers: { 'cf-access-jwt-assertion': active } })).status).toBe(200);
-    await browser.db.prepare("UPDATE users SET status = 'disabled' WHERE id = 'seed-lucca'").run();
-    for (const path of ['/connections', '/connections/data', '/api/connections', '/admin', '/admin/data', '/authorize']) {
-      expect((await browser.fetch(path, { headers: { 'cf-access-jwt-assertion': active } })).status).toBe(403);
-    }
-    expect((await browser.fetch('/connections', { headers: { 'cf-access-jwt-assertion': await token('missing@example.test') } })).status).toBe(403);
-    expect(await browser.db.prepare("SELECT id FROM users WHERE email = 'missing@example.test'").first()).toBeNull();
-  } finally { await browser.runtime.dispose(); }
+    const account = await legacy.issue({ email: 'legacy@example.test' });
+    const before = await legacy.db.prepare('SELECT * FROM whatsapp_connections WHERE user_id = ? ORDER BY id').bind(account.userId).all();
+    await legacy.db.batch(unstable_splitSqlQuery(migration).map(sql => legacy.db.prepare(sql)));
+    await legacy.db.prepare("UPDATE users SET clerk_user_id = 'user_linked' WHERE id = ?").bind(account.userId).run();
+    expect((await legacy.db.prepare('SELECT * FROM whatsapp_connections WHERE user_id = ? ORDER BY id').bind(account.userId).all()).results).toEqual(before.results);
+    const listed = await legacy.rpc(account.accessToken, 'tools/call', { name: 'search_connections', arguments: {} }, { 'Mcp-Name': 'search_connections' });
+    expect(listed.response.status).toBe(200);
+    expect(listed.body.result.isError).not.toBe(true);
+    expect(listed.body.result.structuredContent.data.items.map((connection: { id: string }) => connection.id).sort()).toEqual([...account.connections].sort());
+    await expect(legacy.db.prepare("UPDATE users SET clerk_user_id = 'user_linked' WHERE id = 'seed-heitor'").run()).rejects.toThrow(/UNIQUE/);
+    expect((await legacy.db.prepare('SELECT id, status, invite_pending_at FROM users WHERE id = ?').bind(account.userId).first())).toMatchObject({ id: account.userId, status: 'active', invite_pending_at: null });
+  } finally { await legacy.runtime.dispose(); }
 });
 
 it('rejects legacy grant props whose canonical email does not match the Provider subject', async () => {

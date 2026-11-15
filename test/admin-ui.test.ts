@@ -6,10 +6,9 @@ const env = {
   DB: {} as D1Database,
   EVOLUTION_BASE_URL: 'https://evolution.invalid',
   TOKEN_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-  ACCESS_JWKS_URL: 'https://access.invalid/certs',
-  ACCESS_ISSUER: 'https://access.invalid',
-  ACCESS_AUDIENCE: 'aud',
-  ALLOWED_EMAILS: 'luccamordente@gmail.com,heitorsalazar@gmail.com',
+  CLERK_PUBLISHABLE_KEY: 'pk_live_' + Buffer.from('clerk.fixture.invalid$').toString('base64'),
+  CLERK_SECRET_KEY: 'sk_live_synthetic',
+  MCP_PUBLIC_URL: 'https://mcp.invalid',
 } as any;
 
 const dashboardDb = {
@@ -62,26 +61,26 @@ describe('admin operational page', () => {
   });
 
   it('protects both administrative surfaces before loading or producing a snapshot', async () => {
-    const page = await app.request('/admin', {}, env);
-    const data = await app.request('/admin/data', {}, env);
-    const bearer = await app.request('/admin', { headers: { authorization: 'Bearer access-token' } }, env);
+    const page = await app.request('https://mcp.invalid/admin', {}, env);
+    const data = await app.request('https://mcp.invalid/admin/data', {}, env);
+    const bearer = await app.request('https://mcp.invalid/admin', { headers: { authorization: 'Bearer access-token' } }, env);
 
     expect(page.status).toBe(401);
     expect(data.status).toBe(401);
     expect(bearer.status).toBe(401);
-    expect((await data.json() as { error: string }).error).toContain('Cloudflare Access');
+    expect((await data.json() as { error: string }).error).toContain('Entre no WaPilot');
   });
 
-  it('gives both operational administrators the same Access-only page and rejects others', async () => {
+  it('gives both operational administrators the same browser-session page and rejects others', async () => {
     for (const email of ['luccamordente@gmail.com', 'heitorsalazar@gmail.com']) {
-      const response = await app.request('/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: email });
+      const response = await app.request('https://mcp.invalid/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: email });
       expect(response.status).toBe(200);
     }
-    const outsider = await app.request('/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'other@example.com' });
+    const outsider = await app.request('https://mcp.invalid/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'other@example.com' });
     expect(outsider.status).toBe(403);
   });
 
-  it('uses the dashboard Access identity for both /connections and /admin', async () => {
+  it('uses the dashboard identity for both /connections and /admin', async () => {
     const sharedAccessEnv = {
       ...env,
       DB: dashboardDb,
@@ -90,7 +89,7 @@ describe('admin operational page', () => {
     };
 
     const dashboard = await app.request('/connections', {}, sharedAccessEnv);
-    const admin = await app.request('/admin', {}, sharedAccessEnv);
+    const admin = await app.request('https://mcp.invalid/admin', {}, sharedAccessEnv);
 
     expect(dashboard.status).toBe(200);
     expect(admin.status).toBe(200);

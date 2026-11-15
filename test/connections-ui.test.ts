@@ -42,3 +42,26 @@ describe('connections workspace page', () => {
     expect(html).not.toContain('__USER_EMAIL__');
   });
 });
+
+it('describes the dashboard according to whether a connection exists', async () => {
+  for (const connections of [[], [{ id: 'one', friendlyName: 'Fixture', state: 'connected', isDefault: true }]]) {
+    const { JSDOM } = await import('jsdom');
+    const html = connectionsPage({ id: 'user-1', email: 'user@example.test', claims: {} });
+    const dom = new JSDOM(html, {
+      url: 'https://example.test/connections#dashboard',
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        window.fetch = async (input) => ({
+          ok: true,
+          json: async () => String(input).includes('/connections/data') ? { connections } : { authorizations: [] },
+        }) as Response;
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    (dom.window.document.querySelector('#back-dashboard') as HTMLElement).click();
+    const title = dom.window.document.querySelector('#dashboard-title')?.textContent;
+    if (connections.length) expect(title).toBe('Seu WhatsApp está pronto para trabalhar.');
+    else expect(title).not.toBe('Seu WhatsApp está pronto para trabalhar.');
+    dom.window.close();
+  }
+});

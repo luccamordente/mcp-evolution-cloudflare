@@ -34,10 +34,11 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await local.dispose(); });
 it('publishes exactly six tools and no gallery resource', async () => {
   expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_contacts', 'search_groups', 'search_messages', 'get_message', 'send_message']);
-  expect(JSON.stringify(await rpc('resources/list'))).not.toContain('image-gallery');
+  const resources = await rpc('resources/list');
+  expect(resources.resources).toEqual([expect.objectContaining({ uri: 'ui://wapilot/send-receipt-v3.html' })]);
 });
 it('returns the latest retained delivery status without downloading media', async () => {
-  expect(await call('get_message', { messageId: 'm1', options: {  } })).toMatchObject({ structuredContent: { data: { connectionId, message: { status: 'Read', text: 'hello' } } } });
+  expect(await call('get_message', { messageId: 'm1' })).toMatchObject({ structuredContent: { data: { connectionId, message: { status: 'Read', text: 'hello' } } } });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 it.each([
@@ -66,6 +67,7 @@ it('maps compact send inputs to existing Status operations', () => {
   expect(JSON.stringify(z.toJSONSchema(sendMessageInput))).not.toContain('status_text');
 });
 it('looks up an unknown send without decrypting credentials or dispatching', async () => {
+  await local.db.prepare('UPDATE whatsapp_connections SET encrypted_token = ? WHERE id = ?').bind('not-ciphertext', connectionId).run();
   expect(await call('get_message', { options: { idempotencyKey: 'unknown-key' } })).toMatchObject({ structuredContent: { data: { connectionId, outcome: 'not_found' } } });
   expect(fetcher).not.toHaveBeenCalled();
 });
@@ -122,6 +124,30 @@ it('resolves quoted messages on the same connection and redacts attachment URLs'
   expect(JSON.stringify(result)).not.toContain('private.invalid');
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+
+it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { include: ['event-responses'] }])('keeps untrusted MIME out of option errors and audit records: %j', async options => {
+  resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'private-mime https://private.invalid/file?token=secret-value', body: { text: 'hello' } } };
+  const result = await call('get_message', { messageId: 'm1', options });
+  expect(result.isError).toBe(true);
+  const audit = await local.db.prepare("SELECT metadata_json FROM audit_log WHERE operation = 'get_message' AND outcome = 'failure'").all();
+  expect(audit.results).toHaveLength(1);
+  for (const output of [JSON.stringify(result), JSON.stringify(audit.results)]) {
+    expect(output).not.toMatch(/private-mime|private\.invalid|secret-value/);
+  }
+});
+
+it('guides proactive audio transcription and document reading through the unified tool', async () => {
+  const discovery = await rpc('server/discover');
+  const catalog = await rpc('tools/list');
+  const description = catalog.tools?.find(tool => tool.name === 'get_message')?.description;
+  for (const guidance of [discovery.instructions, description]) {
+    expect(guidance).toContain('audio');
+    expect(guidance).toContain('document');
+    expect(guidance).toContain('text/plain');
+    expect(guidance).toContain('even without an explicit');
+  }
+});
+
 it('restores contact search through the authorized client, filtering and deduplicating before pagination', async () => {
   fetcher.mockImplementation(async (input, init) => {
     expect(new URL(String(input)).pathname).toBe('/user/contacts');

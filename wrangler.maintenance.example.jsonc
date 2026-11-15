@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wapilot-identity-maintenance-local",
+  "main": "src/maintenance/deactivate-user.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": false,
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "wapilot-identity-maintenance-local",
+    "database_id": "00000000-0000-0000-0000-000000000057",
+    "migrations_dir": "migrations",
+    "remote": false
+  }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000057", "remote": false }],
+  "vars": {
+    "MCP_PUBLIC_URL": "https://mcp.invalid",
+    "ENVIRONMENT": "maintenance",
+    "MAINTENANCE_USER_ID": "REPLACE_WITH_REVIEWED_USER_ID"
+  }
+}

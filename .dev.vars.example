@@ -3,3 +3,9 @@
 TOKEN_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 CONSENT_SECRET=local-consent-secret
 EVOLUTION_GLOBAL_API_KEY=local-evolution-global-key
+
+# Homologação Clerk usa uma configuração explícita diferente do perfil local.
+# Preencha somente em arquivo privado/ignorado e com autorização do ambiente.
+# CLERK_PUBLISHABLE_KEY=
+# CLERK_SECRET_KEY=
+# CLERK_JWT_KEY=

@@ -63,7 +63,7 @@ describe('administrative operational snapshot', () => {
     expect(isAdminOperator('LUCCAMORDENTE@GMAIL.COM', {} as any)).toBe(true);
     expect(isAdminOperator('heitorsalazar@gmail.com', {} as any)).toBe(true);
     expect(isAdminOperator('other@example.com', {} as any)).toBe(false);
-    expect(adminEmails({ ADMIN_EMAILS: 'admin@example.com', ALLOWED_EMAILS: 'admin@example.com,other@example.com' })).toEqual(new Set(['admin@example.com']));
+    expect(adminEmails({ ADMIN_EMAILS: 'admin@example.com' })).toEqual(new Set(['admin@example.com']));
   });
 
   it('keeps users without connections or authorizations and redacts operational secrets', async () => {

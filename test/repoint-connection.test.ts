@@ -81,10 +81,15 @@ describe('repointUserConnection', () => {
     expect(rows[0]).toMatchObject({ instance_id: 'old-inst', encrypted_token: 'enc-old' });
     expect(audits[0][4]).toBe('failure');
   });
-  it('returns 502 and saves nothing when Evolution is unreachable', async () => {
-    const rows = rowsFor();
-    const [, status] = await repointUserConnection(env(rows), 'u1', 'c1', { instanceId: 'new-inst', instanceToken: 't' }, { status: vi.fn().mockRejectedValue(new EvolutionApiError(503, 'down')) } as never);
+  it.each([
+    new EvolutionApiError(503, 'Evolution failed at https://private.invalid/details token=private-token'),
+    new Error('SDK diagnostic https://private.invalid/details token=private-token'),
+  ])('returns a controlled 502 without exposing diagnostics or saving changes: %s', async error => {
+    const rows = rowsFor(); const audits: unknown[][] = [];
+    const [body, status] = await repointUserConnection(env(rows, audits), 'u1', 'c1', { instanceId: 'new-inst', instanceToken: 'private-token' }, { status: vi.fn().mockRejectedValue(error) } as never);
     expect(status).toBe(502);
+    expect(body).toEqual({ error: 'O WaPilot não conseguiu consultar esta conexão. Tente novamente mais tarde.' });
+    expect(JSON.stringify({ body, audits })).not.toMatch(/Evolution|SDK diagnostic|private\.invalid|private-token/);
     expect(rows[0].instance_id).toBe('old-inst');
   });
   it('returns 422 when the token belongs to a different instance', async () => {

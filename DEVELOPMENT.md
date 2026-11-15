@@ -5,6 +5,8 @@ O catálogo MCP atual usa somente `search_connections`, `search_contacts`, `sear
 
 Instale Node 22+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
 
+Pare `dev:clerk` antes da suíte completa: a fixture HTTPS usa as portas locais 8794, 8795 e 8443. Depois dos testes, reinicie o perfil; seu D1/KV persistido é preservado.
+
 ## TokenSave por worktree
 
 Com o CLI `tokensave` instalado e a integração MCP configurada no agente, rode:
@@ -13,7 +15,9 @@ Com o CLI `tokensave` instalado e a integração MCP configurada no agente, rode
 node scripts/worktree-setup.mjs
 ```
 
-O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, seguindo o padrão da Lovell. Ele cria ou atualiza o índice local em `.tokensave/` (ignorado pelo Git), inclui `wrangler.jsonc`, HTML, CSS e `.github/` nas buscas e preserva configurações existentes. A ferramenta é opcional: sua ausência ou falha não interrompe o setup.
+O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, com a lista explícita dos inputs locais a copiar da worktree principal: `.env.stdio` e `.env.clerk`, quando existirem. A cópia usa permissão `0600`, não sobrescreve destinos existentes e não sincroniza alterações posteriores. Mantenha os arquivos de referência na worktree principal; o setup não procura credenciais em outras worktrees. Certificados TLS não são copiados: pertencem ao hostname da máquina de cada desenvolvedor.
+
+Depois da cópia, o comando cria ou atualiza o índice local em `.tokensave/` (ignorado pelo Git), inclui `wrangler.jsonc`, HTML, CSS e `.github/` nas buscas e preserva configurações existentes. A ferramenta é opcional: sua ausência ou falha não interrompe o setup. D1/KV, grants, chaves de cifra/consentimento, configurações geradas e índices não são copiados; cada worktree prepara seus próprios estados.
 
 Cada worktree precisa do próprio índice. Depois de criá-lo, reinicie a conexão MCP do agente se ela ainda estiver usando o índice da worktree principal. Para atualizar um índice existente após mudanças no código, use `tokensave sync`.
 
@@ -46,18 +50,163 @@ No perfil `local`, `/connections` usa deliberadamente a identidade sintética `d
 
 O MCP continua protegido pelo OAuth Provider. Para validar somente a superfície HTTP local, use `/healthz` e espere `401` em `/mcp` sem bearer; um cliente MCP local precisa completar o fluxo OAuth usando o `MCP_PUBLIC_URL` do perfil local.
 
-A UI de conexões também gerencia autorizações OAuth em `GET /api/authorizations`, `DELETE /api/authorizations/:id` e no alias `POST /api/authorizations/:id/revoke`. Essas rotas são same-origin e usam a mesma autenticação Cloudflare Access da página; a assertion Access não é aceita em `/mcp`. A listagem é paginada, filtra grants expirados pelo timestamp Unix em segundos e redige metadados do cliente. A política permite múltiplos grants (`revokeExistingGrants: false`); revogar um grant exige seu identificador e o usuário autenticado, e a UI confirma a remoção com uma nova leitura do Provider.
+A UI de conexões também gerencia autorizações OAuth em `GET /api/authorizations`, `DELETE /api/authorizations/:id` e no alias `POST /api/authorizations/:id/revoke`. Essas rotas são same-origin e usam a sessão Clerk da página, com usuário D1 ativo; essa sessão não é aceita em `/mcp`. A listagem é paginada, filtra grants expirados pelo timestamp Unix em segundos e redige metadados do cliente. A política permite múltiplos grants (`revokeExistingGrants: false`); revogar um grant exige seu identificador e o usuário autenticado, e a UI confirma a remoção com uma nova leitura do Provider.
 
 
 A revisão MCP publicada é `2026-07-28`. O `createMcpHandler` é criado por request com `legacy: 'reject'`, `responseMode: 'json'` e limite de corpo configurável. Clientes 2026 devem enviar os headers e o envelope `_meta` exigidos pela revisão. O adaptador HTTP também aceita envelopes 2025 sem esses campos, usando transporte stateless e respostas JSON; consulte a matriz em `docs/ARCHITECTURE.md`. Não adicione `sessionIdGenerator`, `StreamableHTTPServerTransport` stateful, SSE, WebSocket ou `createLegacyMcpHandler` no Worker publicado. O stdio existe somente no entrypoint Node de desenvolvimento descrito abaixo.
 
-O OAuth Provider exige o binding `OAUTH_KV`, um recurso canônico HTTPS em `MCP_PUBLIC_URL` e um `CONSENT_SECRET`. As aplicações de navegador `/authorize`, `/connections` e `/api` usam audiences Access distintas; `/admin` reutiliza a mesma aplicação e audiência de `/connections`. `ACCESS_AUDIENCE` aceita esses valores separados por vírgula. Essas rotas recebem a assertion JWT do Cloudflare Access, protegido por One-time PIN e pela allowlist dos dois e-mails. O token emitido pelo OAuth Provider é o único bearer aceito em `/mcp`.
+O OAuth Provider exige o binding `OAUTH_KV`, um recurso canônico HTTPS em `MCP_PUBLIC_URL` e um `CONSENT_SECRET`. As rotas de navegador `/authorize`, `/connections`, `/api` e `/admin` compartilham o verificador Request do Backend SDK Clerk. A configuração exige `CLERK_PUBLISHABLE_KEY` da instância correta, `CLERK_SECRET_KEY` em Secret e `MCP_PUBLIC_URL` confiável; `CLERK_JWT_KEY` é opcional para validação local da assinatura. O issuer deriva da publishable key e a origem autorizada deriva da configuração, nunca do Host recebido. Apenas cookie de sessão Clerk autentica o navegador; assertion e bearer Access e bearer OAuth MCP são recusados nessas APIs. O token emitido pelo OAuth Provider é o único bearer aceito em `/mcp`.
 
-A identidade do bearer chega ao servidor como `ctx.props.user`. As ferramentas que operam uma conexão chamam `ensureUser` e resolvem `(user_id, connection_id)` no D1 antes de descriptografar o token da instância. `connectionId` pode ser omitido para usar a conexão padrão; o resolvedor falha se não houver exatamente uma, e um UUID explícito sempre tem prioridade. `search_connections` lista somente os registros de conexão do usuário no D1. O webhook nunca confia no token recebido no corpo do Evolution Go: valida o segredo opaco da URL, confere `instanceId`, seleciona notificações autorizadas antes de persistir conteúdo e deduplica IDs no D1; o envelope bruto não é arquivado.
+O login incorporado fica em `/sign-in`; `/accept-invitation` monta o cadastro pelo ticket Clerk, sem reproduzi-lo no HTML ou no retorno do login. `npm run build:auth` gera `public/auth.js` com `ptBR`; `npm run check` confere esse asset. Clerk JS `6.43.0` e UI `1.42.5` carregam pelo Frontend API da instância, em versões exatas. Dashboard, painel administrativo e consentimento carregam o SDK para renovar a sessão; sair do navegador não revoga grants OAuth. A localização é experimental e ainda requer homologação visual do fluxo completo, inclusive e-mails e mensagens do provedor. Por decisão do operador na #59/#63, production aceita e-mails padrão do Clerk, sem exigir templates personalizados pt-BR ou marca WaPilot nesses e-mails; a UI do produto permanece WaPilot em pt-BR. Na #63, conferir por read-back templates padrão, idioma, aparência, links/variáveis e entrega habilitada. Recebimento real no bootstrap #64 e homologação completa na #65, após o bootstrap, permanecem pendentes, sem presumir equivalência com development.
+
+HTML GET sem sessão volta ao login com retorno limitado a `/connections`, `/admin` ou uma requisição `/authorize` da mesma origem; parâmetros de ticket/credenciais são removidos. APIs retornam JSON `401`, inclusive com publishable key de desenvolvimento e `Accept: text/html`; conta sem vínculo/disabled retorna `403`, e falha de verificação retorna `503` sanitizado. Não há replay de POST de consentimento após login. Handshake de navegação propaga redirect `307` e todos os cookies; respostas autenticadas não são cacheáveis. Headers de diagnóstico `x-clerk-auth-*` não são enviados ao cliente.
+
+Mutações no dashboard e aliases exigem `Origin` canônico, cookie `__Host-wapilot_csrf` e header `X-WaPilot-CSRF` correspondente. O cookie CSRF é legível pelo JavaScript e não é uma sessão de autenticação. O consentimento preserva sua transação vinculada ao navegador e também exige a origem correta. Sua página usa `Referrer-Policy: same-origin` para preservar `Origin` no formulário nativo sem enviar referrer a outra origem; `no-referrer` faria esse POST enviar `Origin: null`, que continua recusado. O perfil sintético `ENVIRONMENT=local` mantém bootstrap e dispensa a sessão/CSRF de produção; os testes Clerk usam ambiente diferente e o SDK real. GET `run`/`renew` não cria números nem renova QR; o provisionamento administrativo usa POST protegido e a renovação existente fica no dashboard.
+
+O [procedimento Clerk](docs/CLERK-OPERATIONS.md) reúne vínculo inicial deliberado, gates de homologação/corte, rollback e desativação recuperável. O entrypoint separado `src/maintenance/deactivate-user.ts` possui apenas `scheduled` e não participa do bundle publicado. Seu exemplo de Wrangler usa D1/KV locais; os perfis `local` e stdio conservam `remoteBindings: false`. `test/clerk-migration.test.ts` verifica grants legados pelo navegador Clerk e inventário preservado; `test/user-deactivation.test.ts` cobre limpeza local, paginação de 101 grants e repetição após falhas parciais. Essas fixtures não comprovam configuração, sessão ou revogação reais.
+
+A identidade do bearer chega ao servidor como `ctx.props.user`. As ferramentas que operam uma conexão chamam `ensureUser` e resolvem `(user_id, connection_id)` no D1 antes de descriptografar o token da instância. `options.connectionId` pode ser omitido para usar a conexão padrão; o resolvedor falha se não houver exatamente uma, e um UUID explícito sempre tem prioridade. `search_connections` lista somente os registros de conexão do usuário no D1. O webhook nunca confia no token recebido no corpo do Evolution Go: valida o segredo opaco da URL, confere `instanceId`, seleciona notificações autorizadas antes de persistir conteúdo e deduplica IDs no D1; o envelope bruto não é arquivado.
 
 `search_messages` busca diretamente as mensagens persistidas no Evolution Go em `GET /message/search`, e não os eventos de webhook materializados no D1. O filtro opcional `conversationId` aceita número de contato ou JID individual/de grupo dentro da conta escolhida por `connectionId` ou pela conexão padrão. O schema remove espaços nas extremidades e rejeita strings vazias, valores de outros tipos e strings com mais de 200 caracteres após a remoção. O cliente envia o valor como `identifier`, combinado com `q` para `text` e `limit` (padrão MCP 25, máximo 50), com codificação segura de query. O provedor restringe a consulta por instância e conversa antes do limite; não filtre localmente uma página geral. Omitir a conversa preserva o uso anterior, a ordenação e a resposta normalizada.
 
 A busca depende da retenção de mensagens no Evolution Go, incluindo `DATABASE_SAVE_MESSAGES=true`; não garante todo o histórico do WhatsApp, e um resultado vazio é inconclusivo. O fork não oferece listagem de chats. Ajustes de contrato devem ficar concentrados em `src/lib/evolution.ts`, com testes mockados das rotas reais. Para o filtro de conversa, `test/mcp-messages.test.ts` exercita o caminho MCP até o cliente Evolution real com D1 e HTTP simulados; testes de schema e rotas complementam validação e serialização. Esses testes verificam o contrato emitido, sem comprovar a versão ou a retenção da instância de produção.
+
+## Clerk development na tailnet privada
+
+`npm run dev:clerk` usa `src/worker.ts` com autenticação Clerk real em
+`https://<máquina>.<tailnet>.ts.net:8443`, acessível somente pela sua tailnet.
+Cada desenvolvedor conecta a própria máquina à própria tailnet; o comando lê
+`Self.DNSName` de `tailscale status --json`, sem hostname compartilhado ou entrada
+de origem em `.env.clerk`. O perfil independente `wrangler.clerk-test.jsonc` usa
+`ENVIRONMENT=clerk-test`: login nunca cria, vincula ou ativa uma conta D1.
+Não herda rotas de produção, AI, filas, Cron, serviços, DO ou Containers; Docker
+não é necessário. D1/KV têm IDs sintéticos e `remote:false`, e o runtime e o proxy
+são iniciados com bindings remotos desativados. O mock em `127.0.0.1:8794` aceita
+somente leitura de estado de duas conexões sintéticas; não provisiona nem envia
+mensagens. Todas as outras operações do mock são recusadas.
+
+Com autorização para a instância Clerk development e para os destinatários de
+teste, se o setup ainda não copiou uma configuração existente, copie
+`.env.clerk.example` para `.env.clerk`, com permissão `0600`, e
+preencha as duas chaves `pk_test_`/`sk_test_` e `CLERK_TEST_ADMIN_EMAIL`. Esse é o
+único arquivo de entrada; o comando não procura credenciais no ambiente do
+processo, em `.dev.vars`, em `.env.stdio` ou em outra worktree. Não use chaves live.
+Arquivo ausente/inválido produz orientação sem imprimir os valores.
+
+```sh
+cp -n .env.clerk.example .env.clerk
+chmod 600 .env.clerk
+# Preencha o arquivo privado antes do próximo comando.
+npm run dev:clerk -- --prepare
+```
+
+`--prepare` funciona sem Tailscale, certificado ou túnel: aplica migrations
+apenas no D1 local e cria as fixtures
+`clerk-test-admin` (e-mail configurado) e `clerk-test-other`, ambas `disabled`, sem
+vínculo Clerk, cada uma com uma conexão fictícia. Os seeds operacionais legados
+sem vínculo são removidos somente desse D1 de teste. Reinícios preservam os IDs,
+cifras, vínculos e estados deliberadamente alterados. A lista operacional de
+teste contém somente o e-mail configurado; não herda a lista de produção.
+
+Persistência, configuração gerada e segredos próprios ficam exclusivamente em
+`.wrangler/clerk-test`: `bindings`, `wrangler.json`, `runtime.env` e
+`secrets.json`. Os arquivos privados têm permissão `0600`; chave de cifra e
+segredo de consentimento são gerados localmente e preservados juntos ao banco.
+Ausência dos segredos com persistência existente interrompe a preparação. Mudar
+o e-mail exige uma base de teste nova. `.wrangler/local-dev`, `.wrangler/stdio`
+e os ambientes existentes não são sobrescritos.
+
+Instale o [Tailscale](https://tailscale.com/download), conecte a máquina à sua
+tailnet e habilite MagicDNS e
+[certificados HTTPS](https://tailscale.com/docs/how-to/set-up-https-certificates)
+nessa rede. O cliente OAuth e o navegador precisam alcançar essa mesma tailnet.
+Depois, rode:
+
+```sh
+npm run dev:clerk
+```
+
+O comando obtém o certificado público do hostname da própria máquina com
+`tailscale cert` e guarda o par em
+`.wrangler/clerk-test/tls/tailscale.pem` e `tailscale-key.pem`, com permissão
+`0600`. Confere hostname e validade antes de servir e consulta o cache do Tailscale
+a cada início; reinicie sessões longas antes do vencimento. A chave permanece
+privada na worktree. Não é necessário instalar uma CA local nem alterar a trust
+store; navegador e cliente OAuth validam a cadeia pública normalmente.
+
+O Worker escuta HTTPS somente em `127.0.0.1:8795`; o mock continua em
+`127.0.0.1:8794`. O [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
+encaminha TCP privado da porta `8443` para esse Worker, em primeiro plano.
+Preservar TLS até o Wrangler mantém HTTPS também nos redirects e no challenge
+OAuth. As portas locais 8794/8795 e a porta Tailscale 8443 precisam estar livres.
+O comando recusa qualquer configuração anterior de Serve ou Funnel na 8443,
+inclusive de outra sessão, e preserva os serviços de outras portas. Não habilita
+Funnel. Login ausente, HTTPS desabilitado ou conflito produzem orientação
+sanitizada antes de iniciar o endpoint.
+
+O Wrangler fixado 4.150.0 recebe `dev.host` com o hostname e a porta externos e
+`dev.upstream_protocol=https`; `MCP_PUBLIC_URL` recebe a mesma origem HTTPS.
+A [configuração oficial](https://developers.cloudflare.com/workers/wrangler/configuration/#local-development-settings)
+descreve essas opções. A origem vem da configuração local validada, sem confiar
+em `Host` ou `X-Forwarded-*` recebidos do cliente. O self-check acessa
+`/connections/data` pela origem externa com TLS verificado e exige `401`: o
+verificador publicado responde `503` se `request.url` divergir da origem
+configurada. Falha no certificado ou na origem encerra a sessão Serve própria,
+Worker e mock com mensagem sanitizada.
+
+A primeira identidade é preparada fora dos endpoints WaPilot, somente após a
+autorização do #62: localizar ou convidar diretamente no Clerk development,
+aceitar/verificar no Account Portal e conferir por read-back o ID, e-mail
+primário verificado e ausência de banimento/bloqueio. Antes disso, confira as
+restrições de conta e o alvo de configuração em
+[CLERK-OPERATIONS.md](docs/CLERK-OPERATIONS.md). Prepare um SQL privado em
+`.wrangler/clerk-test/link-admin.sql`, substituindo e escapando os placeholders
+com os valores conferidos:
+
+```sql
+UPDATE users SET clerk_user_id = 'VERIFIED_DEVELOPMENT_CLERK_ID',
+  status = 'active', updated_at = datetime('now')
+WHERE id = 'clerk-test-admin' AND email = 'APPROVED_TEST_EMAIL'
+  AND status = 'disabled' AND clerk_user_id IS NULL AND invite_pending_at IS NULL;
+SELECT id, email, status, clerk_user_id FROM users WHERE id = 'clerk-test-admin';
+```
+
+Execute apenas contra a configuração de teste já gerada:
+
+```sh
+npx wrangler d1 execute DB --local --config .wrangler/clerk-test/wrangler.json --env-file .wrangler/clerk-test/runtime.env --persist-to .wrangler/clerk-test/bindings --file .wrangler/clerk-test/link-admin.sql
+```
+
+Uma alteração é esperada; zero mudanças ou conflito exige reconciliação, sem
+sobrescrever vínculo. Login deve mostrar somente a conexão dessa fixture.
+Depois do primeiro administrador, os convites de outro destinatário aprovado
+usam os endpoints próprios e permanecem pendentes até ativação explícita.
+Um cliente OAuth local deve registrar retorno acessível, completar consentimento
+com PKCE e chamar `search_connections`. Esse perfil exige um cliente na tailnet;
+um conector fora dela não alcança o endpoint privado.
+
+Ctrl+C encerra somente a sessão Serve iniciada pelo comando, o Worker e o mock;
+o Tailscale remove o endpoint dessa sessão sem resetar a configuração existente.
+Depois de parar, `rm -rf .wrangler/clerk-test` limpa somente esse ambiente,
+incluindo fixtures, grants, chaves e certificado. Remova `.env.clerk`
+separadamente quando não for mais necessário.
+
+`test/clerk-local.test.ts` requer OpenSSL e usa uma CA temporária explicitamente
+confiada pelo cliente Node, sem modificar a trust store. Um CLI Tailscale de
+fixture encaminha TCP para o Worker HTTPS real e simula configurações anteriores,
+inclusive Funnel em 443. A suíte verifica guard de origem, challenge e metadata
+OAuth HTTPS, assets/login/API, recusa de headers de origem forjados, conflitos,
+certificados inválidos e limpeza só da sessão própria. Também cobre isolamento
+de configuração e cookies Clerk assinados com Backend/JWKS simulados.
+A matriz existente em `test/clerk-browser.test.ts` complementa as negativas.
+Essas provas não enviam e-mails nem homologam Clerk real ou confiança do
+navegador; a aceitação externa permanece no #62.
+
+## Convites administrativos em desenvolvimento
+
+As rotas próprias são `POST /admin/invitations` com `{ email }` e `POST /admin/invitations/:userId/activate` com `{ clerkUserId }`. Ambas exigem sessão de administrador ativo e CSRF; não há gestão de convites no painel de leitura. Conta convidada permanece `disabled` até o read-back do ID Clerk e do e-mail primário verificado. Uma repetição não envia outro e-mail nem reativa desativados. Consulte o contrato em [ARCHITECTURE.md](docs/ARCHITECTURE.md#convites-e-ativação-administrativa) e a reconciliação em [DEPLOY.md](docs/DEPLOY.md#convites-e-ativação-administrativa).
+
+`npx vitest run test/admin-invitations.test.ts` usa o Worker publicado, runtime workerd, D1/KV locais e o SDK real com Backend/JWKS simulados. Inclui respostas portadoras redigidas, conflitos, concorrência, falhas antes/depois do envio, paginação, verificação de identidade e cancelamento durante ativação. Não precisa de credenciais nem envia convites reais. Um fluxo real na aplicação existente depende de autorização específica para credenciais, usuário de teste, configuração e e-mail; esta suíte não substitui sua homologação.
 
 ## MCP local por stdio (Node 22+)
 
@@ -67,7 +216,7 @@ A busca depende da retenção de mensagens no Evolution Go, incluindo `DATABASE_
 
 Copie `.env.stdio.example` para `.env.stdio` (ignorado pelo Git) e informe `EVOLUTION_BASE_URL`, `LOCAL_INSTANCE_ID` e `LOCAL_INSTANCE_TOKEN` de uma instância existente. O ID deve ser o ID canônico retornado pelo estado live. A chave administrativa e a chave de criptografia de produção não são necessárias. A configuração também pode vir do ambiente do processo, que tem precedência sobre o arquivo. `IMAGE_STORAGE_ORIGINS` é opcional e aceita as origens HTTPS exatas aprovadas para leitura de imagens.
 
-O setup de worktrees copia `.env.stdio` da worktree principal quando o destino ainda não existe, com permissão `0600`. A cópia é independente; alterações posteriores não são sincronizadas e uma configuração existente nunca é substituída. Somente esse arquivo é copiado: D1, chave de criptografia e estado em `.wrangler/stdio` continuam isolados. Sem Git ou fora de um checkout, a cópia é pulada sem interromper o setup. O helper é `scripts/copy-stdio-env.mjs`; nesta instalação, o hook Git local `post-checkout` também o executa para novas worktrees criadas a partir de branches anteriores ao setup atualizado.
+O setup Orca copia `.env.stdio` e os demais inputs listados em `orca.yaml` da worktree principal, como descrito acima; D1, chave de criptografia e estado em `.wrangler/stdio` continuam isolados. Sem Git ou fora de um checkout, a cópia é pulada sem interromper o setup. O helper informa se cada arquivo foi copiado, se o destino existente foi mantido ou se falta a configuração na principal, orientando o uso do respectivo `.example`. O nome `scripts/copy-stdio-env.mjs` foi preservado para os callers existentes: ele recebe o destino e a lista de arquivos; sem lista, mantém a cópia exclusiva de `.env.stdio`. Hooks Git locais anteriores também precisam apontar para esse helper no caminho atual; o setup Orca não instala nem altera hooks globais.
 
 Configure o cliente para iniciar o processo filho com o diretório absoluto desta worktree:
 
@@ -90,7 +239,7 @@ O cadastro, a auditoria e a chave ficam em `.wrangler/stdio`, isolados por workt
 
 As ferramentas de leitura consultam o provedor real. `send_message` também está disponível, com as mesmas variantes do HTTP e a conexão padrão ou um identificador de conexão explícito. O [contrato de envio](docs/SEND-MESSAGE.md) descreve os campos de cada `message.kind`. Downloads para figurinha, prévia de link e cabeçalhos interativos exigem `SEND_MEDIA_ORIGINS` independente das allowlists de leitura. O entrypoint local fornece escopos de leitura e escrita à factory compartilhada como configuração confiável do processo; argumentos e metadados do cliente não concedem permissões. O HTTP mantém OAuth e exige `mcp:write` para envios, recusando contexto de autorização ausente.
 
-`send_message` aceita `idempotencyKey` opcional para a mesma ação. A migration `0006_send_operations.sql` mantém a reserva e o resultado mínimo no D1 por 24 horas, sem texto ou arquivos. A migration `0010_unified_send_fence.sql` impede que a mesma chave ativa gere outra reserva entre os nomes antigos e `send_message`; os nomes antigos permanecem somente na consulta de resultados anteriores. Repetições concluídas reutilizam o ID; conflitos e resultados desconhecidos não iniciam novo envio. Não mude a chave para contornar um envio incerto. No stdio, a exclusão física de metadados vencidos ocorre no startup e a cada minuto enquanto o processo permanece aberto, sem consultar mensagens ou usar Cron remoto. Se estiver parado, a limpeza retoma na próxima abertura; a validade continua sendo conferida no uso. EOF e sinais cancelam o timer e aguardam a limpeza em andamento antes de liberar o D1. A proteção é limitada ao usuário/conexão/operação e à janela de 24 horas; chamadas sem chave preservam o comportamento anterior. `test/send-idempotency.test.ts` exercita MCP com D1 local real e provedor simulado, sem credenciais reais, incluindo concorrência, falhas de persistência e expiração no uso. O helper `test/helpers/local-d1.ts` aplica as migrations em uma instância Miniflare isolada.
+`send_message` aceita `idempotencyKey` opcional para a mesma ação. A migration `0006_send_operations.sql` mantém a reserva e o resultado mínimo no D1 por 24 horas, sem texto ou arquivos. A migration `0010_unified_send_fence.sql` impede que a mesma chave ativa gere outra reserva entre os nomes antigos e `send_message`; os nomes antigos permanecem somente na barreira de reutilização, sem consulta pública por operação antiga. Repetições concluídas reutilizam o ID; conflitos e resultados desconhecidos não iniciam novo envio. Não mude a chave para contornar um envio incerto. No stdio, a exclusão física de metadados vencidos ocorre no startup e a cada minuto enquanto o processo permanece aberto, sem consultar mensagens ou usar Cron remoto. Se estiver parado, a limpeza retoma na próxima abertura; a validade continua sendo conferida no uso. EOF e sinais cancelam o timer e aguardam a limpeza em andamento antes de liberar o D1. A proteção é limitada ao usuário/conexão/operação e à janela de 24 horas; chamadas sem chave preservam o comportamento anterior. `test/send-idempotency.test.ts` exercita MCP com D1 local real e provedor simulado, sem credenciais reais, incluindo concorrência, falhas de persistência e expiração no uso. O helper `test/helpers/local-d1.ts` aplica as migrations em uma instância Miniflare isolada.
 
 A auditoria começa vazia no D1 local. Não há cache local de mensagens enviadas; seus IDs continuam nas respostas, mas listagem e encaminhamento dependem do conteúdo retido no provedor. Mensagens retidas dependem da disponibilidade e retenção do provedor, sem importar o histórico D1 de produção. Mídia conserva o limite de 8 MiB; o buffer stdio comporta seu envelope base64. Escritas nunca são repetidas automaticamente. **Uma instância de produção executa ações reais**: D1 local não simula envios. Só teste um envio real com destinatário e conteúdo definidos. As suítes regulares usam provedor HTTP simulado. A aceitação conectada descrita abaixo usa handlers Go reais com a fronteira WhatsApp substituída, sem envios externos.
 
@@ -154,11 +303,11 @@ O fluxo de escolha e cobertura (#33) é anunciado por `server/discover` e pelo c
 
 ## Aceitação do envio unificado
 
-`npm run test:acceptance:send` conecta o handler MCP e D1 local à fixture Go pelo HTTP. O launcher usa o checkout canônico `.scratch/evolution-go` e um overlay temporário de fontes para capturar a mensagem nativa na fronteira externa do cliente WhatsApp. Os schemas, a tradução JSON:API, os handlers e a construção nativa continuam reais; os pontos de instrumentação são conferidos antes do build. O checkout não recebe modificações permanentes. A execução exige o toolchain indicado por `go.mod`; as variantes que convertem mídia exigem FFmpeg e ffprobe. A fixture não usa credenciais pessoais nem envia mensagens ao WhatsApp.
+`npm run test:acceptance:send` conecta o handler MCP e D1 local à fixture Go pelo HTTP. Para compilar essa fixture, o launcher depende de fontes em `.scratch/evolution-go` e usa um overlay temporário para capturar a mensagem nativa na fronteira externa do cliente WhatsApp. Essa dependência é exclusiva dos testes de aceitação; consultas à implementação seguem o acesso pelo GitHub descrito em `AGENTS.md`. Os schemas, a tradução JSON:API, os handlers e a construção nativa continuam reais; os pontos de instrumentação são conferidos antes do build. As fontes não recebem modificações permanentes. A execução exige o toolchain indicado por `go.mod`; as variantes que convertem mídia exigem FFmpeg e ffprobe. A fixture não usa credenciais pessoais nem envia mensagens ao WhatsApp.
 
 Os testes regulares de `test/send-message.test.ts` percorrem descoberta e chamada de ferramenta pelo MCP, com D1 real e provedor simulado. Cobrem variantes válidas, campos incompatíveis, citação, autorização, allowlist de download e o bloqueio entre chaves antigas e novas. As suítes de idempotência, stdio e compatibilidade preservam concorrência, resultados desconhecidos e isolamento. O script conectado acrescenta a observação da estrutura nativa produzida; ele não substitui homologação em dispositivos.
 
-Android, iOS e WhatsApp Web têm uma conferência separada para renderização, citações, seleção de listas e botões, votação, reprodução de mídia e publicação no Status. Cada envio real exige destinatário, conteúdo e autorização próprios. Evento e RSVP só entram nessa homologação quando o backend implementar envio nativo. Consulte [a matriz de suporte e dependências](docs/SEND-MESSAGE.md#inventário-do-provedor-e-suporte-futuro).
+Android, iOS e WhatsApp Web têm uma conferência separada para renderização, citações, seleção de listas e botões, votação, reprodução de mídia e publicação no Status. Cada envio real exige destinatário, conteúdo e autorização próprios. Evento e RSVP de leitura têm contrato nativo, mas sua homologação visual continua separada. Consulte [a matriz de suporte e dependências](docs/SEND-MESSAGE.md#inventário-do-provedor-e-suporte-futuro).
 
 ### Connected native history acceptance
 
@@ -170,3 +319,9 @@ The connected case uses real local D1, the shared MCP handler, the consumer
 normalizer and authenticated Go HTTP reads. It requires five structured-only
 `synthetic-*` messages and 500 poll votes and event responses, across multiple
 bounded pages. An unset URL skips this case and does not establish H-A8.
+
+### Aceitação conectada reproduzível do histórico nativo
+
+`npm run test:acceptance:history` inicia a fixture HTTP real do provedor e executa o handler MCP sobre PostgreSQL isolado. Configure `MESSAGE_HISTORY_TEST_DSN` como DSN keyword simples, por exemplo `host=127.0.0.1 port=5432 dbname=acceptance user=test password=synthetic sslmode=disable`. O launcher aceita somente as chaves `host`, `port`, `dbname`, `user`, `password`, `sslmode` e `connect_timeout`, sem repetições, aspas, escapes ou espaços nos valores; `host` deve ser exatamente `127.0.0.1`, `::1` ou `localhost`. URLs, `hostaddr`, listas de hosts, serviços e opções são recusados antes de iniciar Go; variáveis `PG*` não são herdadas pelo processo Go. O checkout canônico é `.scratch/evolution-go`; atualize-o com `git pull --ff-only` antes da execução. `WAPILOT_ACCEPTANCE_GO` seleciona o toolchain de `go.mod`. O launcher falha sem DSN e limpa seus arquivos temporários. Não use credenciais ou banco de produção.
+
+A aceitação de envio usa o mesmo checkout canônico. A fixture de evento usa o store SDK isolado e verifica o segredo durável antes da captura do dispatch. Nenhuma das aceitações envia mensagens ao WhatsApp.

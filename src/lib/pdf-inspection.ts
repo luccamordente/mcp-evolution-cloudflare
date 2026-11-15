@@ -98,11 +98,11 @@ export async function inspectPdf(bytes: Uint8Array, options: PdfInspectionReques
   }, expiresAt);
 }
 
-export async function inspectMessageDocument(client: EvolutionGoClient, env: Pick<Env, 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, options: PdfInspectionRequest, parentSignal: AbortSignal) {
+export async function inspectMessageDocument(client: EvolutionGoClient, env: Pick<Env, 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, options: PdfInspectionRequest, parentSignal: AbortSignal, expiresAt?: number) {
   try {
     return await withPdfDownload(client, env, messageId, parentSignal,
       kind => new PdfProcessingError(kind === 'cancel' ? 'request_cancelled' : 'wapilot_timeout', kind === 'cancel' ? 499 : 504, kind === 'cancel' ? 'WaPilot PDF inspection was cancelled.' : 'WaPilot PDF inspection exceeded 60 seconds. Request fewer pages.'),
-      async (blob, signal, expiresAt) => inspectPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt));
+      async (blob, signal, expiresAt) => inspectPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt), expiresAt);
   } catch (error) {
     if (error instanceof PdfProcessingError || error instanceof DocumentReadingError) throw error;
     throw new PdfProcessingError('pdf_page_unavailable', 422, 'WaPilot could not inspect this PDF. Use visual reading if available.');

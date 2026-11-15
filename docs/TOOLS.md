@@ -36,7 +36,7 @@ Sem `encodingFormat`, `get_message` devolve `connectionId`, `messageId` e `messa
 | `image/*` | erro | erro | imagem MCP nativa | páginas PNG nativas |
 | `application/pdf` | erro | erro | erro | recurso binário MCP incorporado |
 
-Vídeo e figurinha não habilitam conversão textual. Formatos incompatíveis retornam `incompatible_encoding_format`, com MIME e formatos disponíveis. PDF textual não comprova cobertura visual; páginas sem texto não são necessariamente vazias. A transcrição pode levar cinco minutos (cliente: seis minutos); PDF requer até 90 segundos no cliente. Não repita processamento automaticamente.
+Vídeo e figurinha não habilitam conversão textual. Formatos incompatíveis retornam `incompatible_encoding_format`, com os formatos disponíveis. PDF textual não comprova cobertura visual; páginas sem texto não são necessariamente vazias. A transcrição pode levar cinco minutos (cliente: seis minutos); PDF requer até 90 segundos no cliente. Não repita processamento automaticamente. O prazo total de `get_message` conta desde a primeira consulta de metadados: 300 segundos para transcrição de áudio ou 60 segundos para as demais leituras, compartilhados entre includes e conversões da mesma chamada. A leitura de imagem e cada página de respostas de enquete/evento recebem o sinal desse mesmo prazo, inclusive nas consultas de metadados e no download; seus timeouts individuais não reiniciam o orçamento total.
 
 Para renderizar PDF, use `page` (posição física a partir de 1, padrão 1) ou `pages` (até três posições distintas), `preset: preview | reading | detail` (640, 1600 ou 2400 pixels na maior dimensão) e `crop: {x,y,width,height}` normalizado. O recorte precisa ficar dentro da página e exige uma única página. O resultado identifica páginas entregues e falhas; entrega não comprova que o agente examinou as imagens. O cliente deve consumir os blocos nativos antes de citar evidência visual. O PDF original exige um cliente capaz de receber recursos binários; a limpeza de arquivos temporários pertence ao cliente.
 
@@ -69,7 +69,7 @@ A chave opaca reserva `(usuário, conexão, operação, chave)` no D1 por 24 hor
 
 Sem um ID conhecido, use `get_message({options: {connectionId, idempotencyKey}})`. Essa consulta resolve somente o registro operacional de `send_message`, sem descriptografar credenciais nem enviar mensagens. Retorna `accepted` com `messageId` quando registrado, ou `pending`, `unknown`, `not_found`. Depois, consulte o ID para ler seu status retido. `not_found` não comprova ausência de envio; uma chave expirada ou uma falha após despacho pode impedir reconciliação. Registros legados continuam protegendo chaves, sem ferramenta pública para consultá-los por nome de operação antiga.
 
-Erros e auditoria não expõem tokens, URLs privadas, payloads brutos ou conteúdo de anexos. A migração não altera transporte HTTP, OAuth, Access, retenção ou infraestrutura.
+Erros e auditoria não expõem tokens, URLs privadas, payloads brutos ou conteúdo de anexos. A migração não altera transporte HTTP, OAuth, Clerk, retenção ou infraestrutura.
 
 ## Assinaturas MCP Events
 

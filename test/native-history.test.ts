@@ -41,12 +41,12 @@ describe('native retained history boundary', () => {
 
 describe('response page boundary', () => {
   const row = { type: 'event-response', id: 'r', attributes: { eventMessageId: 'fixture', respondentJid: '2@s.whatsapp.net', responseMessageId: 'reply', response: 'GOING', timestampMS: 123 } };
-  function paged(next: string | null, target = 'fixture') {
+  function paged(next: string | null, target = 'fixture', count = 1) {
     const calls: { path: string; token: string | null; redirect: RequestRedirect | undefined }[] = [];
     const c = new EvolutionGoClient({ baseUrl: 'https://provider.invalid', instanceId: 'instance', instanceToken: 'synthetic-token', fetcher: async (input, init) => {
       const url = new URL(String(input));
       calls.push({ path: url.pathname + url.search, token: new Headers(init?.headers).get('apikey'), redirect: init?.redirect });
-      return Response.json({ jsonapi: { version: '1.1' }, ...(url.pathname === '/message/status' ? { data: resource(fixtures[3]) } : { data: [{ ...row, attributes: { ...row.attributes, eventMessageId: target } }], links: { next }, meta: { coverage: 'observed', consistency: 'eventually-consistent-current-state' } }) });
+      return Response.json({ jsonapi: { version: '1.1' }, ...(url.pathname === '/message/status' ? { data: resource(fixtures[3]) } : { data: Array.from({ length: count }, (_, i) => ({ ...row, id: String(i), attributes: { ...row.attributes, eventMessageId: target } })), links: { next }, meta: { coverage: 'observed', consistency: 'eventually-consistent-current-state' } }) });
     } });
     return { c, calls };
   }
@@ -59,6 +59,10 @@ describe('response page boundary', () => {
   it.each(['https://foreign.invalid/messages/fixture/event-responses?page%5Bcursor%5D=x', '/messages/other/event-responses?page%5Bcursor%5D=x', '/messages/fixture/event-responses'])('rejects unsafe continuation %s', async next => {
     const { c } = paged(next);
     await expect(c.listMessageResponses('fixture', 'eventResponses')).rejects.toMatchObject({ status: 502 });
+  });
+  it('rejects a page larger than the requested limit', async () => {
+    const { c } = paged(null, 'fixture', 2);
+    await expect(c.listMessageResponses('fixture', 'eventResponses', 1)).rejects.toMatchObject({ status: 502 });
   });
   it('preserves ambiguous poll state without asserting an option', () => {
     const attributes = { pollMessageId: 'fixture', pollChatJid: 'group@g.us', voteMessageId: 'reply', voterJid: '2@s.whatsapp.net', votedAt: '2026-11-11T00:00:00Z', receivedAt: '2026-11-11T00:00:00Z', orderingState: 'ambiguous', identityProvenance: 'exact', diagnostic: { state: 'ambiguous', reason: 'conflicting_protocol_timestamp' } };

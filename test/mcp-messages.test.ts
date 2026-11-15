@@ -90,6 +90,161 @@ async function messageTool(defaultCount = 1, trustedLocalScopes?: readonly strin
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
+describe('unified get_message total media deadline', () => {
+  it.each(['lookup', 'storage'])('aborts a stalled image %s at the remaining total deadline', async stage => {
+    const { rpc, fetcher } = await messageTool();
+    vi.useFakeTimers();
+    const start = Date.now();
+    let lookups = 0;
+    let started!: () => void;
+    const stalled = new Promise<void>(resolve => { started = resolve; });
+    let upstreamSignal: AbortSignal | undefined;
+    fetcher.mockImplementation(async (url, init) => {
+      if (++lookups === 1) {
+        vi.setSystemTime(start + 55_000);
+        return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/image.png', 'image/png') });
+      }
+      if (stage === 'storage' && !String(url).startsWith('https://storage.example.test/')) return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/image.png', 'image/png') });
+      upstreamSignal = init?.signal as AbortSignal;
+      started();
+      return new Promise<Response>((_, reject) => upstreamSignal!.addEventListener('abort', () => reject(upstreamSignal!.reason), { once: true }));
+    });
+    let completed = false;
+    const pending = rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { encodingFormat: 'image/*' } } }).then(result => { completed = true; return result; });
+    await stalled;
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(upstreamSignal?.aborted).toBe(true);
+    expect(completed).toBe(true);
+    expect((await pending).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504 } } } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['poll-responses', 'event-responses'])('aborts a stalled second %s page at the original deadline', async include => {
+    const { rpc, fetcher } = await messageTool();
+    vi.useFakeTimers();
+    const start = Date.now();
+    const kind = include === 'poll-responses' ? 'votes' : 'eventResponses';
+    const path = kind === 'votes' ? '/polls/message-1/votes' : '/messages/message-1/event-responses';
+    const body = kind === 'votes' ? { poll: { question: 'Choose', options: [{ id: 'a', name: 'A' }] } } : { event: { name: 'Meeting' } };
+    let pages = 0;
+    let started!: () => void;
+    const stalled = new Promise<void>(resolve => { started = resolve; });
+    let upstreamSignal: AbortSignal | undefined;
+    fetcher.mockImplementation(async (url, init) => {
+      if (new URL(String(url)).pathname === '/message/status') {
+        vi.setSystemTime(start + 55_000);
+        return Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, attributes: { body }, relationships: { [kind]: { links: { related: path } } } } });
+      }
+      if (++pages === 1) return Response.json({ jsonapi: { version: '1.1' }, data: [], links: { next: path + '?page%5Bcursor%5D=next' }, meta: { coverage: 'observed' } });
+      upstreamSignal = init?.signal as AbortSignal;
+      started();
+      return new Promise<Response>((_, reject) => upstreamSignal!.addEventListener('abort', () => reject(upstreamSignal!.reason), { once: true }));
+    });
+    let completed = false;
+    const pending = rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: [include] } } }).then(result => { completed = true; return result; });
+    await stalled;
+    expect(pages).toBe(2);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(upstreamSignal?.aborted).toBe(true);
+    expect(completed).toBe(true);
+    expect((await pending).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504 } } } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    { encodingFormat: 'text/plain' },
+    { encodingFormat: 'image/*' },
+    { encodingFormat: 'application/pdf' },
+    { include: ['metadata'] },
+  ])('counts the initial lookup in the PDF budget: %j', async options => {
+    const { rpc, fetcher, env, toMarkdown } = await messageTool();
+    env.MAX_MEDIA_BYTES = '8388608';
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        now = 60_001;
+        return new Response(readFileSync('test/fixtures/document-pages.pdf'));
+      }
+      now = 7_000;
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
+    });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { connectionId, messageId: 'message-1', error: { code: 'wapilot_timeout', status: 504, retryable: false } } } });
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('shares one PDF budget across metadata inspection and conversion', async () => {
+    const { rpc, fetcher, env, toMarkdown } = await messageTool();
+    env.MAX_MEDIA_BYTES = '8388608';
+    let now = 0, downloads = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        now = ++downloads === 1 ? 35_000 : 60_001;
+        return new Response(readFileSync('test/fixtures/document-pages.pdf'));
+      }
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
+    });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: ['metadata'], encodingFormat: 'text/plain' } } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504 } } } });
+    expect(downloads).toBe(2);
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('stops a stalled conversion at the original deadline after metadata work and clears timers', async () => {
+    const { rpc, fetcher, env, toMarkdown } = await messageTool();
+    env.MAX_MEDIA_BYTES = '8388608';
+    vi.useFakeTimers();
+    const start = Date.now();
+    let lookups = 0;
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        vi.setSystemTime(start + 35_000);
+        return new Response(readFileSync('test/fixtures/document-pages.pdf'));
+      }
+      if (++lookups === 1) vi.setSystemTime(start + 7_000);
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf() });
+    });
+    let started!: () => void;
+    const converting = new Promise<void>(resolve => { started = resolve; });
+    toMarkdown.mockImplementation(() => { started(); return new Promise(() => {}); });
+    let completed = false;
+    const pending = rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: ['metadata'], encodingFormat: 'text/plain' } } }).then(result => { completed = true; return result; });
+    await converting;
+    expect(toMarkdown).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(completed).toBe(true);
+    expect((await pending).result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504, retryable: false } } } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('counts the initial lookup and download in the audio inference budget', async () => {
+    const { rpc, fetcher, run } = await messageTool();
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    fetcher.mockImplementation(async url => {
+      if (String(url).startsWith('https://storage.example.test/')) {
+        now = 20_000;
+        return new Response('synthetic audio');
+      }
+      now = 7_000;
+      return Response.json({ jsonapi: { version: '1.1' }, data: retainedPdf('https://storage.example.test/voice.ogg', 'audio/ogg') });
+    });
+    run.mockImplementation(async () => { now = 300_001; return { text: 'Late transcript' }; });
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { encodingFormat: 'text/plain' } } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'wapilot_timeout', status: 504, retryable: false } } } });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain('Late transcript');
+  });
+});
+
 describe('PDF elapsed deadline checkpoints', () => {
   it.each([
     [{ encodingFormat: 'image/*' }, 'FPDF_RenderPageBitmap', {pages: [1, 3]}, 'document-matrix.pdf', [0]],

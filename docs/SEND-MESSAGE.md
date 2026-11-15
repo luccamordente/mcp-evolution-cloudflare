@@ -9,9 +9,10 @@ O catálogo MCP atual usa somente `search_connections`, `search_contacts`, `sear
 
 | Campo | Contrato |
 | --- | --- |
-| `connectionId` | UUID interno opcional. A ausência seleciona a conexão padrão do usuário. |
-| `idempotencyKey` | Chave opaca opcional, de 1 a 200 caracteres após remover espaços nas extremidades. Não contém conteúdo da mensagem. |
-| `message` | Objeto obrigatório, discriminado por `kind`. |
+| `options.connectionId` | UUID interno opcional. A ausência seleciona a conexão padrão do usuário. |
+| `options.idempotencyKey` | Chave opaca opcional, de 1 a 200 caracteres após remover espaços nas extremidades. Não contém conteúdo da mensagem. |
+| `message` | Objeto obrigatório, discriminado por `kind`, contendo somente campos específicos da variante. |
+| `options` | Objeto obrigatório com `to`, citação e demais campos comuns; mídia usa `mediaSource` e `mimeType`. |
 
 O HTTP exige OAuth com `mcp:write`. O stdio recebe permissões do processo local confiável. Ambos resolvem o usuário e a conexão antes de usar a credencial da instância. A chave administrativa não autentica envios.
 
@@ -23,26 +24,26 @@ Os campos desta tabela são próprios da variante. Campos opcionais usam `?`. As
 | --- | --- | --- |
 | `text` | `text`, `forwardingScore?` | `to` |
 | `link` | `text` com pelo menos uma URL HTTPS aprovada | `to` |
-| `image` | `mimeType`, `source`, `caption?` | `to` |
-| `video` | `mimeType`, `source`, `fileName?`, `caption?`, `gifPlayback?` | `to` |
-| `voice_note` | `mimeType`, `source` | `to` |
-| `document` | `mimeType`, `source`, `fileName?`, `caption?` | `to` |
-| `gif` | `mimeType`, `source`, `fileName?`, `caption?` | `to` |
+| `image` | `caption?` | `to` |
+| `video` | `fileName?`, `caption?`, `gifPlayback?` | `to` |
+| `voice_note` | nenhum (mídia em `options`) | `to` |
+| `document` | `fileName?`, `caption?` | `to` |
+| `gif` | `fileName?`, `caption?` | `to` |
+| `event` | `name`, `description?`, `startTime`, `endTime?`, `location?` | `to` |
 | `poll` | `question`, `options`, `maxAnswers` com padrão `1` | `to` |
 | `list` | `title`, `description`, `buttonText`, `footerText`, `sections` | `to` |
 | `location` | `name`, `latitude`, `longitude`, `address` | `to` |
 | `contact` | `fullName`, `organization?`, `phone` | `to` |
 | `sticker` | `url` | `to` |
 | `buttons` | `title`, `description`, `footer`, `buttons`, `header?` | `to` |
-| `carousel` | `cards`, `footer?`, `delayMs?` | `to` |
+| `carousel` | `cards`, `footer?` | `to` |
 | `forward` | `source: { conversationId, messageId }` | `to` |
-| `status_text` | `text` | Status, sem `to` |
-| `status_image` | `mimeType`, `source`, `caption?` | Status, sem `to` |
-| `status_video` | `mimeType`, `source`, `caption?` | Status, sem `to` |
 
 `voice_note` rejeita legenda e nome de arquivo, pois o formato nativo não preserva esses campos. `image` também não aceita nome de arquivo. Em `video`, `fileName` exige `gifPlayback: true` e identifica metadados de armazenamento, sem prometer nome visível no cliente. `voice_note` envia uma mensagem de voz com a marca nativa `PTT=true`. Não representa um anexo de áudio comum. `forward` resolve a mensagem retida na conversa de origem e recusa conteúdo ausente ou pertencente a outra conversa. O encaminhamento disponível conserva texto e mídia retidos, incluindo reprodução de GIF; não promete reconstruir todos os formatos interativos.
 
 ### Opções de conversa
+
+Os campos abaixo pertencem a `options`, assim como `customMessageId`, `mediaSource` e `mimeType`.
 
 `text`, `link`, `image`, `video`, `voice_note`, `document`, `gif`, `poll`, `list`, `location`, `contact`, `sticker` e `buttons` aceitam estas opções:
 
@@ -58,21 +59,21 @@ Os campos desta tabela são próprios da variante. Campos opcionais usam `?`. As
 
 `customMessageId` é opcional em `text`, `link`, `image`, `video`, `voice_note`, `document`, `gif`, `poll`, `location`, `contact`, `sticker` e nas três variantes de Status. Ele define o ID solicitado ao WhatsApp. Não substitui `idempotencyKey` nem garante deduplicação.
 
-`carousel` aceita somente `to` e `delayMs` como opções de conversa. Não anuncia citação, menções, `formatJid` ou ID personalizado. `forward` aceita somente destino e origem. As variantes de Status não aceitam destinatário, citação, menções ou atraso.
+`carousel` aceita somente `to` e `delayMs` como opções de conversa. Não anuncia citação, menções, `formatJid` ou ID personalizado. `forward` aceita somente destino e origem. Status usa `message.kind: "text" | "image" | "video"` e `options.to: "status"`; não aceita citação, menções ou atraso. Os nomes `status_*` são exclusivamente internos.
 
 ### Mídia e URLs
 
-A fonte de anexos é `{ kind: "base64", dataBase64: "..." }`, sem prefixo de URL de dados. O limite de bytes é `MAX_MEDIA_BYTES`, com padrão de 8 MiB. O Worker normaliza espaços e padding do Base64 e normaliza MIME antes do envio e do cálculo de idempotência. O registro operacional guarda o hash dos bytes, sem guardar o arquivo.
+`options.mimeType` informa o MIME e `options.mediaSource`, a fonte de anexos, é `{ kind: "base64", dataBase64: "..." }`, sem prefixo de URL de dados. O limite de bytes é `MAX_MEDIA_BYTES`, com padrão de 8 MiB. O Worker normaliza espaços e padding do Base64 e normaliza MIME antes do envio e do cálculo de idempotência. O registro operacional guarda o hash dos bytes, sem guardar o arquivo.
 
 | Variante | MIME aceito |
 | --- | --- |
-| `image`, `status_image` | `image/jpeg`, `image/png`, `image/webp` |
-| `video`, `status_video` | `video/mp4` |
+| `image` (conversa ou Status) | `image/jpeg`, `image/png`, `image/webp` |
+| `video` (conversa ou Status) | `video/mp4` |
 | `voice_note` | `audio/*` |
 | `document` | `application/*` |
 | `gif` | `image/gif` ou `video/mp4` |
 
-`gif` solicita reprodução em loop. Um GIF de entrada é convertido pelo backend para MP4 silencioso. `video` conserva vídeo comum, exceto quando `gifPlayback: true` solicita loop. Os limites de conversão estão em [TOOLS.md](TOOLS.md#envio-de-gifs).
+`gif` solicita reprodução em loop. Um GIF de entrada é convertido pelo backend para MP4 silencioso. `video` conserva vídeo comum, exceto quando `gifPlayback: true` solicita loop. Consulte o [envelope público de envio](TOOLS.md#envio-e-idempotência).
 
 `sticker.url`, URLs presentes em `link.text`, cabeçalhos de botões e imagens/vídeos dos cartões são downloads remotos executados pelo provedor. Eles exigem uma origem HTTPS exata em `SEND_MEDIA_ORIGINS`, separada das allowlists de leitura. A configuração vazia bloqueia esses downloads. URLs não aceitam credenciais ou fragmentos, e a origem da API é excluída da allowlist.
 
@@ -105,13 +106,17 @@ Uma resposta de texto cita uma mensagem conhecida:
 
 ```json
 {
-	"idempotencyKey": "example-text-1",
-	"message": {
-		"kind": "text",
-		"to": "5511999999999",
-		"text": "Confirmado!",
-		"replyTo": { "messageId": "SOURCE_MESSAGE" }
-	}
+  "message": {
+    "kind": "text",
+    "text": "Confirmado!"
+  },
+  "options": {
+    "idempotencyKey": "example-text-1",
+    "to": "5511999999999",
+    "replyTo": {
+      "messageId": "SOURCE_MESSAGE"
+    }
+  }
 }
 ```
 
@@ -119,24 +124,38 @@ Uma enquete usa a mesma estrutura de citação:
 
 ```json
 {
-	"idempotencyKey": "example-poll-1",
-	"message": {
-		"kind": "poll",
-		"to": "5511999999999",
-		"question": "Qual horário?",
-		"options": ["10h", "14h", "16h"],
-		"maxAnswers": 1,
-		"replyTo": { "messageId": "SOURCE_MESSAGE" }
-	}
+  "message": {
+    "kind": "poll",
+    "question": "Qual horário?",
+    "options": [
+      "10h",
+      "14h",
+      "16h"
+    ],
+    "maxAnswers": 1
+  },
+  "options": {
+    "idempotencyKey": "example-poll-1",
+    "to": "5511999999999",
+    "replyTo": {
+      "messageId": "SOURCE_MESSAGE"
+    }
+  }
 }
 ```
 
-Um Status não recebe `to`:
+Um Status usa `options.to: "status"`:
 
 ```json
 {
-	"idempotencyKey": "example-status-1",
-	"message": { "kind": "status_text", "text": "Aberto hoje até 18h." }
+  "message": {
+    "kind": "text",
+    "text": "Aberto hoje até 18h."
+  },
+  "options": {
+    "idempotencyKey": "example-status-1",
+    "to": "status"
+  }
 }
 ```
 
@@ -148,9 +167,9 @@ O resultado conserva `connectionId`, `accepted`, os identificadores retornados p
 
 A operação canônica de idempotência é `send_message`. A chave protege a ação por 24 horas no escopo do usuário e da conexão. O hash inclui variante, destino, referência citada, opções e conteúdo ordenado. Trocar a variante com a mesma chave produz conflito; não cria outra ação independente.
 
-As antigas ferramentas `send_text`, `send_media`, `reply_to_message` e `forward_message` foram removidas do catálogo e dos handlers. `get_message` com `options.idempotencyKey` ainda aceita esses nomes como `operation` somente para consultar registros operacionais anteriores à migração. Esses registros continuam sujeitos à expiração original de 24 horas.
+As antigas ferramentas `send_text`, `send_media`, `reply_to_message` e `forward_message` foram removidas do catálogo e dos handlers. Esses registros continuam sujeitos à expiração original de 24 horas e não possuem consulta pública por nome antigo. O catálogo atual consulta apenas `send_message` por `get_message({options: {idempotencyKey, connectionId}})`, sem descriptografar credenciais nem chamar o provedor.
 
-A migration `0010_unified_send_fence.sql` cria bloqueios atômicos entre os namespaces antigo e novo. Um registro legado ativo impede reservar a mesma chave por `send_message`; uma reserva nova impede um Worker antigo de reservar essa chave no namespace legado. O erro `send_legacy_action_exists` não autoriza reenvio, troca de chave ou cópia de conteúdo. A consulta usa a operação original, sem iniciar outra escrita. A [ordem de publicação](DEPLOY.md#publicação-da-ferramenta-unificada-de-envio) aplica essa migration antes do corte de catálogo e clientes.
+A migration `0010_unified_send_fence.sql` cria bloqueios atômicos entre os namespaces antigo e novo. Um registro legado ativo impede reservar a mesma chave por `send_message`; uma reserva nova impede um Worker antigo de reservar essa chave no namespace legado. O erro `send_legacy_action_exists` não autoriza reenvio, troca de chave ou cópia de conteúdo. A consulta pública usa somente a operação unificada, sem iniciar outra escrita. A [ordem de publicação](DEPLOY.md#publicação-da-ferramenta-unificada-de-envio) aplica essa migration antes do corte de catálogo e clientes.
 
 ## Inventário do provedor e suporte futuro
 
@@ -181,7 +200,7 @@ O suporte eventual de cada item abaixo requer uma implementação verificada ant
 
 | Item | Estado atual e dependência |
 | --- | --- |
-| Evento nativo | Não há rota de envio de evento no `main` conferido. Exige contrato, construção nativa, segredo de mensagem, serialização e testes do backend. O recebimento de RSVP também requer mudanças. Veja a [investigação de eventos nativos](NATIVE-WHATSAPP-EVENTS.md). |
+| Operações adicionais de evento | Criação nativa usa `event` e leitura de RSVP usa `get_message` com `options.include: ["event-responses"]`. Edição, cancelamento e RSVP de saída continuam fora do contrato. Veja o [contrato implementado](plans/NATIVE-HISTORY-BACKEND-CONTRACT.md). |
 | Template de negócio | `/send/template` existe, mas o handler rejeita a operação. Exige outro canal ou implementação compatível. |
 | Pix | Os campos existem no tipo de botão, mas o serviço rejeita esse envio porque há descarte silencioso no protocolo usado. |
 | Anexo de áudio comum | A rota `audio` atual produz nota de voz. Exige suporte distinto para áudio sem PTT. |
@@ -208,4 +227,14 @@ Um arquivo `.ics` enviado por `document` continua sendo um anexo, mesmo quando o
 
 Os testes do contrato também verificam descoberta de uma única ferramenta de envio, serialização das variantes, rejeição antes do despacho, autorização, posse da conexão, conflitos entre variantes, concorrência e bloqueio entre chaves antigas e novas. Os testes distinguem aceite confirmado de resultado desconhecido, sem replay automático. A execução e suas limitações ficam no relatório da mudança; este documento não afirma resultado de produção.
 
-A aceitação em dispositivos é separada e depende de autorização para destinatário e conteúdo reais. Para cada variante homologada, a conferência registra Android, iOS e WhatsApp Web, versão do cliente e conexão usada. Verifica aparência nativa, conteúdo, autoria/citação, callback de linhas e botões, votação da enquete, reprodução de mídia e destinatário Status. Evento e RSVP entram nessa lista somente após existir suporte nativo. Uma resposta HTTP bem-sucedida não substitui a observação no dispositivo.
+A aceitação em dispositivos é separada e depende de autorização para destinatário e conteúdo reais. Para cada variante homologada, a conferência registra Android, iOS e WhatsApp Web, versão do cliente e conexão usada. Verifica aparência nativa, conteúdo, autoria/citação, callback de linhas e botões, votação da enquete, reprodução de mídia e destinatário Status. Evento e RSVP de leitura têm contrato nativo, mas sua homologação visual continua separada. Uma resposta HTTP bem-sucedida não substitui a observação no dispositivo.
+
+## Eventos nativos
+
+`message.kind: "event"` cria um cartão de evento pela rota tipada `/send/event`. Recebe `options.to`, `options.replyTo?`, `message.name`, `description?`, `startTime`, `endTime?` e `location?`. Não aceita menções, atraso, ID personalizado, cancelamento ou convidados adicionais na criação. Um `.ics` enviado como documento continua documento.
+
+Os instantes exigem data ISO 8601 com segundos inteiros e fuso explícito. O adaptador emite segundos Unix em `0..253402300799`, sem truncamento; o término deve ser posterior ao início. Offsets equivalentes são normalizados para a mesma ação idempotente. Não há validação de data futura que invalide uma repetição da mesma ação.
+
+Nome e nome do local recebem trim e aceitam 1 a 200 unidades UTF-16. Descrição e endereço opcionais preservam espaços e aceitam 1 a 10.000 e 1 a 1.000 unidades respectivamente. Local exige nome, latitude e longitude finitas nos intervalos geográficos; zero é válido. Número individual é normalizado para JID PN completo; PN, LID e grupo são aceitos. Citação de grupo exige participante completo e a origem precisa estar retida e verificável no provedor.
+
+A idempotência existente protege a chave por 24 horas. Segredo e ID nativo pertencem ao provedor. Timeout ou resultado desconhecido não inicia outro envio, não altera a chave e não usa texto/documento como fallback. Aceite não confirma entrega ou renderização. A leitura de RSVP é uma operação separada; esta variante não envia RSVP, edita ou cancela eventos.

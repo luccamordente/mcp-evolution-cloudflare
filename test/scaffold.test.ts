@@ -3,35 +3,18 @@ import { app, MCP_PROTOCOL_VERSION } from '../src/index';
 import { evolutionState } from '../src/lib/connection-status';
 import { encryptToken, decryptToken } from '../src/lib/crypto';
 import { EvolutionGoClient } from '../src/lib/evolution';
-import { accessAudiences, authenticateAccessRequest } from '../src/lib/auth';
+import { createTestD1 } from './helpers/local-d1';
 
 const env = {
   DB: {} as D1Database,
   EVOLUTION_BASE_URL: 'https://evolution.invalid',
   TOKEN_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-  ACCESS_JWKS_URL: 'https://access.invalid/certs',
-  ACCESS_ISSUER: 'https://access.invalid',
-  ACCESS_AUDIENCE: 'aud',
-  ALLOWED_EMAILS: 'luccamordente@gmail.com,heitorsalazar@gmail.com',
+  CLERK_PUBLISHABLE_KEY: 'pk_live_' + Buffer.from('clerk.fixture.invalid$').toString('base64'),
+  CLERK_SECRET_KEY: 'sk_live_synthetic',
+  MCP_PUBLIC_URL: 'https://mcp.invalid',
 } as any;
 
 describe('worker scaffold', () => {
-  it('accepts comma-separated Cloudflare Access audiences', () => {
-    expect(accessAudiences({ ACCESS_AUDIENCE: 'authorize-aud, connections-aud, api-aud' })).toEqual([
-      'authorize-aud',
-      'connections-aud',
-      'api-aud',
-    ]);
-  });
-
-  it('accepts comma-separated Cloudflare Access audiences', () => {
-    expect(accessAudiences({ ACCESS_AUDIENCE: 'authorize-aud, connections-aud, api-aud' })).toEqual([
-      'authorize-aud',
-      'connections-aud',
-      'api-aud',
-    ]);
-  });
-
   it('serves health with the current SDK protocol revision', async () => {
     const response = await app.request('/healthz', {}, env);
     expect(response.status).toBe(200);
@@ -67,25 +50,26 @@ describe('worker scaffold', () => {
 
   it('protects authorization management on the UI and API surfaces', async () => {
     for (const path of ['/connections/authorizations', '/api/authorizations']) {
-      const response = await app.request(path, {}, env);
+      const response = await app.request('https://mcp.invalid' + path, {}, env);
       expect(response.status).toBe(401);
-      expect((await response.json() as { error: string }).error).toContain('Cloudflare Access');
+      expect((await response.json() as { error: string }).error).toContain('Entre no WaPilot');
     }
   });
 
-  it('routes the legacy admin URL through the Access-protected connections surface', async () => {
+  it('routes the legacy admin URL through the authenticated connections surface', async () => {
     const response = await app.request('/admin/evolution', {}, env);
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe('/connections?provision=1');
   });
 
   it('allows the synthetic UI identity only in the local environment', async () => {
-    await expect(authenticateAccessRequest(new Request('http://localhost/connections'), {
-      ...env,
-      ENVIRONMENT: 'local',
-      LOCAL_DEV_USER_EMAIL: 'dev@example.test',
-    } as any)).resolves.toMatchObject({ id: 'local:dev@example.test', email: 'dev@example.test' });
-    await expect(authenticateAccessRequest(new Request('http://localhost/connections'), env)).rejects.toMatchObject({ status: 401 });
+    const database = await createTestD1();
+    try {
+      const response = await app.request('/connections', {}, { ...env, DB: database.db, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'dev@example.test' });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('dev@example.test');
+    } finally { await database.dispose(); }
+    expect((await app.request('https://mcp.invalid/connections', {}, env)).status).toBe(401);
   });
 
   it('encrypts and decrypts instance tokens with authenticated encryption', async () => {

@@ -84,8 +84,8 @@ export async function processPdf(bytes: Uint8Array, options: PdfRequest, signal:
   }, expiresAt);
 }
 
-export async function readDocumentPages(client: EvolutionGoClient, env: Pick<Env, 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, options: PdfRequest, parentSignal: AbortSignal) {
+export async function readDocumentPages(client: EvolutionGoClient, env: Pick<Env, 'DOCUMENT_STORAGE_ORIGINS' | 'EVOLUTION_BASE_URL' | 'MAX_MEDIA_BYTES'>, messageId: string, options: PdfRequest, parentSignal: AbortSignal, expiresAt?: number) {
   return withPdfDownload(client, env, messageId, parentSignal,
     kind => new PdfProcessingError(kind === 'cancel' ? 'request_cancelled' : 'wapilot_timeout', kind === 'cancel' ? 499 : 504, kind === 'cancel' ? 'WaPilot PDF reading was cancelled.' : 'WaPilot PDF reading exceeded 60 seconds. Request fewer pages.'),
-    async (blob, signal, expiresAt) => processPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt));
+    async (blob, signal, expiresAt) => processPdf(new Uint8Array(await blob.arrayBuffer()), options, signal, expiresAt), expiresAt);
 }

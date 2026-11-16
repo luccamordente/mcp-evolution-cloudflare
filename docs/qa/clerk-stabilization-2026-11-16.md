@@ -28,17 +28,23 @@ A observabilidade publicada mantém logs habilitados, invocation logs desligados
 
 As provas de continuidade/refresh e a revogação dos dois grants descartáveis de 15/11 permanecem evidências históricas, separadas deste checkpoint. Nenhum grant diário foi revogado. Os cinco arquivos de tokens já removidos não foram recriados para esta operação.
 
-## Correção HTTP preparada
+## Correção HTTP publicada
 
 A reprodução local demonstrou a mesma exceção para HTTP público. A correção no entrypoint responde `308` para a mesma URL em HTTPS com `no-store`, antes de construir o Provider; preserva método, corpo não consumido, caminho/query e o HTTP de loopback do desenvolvimento. O contrato HTTPS/OAuth/MCP permanece igual.
 
-Implementação delegada com esforço medium e revisão independente GPT Sol xhigh, sem achados bloqueantes. Dez casos novos de fronteira e quatro testes de consentimento passaram; a suíte completa aprovou **1006 testes, 23 pulados**, com assets e typecheck aprovados. O dry-run do pacote passou usando configuração privada com vars atuais, mesmos D1/KV e imagem sender conferida na versão ativa. Essa prova local ainda não é publicação nem teste após deploy.
+Implementação delegada com esforço medium e revisão independente GPT Sol xhigh, sem achados bloqueantes. Dez casos novos de fronteira e quatro testes de consentimento passaram; a suíte completa aprovou **1006 testes, 23 pulados**, com assets e typecheck aprovados. O dry-run do pacote passou sem warnings usando configuração privada exclusiva de produção, vars atuais, mesmos D1/KV e imagem sender conferida na versão ativa.
+
+O [PR #74](https://github.com/luccamordente/mcp-evolution-cloudflare/pull/74) foi integrado no commit `e66c582f5e846178a30b98bb10d83fcdc60badf1`. A candidata foi relida inativa, com bindings/secrets, compatibilidade e imagem idênticos aos anteriores, e promovida a 100% às **22:23:59 UTC**, versão **`0f73662e-bc2d-4700-abf3-49abceba2bc4`**. A atribuição ao fonte usa a árvore Git idêntica ao `main`, recibo do upload e tag `http-e66c582`; a API desta versão não retornou annotation `workers/commit_sha`. Nenhum `secret put/delete` foi usado.
+
+Às **22:24:44 UTC**, o read-back confirmou essa versão em 100%, bindings/secrets e observabilidade preservados, mesma imagem sender, dois usuários ativos vinculados, três conexões idênticas e FK zero. As 23 chaves `grant:` preexistentes não expiradas permaneciam presentes; esse número é o inventário de chaves desta operação, não uma recontagem histórica dos seis grants diários de 15/11. O retorno Access seguro continuava disponível.
+
+Os probes reais confirmaram GET HTTP `/` e POST HTTP `/mcp` com 308 e `no-store`; health/discovery HTTPS 200; MCP HTTPS sem bearer 401 com metadata OAuth; APIs sem sessão 401 JSON `no-store` e HTML de dashboard/admin redirecionado ao login. Uma leitura autenticada de conexões pelo conector passou depois do deploy, sem status live nem mensagens. Não houve teste novo de refresh nem homologação das sessões pessoais, nem medição contínua de disponibilidade.
 
 ## Gates restantes
 
 - Sessões reais das duas pessoas: dashboard, somente suas conexões, APIs e painel administrativo; renovação e painel móvel autenticado.
 - Verificação final OAuth/MCP/refresh e inventário, sem revogar autorizações diárias.
-- Publicar/verificar a correção HTTP revisada e concluir as verificações de estabilidade, sem alegar observação contínua ou indisponibilidade zero.
+- Concluir as verificações de estabilidade com sessões reais e refresh final, sem alegar observação contínua ou indisponibilidade zero.
 - Após os gates, encerrar o legado Access pela operação autorizada e documentar o efeito sobre o retorno; até lá, preservar aplicações, policies, secrets e artefato seguro. Builds não foi reativado.
 
 As issues #59, #64 e #66 permanecem abertas. O estado privado conserva a confirmação e o vínculo concluído, para retomar as verificações sem exigir confirmação idêntica nem consultar o grupo fora do intervalo de quatro horas. Nenhuma conclusão de homologação é inferida dos testes locais históricos ou dos mocks.

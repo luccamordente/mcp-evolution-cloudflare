@@ -362,3 +362,16 @@ Antes de publicar o Worker com os códigos expressivos, aplique `0012_send_actio
 ### Logs de links temporários de anexos
 
 O contrato `/attachments/:token` contém uma capacidade de 15 minutos no path. Preserve `observability.enabled=true`, `redact_query_string=true` e logs sanitizados da aplicação (`logs.enabled=true`), com `logs.invocation_logs=false` e `traces.enabled=false`: logs automáticos de invocação podem registrar a URL completa, e a redação de query não protege o path. Confira esses campos no read-back da nova versão completa antes da promoção. A configuração no fonte não comprova alteração live.
+
+## Release same-row message observations
+
+This release adds observation and delivery fields inside existing message metadata. It adds no relational column, table, index, queue, or history cache. Existing unrelated migrations keep their own release requirements.
+
+1. Record the reviewed WaPilot and Go commit IDs, immutable build artifacts, active prior versions, runtime bindings, and sender image. Run `npm run check`, the [connected acceptance launcher](../DEVELOPMENT.md#verify-same-row-observations-through-mcp-and-postgresql), and the Go PostgreSQL and CLI regressions documented in its `docs/message-observation-acceptance.md`.
+2. Run `npx wrangler deploy --dry-run --containers-rollout none`. This validates the Worker bundle only. Preserve `wrangler.jsonc`, existing Containers, and sender images. Without Docker, a complete Container build remains unverified.
+3. Under deployment authorization, publish WaPilot first. Confirm legacy-provider reads, normal messages, missing IDs, and connection isolation through the authenticated MCP. Check runtime bindings by read-back. Then publish the reviewed Go producer under its separate deployment authorization.
+4. Verify authorized synthetic receipt-only, pending, and original rows through MCP and Go reads. Confirm default search exclusion, explicit receipt inspection, successful pending JSON, processing 409, and promotion without delivery regression. A successful inspection does not guarantee later recovery.
+5. Confirm structured history diagnostics in the already enabled logging pipeline. Count outcomes and skip reasons without message IDs as metric labels. Keep source and destination authorization, classification, restoration, reviewed private plans, backups, and CAS as separate operational gates in the Go repair runbook. No test run authorizes production repairs.
+6. Retain compatible rollback artifacts. Keep metadata intact and check receipt filtering and pending reads after rollback. Old consumers or writers that ignore markers can expose receipts as messages or regress stored state. Use a verified compatible version or pause affected ingestion and reads until compatibility is restored. Data rollback requires separate approval and the repair tool's conditional checks.
+
+No deployment, production repair, real WhatsApp send, or key negotiation is performed by these checks. The historical loss cause and Cloud Logging delivery after deployment remain operational verification items.

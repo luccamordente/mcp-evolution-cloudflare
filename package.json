@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:sender-container": "node --test test/sender-container.container.mjs",
     "test:acceptance:history": "node scripts/native-history-acceptance.mjs",
+    "test:acceptance:observation": "node scripts/message-observation-acceptance.mjs",
     "test:acceptance:send": "node scripts/send-acceptance-backend.mjs",
     "test:acceptance:gif": "node scripts/acceptance-gif.mjs",
     "check": "npm run check:auth && npm run check:receipt && npm run typecheck && npm test",

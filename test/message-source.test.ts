@@ -12,4 +12,9 @@ describe('withSource', () => {
     expect(withSource({ id: 'm', conversationId: '5511999999999', source: '5511999999999', direction: 'inbound' }, '551142000028').source).toBe('5511999999999');
     expect(withSource({ id: 'm', conversationId: '120363@g.us', source: '120363', direction: 'outbound' }).source).toBe('120363');
   });
+  it('never fills receipt-only source or timestamp from connection metadata', () => {
+    const message = withSource({ id: 'm', direction: 'outbound', source: 'invented', timestamp: '2026-11-16', type: 'application/octet-stream', observation: { version: 1, state: 'receipt_only', observedAt: 1794790925000, timestampSource: 'receipt' } }, '551142000028');
+    expect(message).toMatchObject({ direction: 'unknown', messageType: 'unknown' });
+    for (const field of ['source', 'timestamp', 'type']) expect(message).not.toHaveProperty(field);
+  });
 });

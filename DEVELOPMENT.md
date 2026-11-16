@@ -325,3 +325,20 @@ bounded pages. An unset URL skips this case and does not establish H-A8.
 `npm run test:acceptance:history` inicia a fixture HTTP real do provedor e executa o handler MCP sobre PostgreSQL isolado. Configure `MESSAGE_HISTORY_TEST_DSN` como DSN keyword simples, por exemplo `host=127.0.0.1 port=5432 dbname=acceptance user=test password=synthetic sslmode=disable`. O launcher aceita somente as chaves `host`, `port`, `dbname`, `user`, `password`, `sslmode` e `connect_timeout`, sem repetições, aspas, escapes ou espaços nos valores; `host` deve ser exatamente `127.0.0.1`, `::1` ou `localhost`. URLs, `hostaddr`, listas de hosts, serviços e opções são recusados antes de iniciar Go; variáveis `PG*` não são herdadas pelo processo Go. O checkout canônico é `.scratch/evolution-go`; atualize-o com `git pull --ff-only` antes da execução. `WAPILOT_ACCEPTANCE_GO` seleciona o toolchain de `go.mod`. O launcher falha sem DSN e limpa seus arquivos temporários. Não use credenciais ou banco de produção.
 
 A aceitação de envio usa o mesmo checkout canônico. A fixture de evento usa o store SDK isolado e verifica o segredo durável antes da captura do dispatch. Nenhuma das aceitações envia mensagens ao WhatsApp.
+
+### Verify same-row observations through MCP and PostgreSQL
+
+`npm run test:acceptance:observation` starts the Go test-only HTTP fixture and calls the real MCP handler/server through local D1 and `EvolutionGoClient` network fetch. Set `MESSAGE_HISTORY_TEST_DSN` to an isolated loopback PostgreSQL keyword DSN with schema creation permission. The launcher accepts the same simple parameters as native history acceptance and removes inherited `PG*` variables. Set `WAPILOT_OBSERVATION_GO_ROOT` to the absolute Go checkout containing `pkg/message/acceptance/observation_connected_test.go`; its default is `.scratch/evolution-go`. `WAPILOT_ACCEPTANCE_GO` selects the Go executable required by that checkout's `go.mod`.
+
+```sh
+export MESSAGE_HISTORY_TEST_DSN='host=127.0.0.1 port=55432 user=postgres dbname=postgres sslmode=disable'
+export WAPILOT_OBSERVATION_GO_ROOT=/absolute/path/to/evolution-go
+export WAPILOT_ACCEPTANCE_GO=/absolute/path/to/go
+npm run test:acceptance:observation
+```
+
+Expect eight connected tests and one Go fixture test to pass without skips. The fixture serves real authenticated message routes over loopback, reopens database pools six times, rejects one write in a real read-only transaction, and verifies unchanged row UUIDs, count, status, columns, relations, and indexes. It builds the real repair CLI for one synthetic classification and one separately approved synthetic text restoration, then reads the destination ID and group through MCP. The existing Go CLI regression owns the full 21-row, four-image, CAS, backup, rollback, and retention-policy matrix.
+
+The Go log records request paths and `schemaUnchanged=true`, then confirms removal of its synthetic schema. Private control files and local D1 are removed after the test. No provider fetch is mocked. Only the `_test.go` fixture exposes control endpoints. No production route, migration, WhatsApp message, personal credential, or remote binding is used. `npm run check` skips these eight tests when the launcher environment is absent; that skip does not prove connected acceptance.
+
+Run `npm run check` separately. Validate the Worker bundle with `npx wrangler deploy --dry-run --containers-rollout none` while preserving the sender Container configuration. This is a Worker-only build; a full Container image build still requires Docker. Follow [the observation release sequence](docs/DEPLOY.md#release-same-row-message-observations) before an authorized publication.

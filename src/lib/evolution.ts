@@ -1,3 +1,4 @@
+import { messageObservationSchema, messageDeliverySchema } from './message-observation';
 import { contentDiagnosticSchema, nativeMessageSchema, hasNativeContent, responsePageSchema, type ResponseKind } from './native-message';
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 import { Buffer } from 'node:buffer';
@@ -327,6 +328,22 @@ function normalizeMessage(value: unknown): Message {
     type: stringValue(attributes.encodingFormat),
     messageType: stringValue(attributes.encodingFormat) ?? 'unknown',
   };
+  const observation = messageObservationSchema.safeParse(meta.observation);
+  if (observation.success) message.observation = observation.data;
+  const delivery = messageDeliverySchema.safeParse(meta.delivery);
+  if (delivery.success) message.delivery = delivery.data;
+  if (message.observation && message.observation.state !== 'original_received') {
+    message.contentUnavailable = true;
+    message.contentUnavailableReason = message.observation.state;
+    message.type = undefined;
+    message.messageType = 'unknown';
+    if (message.observation.state === 'receipt_only') {
+      message.direction = 'unknown';
+      delete message.source;
+      delete message.timestamp;
+    }
+    return message;
+  }
   const diagnostic = contentDiagnosticSchema.safeParse(meta.content);
   if (diagnostic.success) {
     message.contentDiagnostic = diagnostic.data;
@@ -526,13 +543,13 @@ export class EvolutionGoClient {
     return { items, hasMore: options.offset + items.length < groups.length };
   }
 
-  async searchMessages(options: { text?: string; conversationId?: string; offset: number; limit: number }): Promise<Page<Message>> {
+  async searchMessages(options: { text?: string; conversationId?: string; includeReceiptOnly?: boolean; offset: number; limit: number }): Promise<Page<Message>> {
     const rows: Message[] = [];
     let cursor: string | undefined;
     let hasMore = false;
     const seen = new Set<string>();
     while (rows.length < options.offset + options.limit) {
-      const page = await this.listMessages(options.text, Math.min(50, options.offset + options.limit - rows.length), options.conversationId, undefined, cursor);
+      const page = await this.listMessages(options.text, Math.min(50, options.offset + options.limit - rows.length), options.conversationId, undefined, cursor, options.includeReceiptOnly);
       rows.push(...page.items);
       hasMore = page.hasMore;
       if (!page.hasMore || !page.nextCursor || seen.has(page.nextCursor)) break;
@@ -557,26 +574,45 @@ export class EvolutionGoClient {
     return { items: rows.slice(offset, offset + limit), hasMore: page.hasMore, meta: page.meta };
   }
 
-  async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*', cursor?: string): Promise<Page<Message>> {
+  async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*', cursor?: string, includeReceiptOnly?: boolean): Promise<Page<Message>> {
     const boundedLimit = Math.min(Math.max(limit, 1), 50);
     const query = text?.trim() ?? '';
     // Evolution Go caps limit at 50 (anything above falls back to 25), so look one row
     // ahead when we can, and otherwise probe once for an older row.
     const fetchLimit = Math.min(boundedLimit + 1, MESSAGE_SEARCH_MAX_LIMIT);
+    const timestamps = new WeakMap<Message, number>();
+    let supportsBeforeId = false;
     const search = async (rowLimit: number, before?: string) => {
       const params = new URLSearchParams({ limit: String(rowLimit) });
+      if (includeReceiptOnly !== undefined) params.set('includeReceiptOnly', String(includeReceiptOnly));
       if (query) params.set('q', query);
       if (conversationId !== undefined) params.set('identifier', conversationId);
       if (encodingFormat) params.set('encodingFormat', encodingFormat);
-      // Cursor = Unix ms; Evolution Go returns rows with at < before.
-      if (before && /^\d{1,15}$/.test(before)) params.set('before', before);
+      if (before?.startsWith('id:')) {
+        params.set('beforeId', before.slice(3));
+      } else if (before && /^\d{1,15}$/.test(before)) params.set('before', before);
       const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
-      return this.page(payload, 'message', normalizeMessage).items;
+      supportsBeforeId = asRecord(asRecord(payload)?.meta)?.messageSearchCursor === 'beforeId';
+      if (before?.startsWith('id:') && !supportsBeforeId) {
+        throw new EvolutionApiError(502, 'WaPilot could not continue this history search. Please start a new search.');
+      }
+      return this.page(payload, 'message', value => {
+        const message = normalizeMessage(value);
+        const at = resourceAttributes(value).at;
+        if (typeof at === 'number' && Number.isFinite(at)) timestamps.set(message, at);
+        return message;
+      }).items;
     };
-    const time = (m: Message) => (m.timestamp ? Date.parse(m.timestamp) : NaN);
+    const time = (m: Message) => timestamps.get(m) ?? NaN;
     const rows = await search(fetchLimit, cursor);
     let items = rows.slice(0, boundedLimit);
     const lookahead = rows.slice(boundedLimit);
+    const last = items.at(-1);
+    if (supportsBeforeId && last) {
+      const nextCursor = `id:${last.id}`;
+      const hasMore = lookahead.length > 0 || (items.length === boundedLimit && fetchLimit === boundedLimit && (await search(1, nextCursor)).length > 0);
+      return hasMore ? { items, nextCursor, hasMore: true } : { items, hasMore: false };
+    }
     const times = items.map(time).filter(Number.isFinite);
     if (items.length < boundedLimit || !times.length) return { items, hasMore: false };
     let oldest = Math.min(...times);

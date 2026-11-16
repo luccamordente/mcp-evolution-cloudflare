@@ -1,3 +1,4 @@
+import type { MessageObservation, MessageDelivery } from './lib/message-observation';
 import type { NativeMessage, ContentDiagnostic } from './lib/native-message';
 import type { CallbackSender } from './lib/sender-container';
 import type { ContentUnavailableReason, MessageUpdate } from './lib/message-update';
@@ -115,6 +116,8 @@ export interface MessageMediaItem {
 }
 
 export interface Message extends NativeMessage {
+  observation?: MessageObservation;
+  delivery?: MessageDelivery;
   contentDiagnostic?: ContentDiagnostic;
   contentPartial?: boolean;
   responseLinks?: Partial<Record<'votes' | 'eventResponses', string>>;
@@ -135,7 +138,7 @@ export interface Message extends NativeMessage {
   quotedId?: string;
   mentions?: string[];
   contentUnavailable?: boolean;
-  contentUnavailableReason?: ContentUnavailableReason | ContentDiagnostic['reason'];
+  contentUnavailableReason?: ContentUnavailableReason | ContentDiagnostic['reason'] | 'receipt_only' | 'pending_decryption';
   update?: MessageUpdate;
   /** Original provider type; unknown when absent, without guessing media expiry. */
   messageType?: string;

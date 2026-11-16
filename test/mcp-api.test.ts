@@ -47,6 +47,7 @@ for (const [code, scenario] of Object.entries(toolErrorScenarios)) {
     let options: Record<string, unknown> = {};
     if (code === 'message_not_found') fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: null }));
     else if (code === 'message_content_unavailable') resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'application/octet-stream', body: {} } };
+    else if (code === 'message_content_pending') { resource = { type: 'message', id: 'm1', attributes: {}, meta: { observation: { version: 1, state: 'receipt_only', observedAt: 1794790925000, timestampSource: 'receipt' } } }; options = { encodingFormat: 'image/*' }; }
     else if (code === 'message_unavailable') fetcher.mockResolvedValue(new Response('private-response', { status: 503 }));
     else { resource = { type: 'message', id: 'm1', attributes: { body: { event: { name: 'Synthetic event' } } } }; options = { include: ['event-responses'] }; }
     const result = await call('get_message', { messageId: 'm1', options });
@@ -62,7 +63,7 @@ for (const [code, scenario] of Object.entries(toolErrorScenarios)) {
 }
 it('advertises agent guidance, message variants and option descriptions', async () => {
   const result = await rpc('tools/list');
-  const tools = z.array(z.object({ name: z.string(), title: z.string().min(1), description: z.string().min(30), inputSchema: z.record(z.string(), z.unknown()) })).parse(result.tools);
+  const tools = z.array(z.object({ name: z.string(), title: z.string().min(1), description: z.string().min(30), inputSchema: z.record(z.string(), z.unknown()), outputSchema: z.record(z.string(), z.unknown()) })).parse(result.tools);
   const send = tools.find(tool => tool.name === 'send_message');
   const get = tools.find(tool => tool.name === 'get_message');
   const schema = z.object({ properties: z.object({ message: z.object({ anyOf: z.array(z.object({ description: z.string().min(10), properties: z.object({ kind: z.object({ const: z.string() }) }) })) }), options: z.object({ properties: z.object({ idempotencyKey: z.object({ description: z.string() }) }) }) }) }).parse(send?.inputSchema);
@@ -75,6 +76,9 @@ it('advertises agent guidance, message variants and option descriptions', async 
   expect(getSchema.properties.options.properties.include.description).toContain('15 minutes');
   expect(getSchema.properties.options.properties.encodingFormat.description).toContain('application/json');
   expect(getSchema.properties.options.properties.limit.description).toContain('1..5');
+  expect(JSON.stringify(get?.outputSchema)).toContain('receipt_only');
+  expect(JSON.stringify(get?.outputSchema)).toContain('observedAt');
+  expect(JSON.stringify(tools.find(tool => tool.name === 'search_messages')?.inputSchema)).toContain('includeReceiptOnly');
   expect(JSON.stringify(await rpc('server/discover'))).toContain('data.error.recovery');
 });
 

@@ -1,3 +1,4 @@
+import { messageObservationSchema, messageDeliverySchema } from '../src/lib/message-observation';
 import { searchOptions as listMessagesInput } from '../src/lib/mcp-options';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -122,5 +123,23 @@ describe('MCP tool output schema', () => {
     expect(JSON.stringify(schema)).toContain('quoted');
     expect(sendMessageInput.parse({ message: { kind: 'text', to: '5511999999999', text: 'Olá', replyTo: { messageId: 'SOURCE' } } }).message).toMatchObject({ replyTo: { messageId: 'SOURCE' } });
     expect(sendMessageInput.safeParse({ message: { kind: 'status_text', to: '5511999999999', text: 'Olá' } }).success).toBe(false);
+  });
+});
+
+describe('observation metadata schemas', () => {
+  it('accepts only recognized versions and consistent timestamp sources', () => {
+    const observation = { version: 1, state: 'receipt_only', observedAt: 1794790925000, timestampSource: 'receipt' };
+    expect(messageObservationSchema.parse({ ...observation, privateDiagnostic: 'omitted' })).toEqual(observation);
+    expect(messageObservationSchema.safeParse({ ...observation, version: 2 }).success).toBe(false);
+    expect(messageObservationSchema.safeParse({ ...observation, timestampSource: 'message' }).success).toBe(false);
+    expect(messageObservationSchema.safeParse({ ...observation, observedAt: '1794790925000' }).success).toBe(false);
+    expect(messageDeliverySchema.safeParse({ version: 1, state: 'read', at: 1794790922000 }).success).toBe(true);
+    expect(messageDeliverySchema.safeParse({ version: 1, state: 'History', at: 1794790922000 }).success).toBe(false);
+  });
+
+  it('advertises receipt inspection without widening pagination', () => {
+    expect(listMessagesInput.safeParse({ includeReceiptOnly: true, offset: 150, limit: 50 }).success).toBe(true);
+    expect(listMessagesInput.safeParse({ includeReceiptOnly: 'true' }).success).toBe(false);
+    expect(listMessagesInput.safeParse({ includeReceiptOnly: true, offset: 151, limit: 50 }).success).toBe(false);
   });
 });

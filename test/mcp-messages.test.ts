@@ -1402,3 +1402,95 @@ describe('native history diagnostics', () => {
     expect(result).toMatchObject({ structuredContent: { data: { message: { contentPartial: true, contentDiagnostic: { version: 1, state: 'partial' } } } } });
   });
 });
+
+describe('versioned message observations', () => {
+  const observedAt = 1794790925000;
+  const recoveryStep = 'Keep the same connection and message ID. You may inspect this state again later. Do not automatically resend the message or repeatedly request content processing.';
+  const explanations = {
+    receipt_only: 'WaPilot observed a delivery or read receipt for this message ID, but has not observed the original message in this connection. This record is not message content.',
+    pending_decryption: 'WaPilot observed the message, but its content is awaiting decryption. Content may become available after WhatsApp resends the message; recovery is not guaranteed.',
+  };
+  const incomplete = (state: 'receipt_only' | 'pending_decryption', id = 'message-1') => ({
+    ...retainedMessage, id,
+    attributes: { at: observedAt, encodingFormat: 'application/octet-stream', body: {} },
+    meta: { ...retainedMessage.meta, observation: { version: 1, state, observedAt, timestampSource: state === 'receipt_only' ? 'receipt' : 'message' }, delivery: { version: 1, state: 'read', at: observedAt - 1000 } },
+  });
+
+  it.each([undefined, { version: 1, state: 'original_received', observedAt, timestampSource: 'message' }, { version: 2, state: 'receipt_only', observedAt, timestampSource: 'receipt' }])('preserves retained content for old, current and future providers', async observation => {
+    const { message, fetcher } = await messageTool();
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { ...retainedMessage, meta: { ...retainedMessage.meta, observation, delivery: { version: 2, state: 'read', at: observedAt } } } }));
+    const { result } = await message({ messageId: 'message-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ message: { text: 'Reunião amanhã', source: '5511999999999' } });
+    expect(result.structuredContent.data).not.toHaveProperty('availability');
+    expect(result.structuredContent.data).not.toHaveProperty('message.delivery');
+    if (observation?.version === 1) expect(result.structuredContent.data).toHaveProperty('message.observation', observation);
+    else expect(result.structuredContent.data).not.toHaveProperty('message.observation');
+  });
+
+  it.each(['receipt_only', 'pending_decryption'] as const)('reads %s as successful JSON state', async state => {
+    const { message, fetcher } = await messageTool();
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: incomplete(state) }));
+    const { result } = await message({ messageId: 'message-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ encodingFormat: 'application/json', message: { observation: { version: 1, state }, delivery: { state: 'read' }, contentUnavailable: true, contentUnavailableReason: state }, availability: { state, reason: state, message: explanations[state], recovery: { action: 'inspect_message', tool: 'get_message', steps: [recoveryStep] } } });
+    expect(result.structuredContent.data).not.toHaveProperty('error');
+    if (state === 'receipt_only') {
+      expect(result.structuredContent.data).toMatchObject({ message: { direction: 'unknown', messageType: 'unknown' } });
+      for (const field of ['source', 'timestamp', 'type', 'media']) expect(result.structuredContent.data).not.toHaveProperty(`message.${field}`);
+    } else expect(result.structuredContent.data).toMatchObject({ message: { direction: 'inbound', source: '5511999999999', timestamp: new Date(observedAt).toISOString() } });
+  });
+
+  it.each(['receipt_only', 'pending_decryption'] as const)('blocks explicit content for %s before processing', async state => {
+    const { rpc, fetcher, run, toMarkdown } = await messageTool();
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: incomplete(state) }));
+    for (const encodingFormat of ['image/*', 'application/pdf', 'application/octet-stream']) {
+      const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { encodingFormat } } });
+      expect(result).toMatchObject({ isError: true, structuredContent: { data: { message: { observation: { state } }, availability: { message: explanations[state] }, error: { code: 'message_content_pending', status: 409, retryable: false, recovery: { action: 'inspect_message', steps: [recoveryStep] } } } } });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(run).not.toHaveBeenCalled();
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('preserves pending state and marks optional processing partial', async () => {
+    const { rpc, fetcher, run, toMarkdown } = await messageTool();
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: incomplete('pending_decryption') }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: ['transcript', 'document-text', 'metadata', 'attachments'] } } });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { partial: true, message: { observation: { state: 'pending_decryption' } }, availability: { state: 'pending_decryption' }, errors: [{ part: 'transcript', error: { code: 'message_content_pending', status: 409 } }, { part: 'document-text', error: { code: 'message_content_pending' } }, { part: 'metadata', error: { code: 'message_content_pending' } }, { part: 'attachments', error: { code: 'message_content_pending' } }] } } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(toMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('includes an incomplete quoted target without failing the parent', async () => {
+    const { rpc, fetcher } = await messageTool();
+    fetcher.mockImplementation(async (_url, init) => Response.json({ jsonapi: { version: '1.1' }, data: JSON.parse(String(init?.body)).data.id === 'quoted-1' ? incomplete('receipt_only', 'quoted-1') : { ...retainedMessage, meta: { ...retainedMessage.meta, quotedId: 'quoted-1' } } }));
+    const { result } = await rpc('tools/call', { name: 'get_message', arguments: { messageId: 'message-1', options: { include: ['quoted'] } } });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ quoted: { direction: 'unknown', observation: { state: 'receipt_only' } } });
+    expect(result.structuredContent.data).not.toHaveProperty('quoted.source');
+    expect(result.structuredContent.data).not.toHaveProperty('quoted.timestamp');
+  });
+
+  it.each([undefined, { version: 2, state: 'receipt_only', observedAt, timestampSource: 'receipt' }, { version: 1, state: 'receipt_only', observedAt, timestampSource: 'message' }])('keeps unrecognized markers on the legacy path', async observation => {
+    const { message, fetcher } = await messageTool();
+    fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { ...incomplete('receipt_only'), meta: { ...retainedMessage.meta, observation } } }));
+    const { result } = await message({ messageId: 'message-1' });
+    expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'message_content_unavailable', status: 404 } } } });
+    expect(result.structuredContent.data).not.toHaveProperty('availability');
+  });
+
+  it('forwards receipt inspection before provider pagination and keeps receipt timestamps private', async () => {
+    const { call, fetcher } = await messageTool();
+    fetcher.mockImplementation(async url => {
+      const before = new URL(String(url)).searchParams.get('before');
+      return Response.json({ jsonapi: { version: '1.1' }, data: before ? [incomplete('receipt_only', 'third')] : [incomplete('receipt_only', 'first'), { ...incomplete('receipt_only', 'second'), attributes: { at: observedAt - 1000 } }, { ...incomplete('receipt_only', 'third'), attributes: { at: observedAt - 2000 } }] });
+    });
+    const { result } = await call({ includeReceiptOnly: true, offset: 1, limit: 1 });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent.data).toMatchObject({ items: [{ id: 'second', observation: { state: 'receipt_only' } }], hasMore: true });
+    for (const [url] of fetcher.mock.calls) expect(new URL(String(url)).searchParams.get('includeReceiptOnly')).toBe('true');
+    expect(result.structuredContent.data).not.toHaveProperty('items.0.timestamp');
+  });
+});

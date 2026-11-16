@@ -65,11 +65,11 @@ it.each(['receipt_only','pending_decryption'] as const)('keeps the original noti
   const base=message(id,'Resolved before delayed observation');
   const original={...base,data:{...base.data,meta:{...base.data.meta,observation:{version:1,state:'original_received',observedAt:Date.now(),timestampSource:'message'}}}};
   expect((await ingress(original)).status).toBe(202);
-  const stored=await fixture.db.prepare('SELECT d.id,d.body,d.state FROM event_deliveries d JOIN event_sources s ON s.id = d.source_id WHERE s.connection_id = ? AND s.message_id = ?').bind(account.connections[0],id).all();
-  expect(stored.results).toHaveLength(1);
+  const stored=(await fixture.db.prepare('SELECT d.id,d.body,d.state FROM event_deliveries d JOIN event_sources s ON s.id = d.source_id WHERE s.connection_id = ? AND s.message_id = ?').bind(account.connections[0],id).all()).results;
+  expect(stored).toHaveLength(1);
   const incomplete={...base,data:{...base.data,attributes:{...base.data.attributes,body:{text:'[Aguardando mensagem...]'}},meta:{...base.data.meta,observation:{version:1,state,observedAt:base.data.attributes.at-1000,timestampSource:state==='receipt_only' ? 'receipt' : 'message'}}}};
   expect((await ingress(incomplete)).status).toBe(202);
-  expect(await fixture.db.prepare('SELECT d.id,d.body,d.state FROM event_deliveries d JOIN event_sources s ON s.id = d.source_id WHERE s.connection_id = ? AND s.message_id = ?').bind(account.connections[0],id).all()).toEqual(stored);
+  expect((await fixture.db.prepare('SELECT d.id,d.body,d.state FROM event_deliveries d JOIN event_sources s ON s.id = d.source_id WHERE s.connection_id = ? AND s.message_id = ?').bind(account.connections[0],id).all()).results).toEqual(stored);
   expect(await drain()).toHaveLength(1);
   expect(requests.slice(before).map(request=>JSON.parse(request.body).data)).toEqual([expect.objectContaining({messageId:id,preview:'Resolved before delayed observation'})]);
   await ingress(incomplete);

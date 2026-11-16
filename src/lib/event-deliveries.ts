@@ -2,6 +2,7 @@ import type { Env } from '../types';
 import { decryptToken } from './crypto';
 import { eventAuthorizationValid, eventWebhookHeaders, type EventGrantReader, type EventPrincipal } from './mcp-events';
 import { CallbackSenderError, sendCallback } from './callback-sender';
+import { messageObservationSchema } from './message-observation';
 
 const HOUR = 3600000, DAY = 86400000, LEASE = 60000, MAX_ATTEMPTS = 6;
 type Subscription = {id:string; user_id:string; provider_user_id:string; grant_id:string; client_id:string; resource:string; connection_id:string; activated_at:number; expires_at:number; state:string; encrypted_secret:string|null; encrypted_previous_secret:string|null; previous_secret_until:number|null; callback_url:string};
@@ -12,6 +13,8 @@ function text(value:unknown,limit:number): value is string {return typeof value 
 
 function notification(connectionId:string, item:Record<string,unknown>) {
   const meta=record(item.meta), attributes=record(item.attributes), body=record(attributes.body);
+  const observation=messageObservationSchema.safeParse(meta.observation);
+  if (observation.success && observation.data.state !== 'original_received') return 'unsupported';
   const author=record(record(record(item.relationships).author).data).id;
   const at=attributes.at, format=attributes.encodingFormat;
   if ([item.id,meta.chat,author].some(value=>typeof value==='string' && value.length>200) || typeof format==='string' && format.length>127) return 'oversized';

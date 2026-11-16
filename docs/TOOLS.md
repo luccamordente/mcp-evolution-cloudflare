@@ -146,6 +146,8 @@ Sem um ID conhecido, use `get_message({options: {connectionId, idempotencyKey}})
 
 Erros e auditoria não expõem tokens, URLs privadas, payloads brutos ou conteúdo de anexos. A migração não altera transporte HTTP, OAuth, Clerk, retenção ou infraestrutura.
 
+`npm run test:acceptance:gif` executa a aceitação local do WaPilot com handler MCP e cliente reais, D1 e backend simulados, conforme os [pré-requisitos e limites da validação](GIF-ACCEPTANCE.md). A suíte verifica transporte, escopo de usuário, contrato, metadados e falhas, exigindo somente Node 22+ e dependências npm. A conversão real deve ser testada no repositório do backend. Esta suíte não envia mensagens reais nem comprova entrega ou reprodução nos aplicativos WhatsApp.
+
 ## Assinaturas MCP Events
 
 O HTTP autenticado anuncia `events: {}` e o evento `message.received` no [perfil MCP Events da OpenAI](https://developers.openai.com/plugins/build/mcp-events). São métodos MCP, não ferramentas: `events/list`, `events/subscribe` e `events/unsubscribe`. Exigem OAuth com `mcp:read`; `mcp:write` continua reservado aos envios. O stdio não anuncia eventos.

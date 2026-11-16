@@ -1,15 +1,15 @@
 # Testar envios de GIF
 
-Execute a aceitação dos dois repositórios com:
+Execute a aceitação local do WaPilot com:
 
 ```sh
 npm run test:acceptance:gif
 ```
 
-O comando exige Node 22+, as dependências npm instaladas, Go compatível com o `go.mod` do backend, FFmpeg e ffprobe. O harness compila fontes do backend em `.scratch/evolution-go`, que precisam incluir o suporte a GIF e seus testes. Essa dependência é exclusiva dos testes de aceitação; consultas à implementação seguem o acesso pelo GitHub descrito em `AGENTS.md`.
+Os pré-requisitos são Node 22+ e as dependências npm instaladas. O comando executa o bloco `GIF acceptance` de `test/outbound-history.test.ts`, também incluído em `npm test`. Não depende de checkout do backend, Go, FFmpeg ou ffprobe.
 
-O teste do WaPilot executa o handler HTTP MCP e o cliente de mídia reais com D1 e backend simulados. Ele verifica o contrato JSON:API, a autorização de escrita, os metadados do arquivo convertido e a preservação da reprodução em loop no encaminhamento.
+O harness executa o handler HTTP MCP e o cliente de mídia reais com D1 e backend simulados. Ele verifica o contrato JSON:API de envio e encaminhamento, legenda e citação, autorização de escrita, isolamento de conexões, limite de entrada, metadados retornados pelo provedor e preservação da opção de reprodução em loop. Também verifica a sanitização das respostas e da auditoria, a ausência de cache de conteúdo e a ausência de repetição automática após falha no envio.
 
-O teste do backend executa o middleware JSON:API, o handler HTTP, o serviço de mídia e a conversão FFmpeg reais. Um transporte simulado captura o upload e o despacho ao WhatsApp. O ffprobe verifica o arquivo MP4 produzido. A aceitação exige FFmpeg e ffprobe presentes, sem pular a conversão quando faltam.
+A conversão real de GIF para MP4, a inspeção do arquivo produzido e a construção da mensagem nativa devem ser verificadas pelos testes do backend no próprio repositório. As respostas simuladas desta suíte expressam as expectativas do WaPilot; não comprovam que uma versão do provedor atende a esse contrato.
 
-Os testes não usam credenciais de produção nem enviam mensagens a destinatários reais. A aceitação local verifica o contrato e o arquivo produzido. A reprodução no aplicativo exige uma validação posterior em Android, iOS e WhatsApp Web com destino e conteúdo autorizados.
+Os testes usam dados sintéticos, sem credenciais de produção ou envios a destinatários reais. A entrega e a reprodução no aplicativo exigem uma validação posterior em Android, iOS e WhatsApp Web com destino e conteúdo autorizados.

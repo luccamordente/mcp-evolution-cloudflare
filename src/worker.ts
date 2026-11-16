@@ -33,8 +33,14 @@ export default {
     const recovery=await recoverEventDeliveries(env,now);
     console.log(JSON.stringify({event:'mcp_events_maintenance',...recovery,cleanup_lag_ms:cleanupLag,schedule_lag_ms:Math.max(0,Date.now()-controller.scheduledTime)}));
   },
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const origin = new URL(request.url).origin;
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    const loopback = url.hostname === 'localhost' || url.hostname === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
+    if (url.protocol === 'http:' && !loopback) {
+      url.protocol = 'https:';
+      return new Response(null, { status: 308, headers: { Location: url.href, 'Cache-Control': 'no-store' } });
+    }
+    const origin = url.origin;
     const base = origin.includes('localhost') ? (env.MCP_PUBLIC_URL ?? origin) : origin;
     return createOAuthProvider(base, app.fetch.bind(app)).fetch(request, env, ctx);
   },

@@ -30,6 +30,17 @@ describe('receipt search pagination', () => {
     expect([...first.items, ...last.items].map(row => row.id)).toEqual(rows.map(row => row.id));
     expect(urls.every(url => Number(url.searchParams.get('limit')) <= 50 && url.searchParams.get('includeReceiptOnly') === 'true')).toBe(true);
   });
+  it('rejects a provider capability downgrade during an ID continuation', async () => {
+    const { rows } = receiptPager(60);
+    let requests = 0;
+    const client = new EvolutionGoClient({ baseUrl: 'https://provider.invalid', instanceToken: 'synthetic', instanceId: 'synthetic', fetcher: async () => {
+      requests++;
+      return Response.json({ jsonapi: { version: '1.1' }, ...(requests === 1 ? { meta: { messageSearchCursor: 'beforeId' } } : {}), data: rows.slice(0, 3) });
+    } });
+    const first = await client.listMessages(undefined, 2);
+    await expect(client.listMessages(undefined, 2, undefined, undefined, first.nextCursor)).rejects.toMatchObject({ status: 502 });
+    expect(requests).toBe(2);
+  });
   it('walks the full 200-row offset window without duplicates or cursor loops', async () => {
     const { client, rows } = receiptPager(205);
     const result = await client.searchMessages({ offset: 150, limit: 50, includeReceiptOnly: true });

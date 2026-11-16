@@ -233,3 +233,5 @@ Falhas de envio acrescentam `dispatchState`. `not_started` confirma que a tentat
 `search_messages` mantém limites de 1–50 e janela máxima de 200. Quando o provedor anuncia `meta.messageSearchCursor: "beforeId"`, o cliente continua pelo ID da última mensagem. O provedor compara o horário armazenado e o ID, preservando recibos com horários iguais e precisão abaixo de um milissegundo. Os filtros permanecem no provedor antes do limite.
 
 Provedores antigos sem esse anúncio conservam a paginação por timestamp. Um grupo de horários iguais maior que uma página pode ficar incompleto nesse contrato antigo. A busca lê o histórico atual, sem cache ou snapshot. Mudanças ou remoção da âncora entre consultas podem alterar a continuação.
+
+Se o provedor deixar de anunciar a capacidade durante uma continuação por ID, a consulta falha com erro 502 sanitizado. O cliente não reinicia silenciosamente a busca nem repete páginas. Uma nova consulta explícita pode usar o contrato anunciado naquele momento.

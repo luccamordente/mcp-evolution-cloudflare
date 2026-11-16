@@ -593,6 +593,9 @@ export class EvolutionGoClient {
       } else if (before && /^\d{1,15}$/.test(before)) params.set('before', before);
       const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
       supportsBeforeId = asRecord(asRecord(payload)?.meta)?.messageSearchCursor === 'beforeId';
+      if (before?.startsWith('id:') && !supportsBeforeId) {
+        throw new EvolutionApiError(502, 'WaPilot could not continue this history search. Please start a new search.');
+      }
       return this.page(payload, 'message', value => {
         const message = normalizeMessage(value);
         const at = resourceAttributes(value).at;

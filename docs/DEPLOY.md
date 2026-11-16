@@ -1,6 +1,6 @@
 # Deploy e configuração
 
-O [checkpoint de 16/11/2026](qa/clerk-stabilization-2026-11-16.md) conferiu a versão ativa `a87bc5c9-0fe5-4d27-b13f-7fa7c6cfc50f`, fonte `7694e1367753d98a1491d86491afba5f808251f5`, em 100%, e concluiu o vínculo administrativo de Heitor. As verificações pessoais e o encerramento da #66 continuam pendentes; o prazo mínimo transcorrido não autoriza declarar homologação nem retirar o retorno antes dos gates.
+O [checkpoint de 16/11/2026](qa/clerk-stabilization-2026-11-16.md) concluiu o vínculo administrativo de Heitor e publicou a correção HTTP do PR #74: versão `0f73662e-bc2d-4700-abf3-49abceba2bc4`, fonte `e66c582f5e846178a30b98bb10d83fcdc60badf1`, em 100%, com probes posteriores aprovados. As verificações pessoais e o encerramento da #66 continuam pendentes; o prazo mínimo transcorrido não autoriza declarar homologação nem retirar o retorno antes dos gates.
 
 O [corte executado em 15/11/2026 UTC](qa/clerk-rollout-preflight-2026-11-15.md#corte-executado-em-produção) publicou Clerk em 100% na versão `1b4fab97-3e69-485c-94c9-5ce4096c0aac`, fonte `47c05b498fc2104854d996b5b85efaef176a1216` (PR #71). O retorno Access seguro `726e4a6c-7314-4878-af52-748097205deb`, fonte `cdd4a73…`, permanece inativo. Builds continuam desabilitados; aplicações/policies Access e secrets de retorno devem ser preservados durante a janela de 24 horas da #66. Os registros anteriores abaixo são históricos; consulte o registro do corte para evidências, limites e pendências.
 

@@ -326,3 +326,24 @@ describe('GIF acceptance', () => {
     expect(JSON.stringify({ result, audits })).not.toContain(gifBase64);
   });
 });
+
+describe('receipt inspection pagination', () => {
+  it('advances all-receipt pages with the private provider timestamp', async () => {
+    const observation = { version: 1, state: 'receipt_only', observedAt: 1794790925000, timestampSource: 'receipt' };
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const before = new URL(String(input)).searchParams.get('before');
+      const count = before ? 2 : 50;
+      const offset = before ? 50 : 0;
+      return Response.json({ jsonapi, data: Array.from({ length: count }, (_, index) => ({ type: 'message', id: `receipt-${offset + index}`, attributes: { at: observation.observedAt - (offset + index) * 1000 }, meta: { observation } })) });
+    });
+    const client = new EvolutionGoClient({ baseUrl: 'https://provider.invalid', instanceToken: 'synthetic-token', instanceId: 'synthetic-instance', fetcher });
+    const result = await client.searchMessages({ includeReceiptOnly: true, offset: 50, limit: 1 });
+    expect(result.items).toMatchObject([{ id: 'receipt-50', direction: 'unknown' }]);
+    expect(result.items[0]).not.toHaveProperty('timestamp');
+    expect(result.hasMore).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    const urls = fetcher.mock.calls.map(([input]) => new URL(String(input)));
+    expect(urls.map(url => url.searchParams.get('includeReceiptOnly'))).toEqual(['true', 'true', 'true']);
+    expect(urls[2].searchParams.get('before')).toBe(String(observation.observedAt - 49_000));
+  });
+});

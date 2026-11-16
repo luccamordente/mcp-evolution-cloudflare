@@ -1,3 +1,4 @@
+import { observationRecovery } from './message-observation';
 import type { McpToolError } from './mcp';
 
 export interface ErrorRecovery {
@@ -10,6 +11,7 @@ export interface ErrorRecovery {
 export function recoveryFor(error: Pick<McpToolError, 'code' | 'operation' | 'status' | 'retryable'>): ErrorRecovery {
   const { code, operation, status } = error;
   switch (code) {
+    case 'message_content_pending': return observationRecovery();
     case 'responses_unavailable':
       return { action: 'inspect_message', tool: 'get_message', steps: ['Read the same message as application/json without the response include to retrieve the poll or event itself.', 'Report that responses are unavailable; this is not evidence of zero votes or RSVPs. Do not invent a response endpoint or infer participant choices.', 'If responses are essential, ask the user to check the conversation or ask the WaPilot operator to investigate retained response access.'] };
     case 'attachment_link_invalid': case 'attachment_link_expired':

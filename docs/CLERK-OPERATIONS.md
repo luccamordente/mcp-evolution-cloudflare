@@ -1,5 +1,7 @@
 # Operação de identidades e corte para Clerk
 
+O [checkpoint de 16/11/2026](qa/clerk-stabilization-2026-11-16.md) substitui o adiamento do vínculo de Heitor: os dois usuários ativos agora têm identidade production verificada e vinculada, com inventário preservado. Dashboard/API/admin pessoais e verificações finais continuam pendentes; preservar o retorno Access até o encerramento efetivo da estabilização.
+
 O [corte executado em 15/11/2026 UTC](qa/clerk-rollout-preflight-2026-11-15.md#corte-executado-em-produção) publicou Clerk em 100% na versão `1b4fab97-3e69-485c-94c9-5ce4096c0aac`, fonte `47c05b498fc2104854d996b5b85efaef176a1216` (PR #71). O retorno Access seguro `726e4a6c-7314-4878-af52-748097205deb`, fonte `cdd4a73…`, permanece inativo. Builds continuam desabilitados; aplicações/policies Access e secrets de retorno devem ser preservados durante a janela de 24 horas da #66. Os registros anteriores abaixo são históricos; consulte o registro do corte para evidências, limites e pendências.
 
 Este procedimento prepara a integração da spec #53. A entrega de código não autoriza usar credenciais reais, emitir convites, alterar configuração externa, aplicar migrations remotas ou publicar. A conta permanece bloqueada quando alguma conferência ou revogação estiver pendente.

@@ -581,15 +581,21 @@ export class EvolutionGoClient {
     // ahead when we can, and otherwise probe once for an older row.
     const fetchLimit = Math.min(boundedLimit + 1, MESSAGE_SEARCH_MAX_LIMIT);
     const timestamps = new WeakMap<Message, number>();
+    let supportsBeforeId = false;
     const search = async (rowLimit: number, before?: string) => {
       const params = new URLSearchParams({ limit: String(rowLimit) });
       if (includeReceiptOnly !== undefined) params.set('includeReceiptOnly', String(includeReceiptOnly));
       if (query) params.set('q', query);
       if (conversationId !== undefined) params.set('identifier', conversationId);
       if (encodingFormat) params.set('encodingFormat', encodingFormat);
-      // Cursor = Unix ms; Evolution Go returns rows with at < before.
-      if (before && /^\d{1,15}$/.test(before)) params.set('before', before);
+      if (before?.startsWith('id:')) {
+        params.set('beforeId', before.slice(3));
+      } else if (before && /^\d{1,15}$/.test(before)) params.set('before', before);
       const payload = await this.request<unknown>(`/message/search?${params.toString()}`);
+      supportsBeforeId = asRecord(asRecord(payload)?.meta)?.messageSearchCursor === 'beforeId';
+      if (before?.startsWith('id:') && !supportsBeforeId) {
+        throw new EvolutionApiError(502, 'WaPilot could not continue this history search. Please start a new search.');
+      }
       return this.page(payload, 'message', value => {
         const message = normalizeMessage(value);
         const at = resourceAttributes(value).at;
@@ -601,6 +607,12 @@ export class EvolutionGoClient {
     const rows = await search(fetchLimit, cursor);
     let items = rows.slice(0, boundedLimit);
     const lookahead = rows.slice(boundedLimit);
+    const last = items.at(-1);
+    if (supportsBeforeId && last) {
+      const nextCursor = `id:${last.id}`;
+      const hasMore = lookahead.length > 0 || (items.length === boundedLimit && fetchLimit === boundedLimit && (await search(1, nextCursor)).length > 0);
+      return hasMore ? { items, nextCursor, hasMore: true } : { items, hasMore: false };
+    }
     const times = items.map(time).filter(Number.isFinite);
     if (items.length < boundedLimit || !times.length) return { items, hasMore: false };
     let oldest = Math.min(...times);

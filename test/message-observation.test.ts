@@ -104,10 +104,13 @@ describe.runIf(Boolean(fixtureJSON))('same-row observation through real MCP, Go 
     expect(first.structuredContent.data.items?.every(item => item.observation?.state === 'receipt_only')).toBe(true);
     const second = await call('search_messages', { options: { includeReceiptOnly: true, offset: 50, limit: 50 } });
     const ids = [...first.structuredContent.data.items ?? [], ...second.structuredContent.data.items ?? []].map(item => item.id);
-    expect(ids).toHaveLength(73);
-    expect(new Set(ids).size).toBe(73);
-    expect(second.structuredContent.data.hasMore).toBe(false);
-    expect(ids).toEqual(expect.arrayContaining(Array.from({ length: 55 }, (_, i) => `page-${String(i).padStart(2, '0')}`)));
+    expect(ids).toHaveLength(100);
+    expect(new Set(ids).size).toBe(100);
+    expect(second.structuredContent.data.hasMore).toBe(true);
+    expect(ids).toEqual(Array.from({ length: 100 }, (_, i) => `page-${String(204 - i).padStart(3, '0')}`));
+    const window = await call('search_messages', { options: { includeReceiptOnly: true, offset: 150, limit: 50 } });
+    expect(window.structuredContent.data.items?.map(item => item.id)).toEqual(Array.from({ length: 50 }, (_, i) => `page-${String(54 - i).padStart(3, '0')}`));
+    expect(window.structuredContent.data.hasMore).toBe(true);
   });
 
   it.each(['receipt_only', 'pending_decryption'] as const)('returns successful JSON state for %s and refuses content processing with 409', async state => {
@@ -208,13 +211,13 @@ describe.runIf(Boolean(fixtureJSON))('same-row observation through real MCP, Go 
     expect(response.status).toBe(200);
     const evidence = z.object({ requests: z.record(z.string(), z.number()), schemaUnchanged: z.literal(true), identitiesUnchanged: z.literal(true), initialRows: z.number(), rows: z.number(), statuses: z.array(z.string()), reopens: z.number(), failedWrites: z.number(), repairOperations: z.array(z.string()) }).parse(await response.json());
     expect(evidence.rows).toBe(evidence.initialRows);
-    expect(evidence.rows).toBe(74);
+    expect(evidence.rows).toBe(224);
     expect(evidence.reopens).toBe(6);
     expect(evidence.failedWrites).toBe(1);
     expect(evidence.statuses).toEqual(['Read', 'Read', 'Read', 'Read', 'Read']);
     expect(evidence.repairOperations).toEqual(['classify_receipt', 'restore_original']);
     expect(evidence.requests['POST /message/status']).toBeGreaterThan(30);
-    expect(Object.keys(evidence.requests).some(path => path.includes('includeReceiptOnly=true') && path.includes('before='))).toBe(true);
+    expect(Object.keys(evidence.requests).some(path => path.includes('includeReceiptOnly=true') && path.includes('beforeId='))).toBe(true);
     expect(Object.keys(evidence.requests).every(path => path.startsWith('GET /message/search') || path === 'POST /message/status')).toBe(true);
     console.info(JSON.stringify({ event: 'message_observation_connected_acceptance', ...evidence }));
   });

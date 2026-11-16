@@ -39,6 +39,7 @@ export const toolErrorScenarios: Record<McpErrorCode, ErrorScenario> = {
   media_too_large: classified(() => new SendMessageInputError('media_too_large', 413, 'WaPilot attachment exceeds its size limit.'), { ...correct, status: 413 }, 'send_message'),
   message_not_found: { kind: 'mcp', status: 404, retryable: false, action: 'inspect_message', tool: 'search_messages' },
   message_content_unavailable: { kind: 'mcp', status: 404, retryable: false, action: 'inspect_message', tool: 'search_messages' },
+  message_content_pending: { kind: 'mcp', status: 409, retryable: false, action: 'inspect_message', tool: 'get_message' },
   message_unavailable: { kind: 'mcp', ...readRetry },
   image_unavailable: classified(() => new MessageImageError(415, 'WaPilot native image display cannot read this file.'), { ...inspect, status: 415 }),
   audio_unavailable: classified(() => new AudioTranscriptionError('audio_unavailable', 404, 'WaPilot audio source is unavailable.'), { ...inspect, status: 404 }),

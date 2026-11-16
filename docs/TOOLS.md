@@ -7,7 +7,7 @@ O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Títu
 | `search_connections` | `options?: {query, include: ['status'], offset, limit}` | D1 do usuário; `/instance/status` somente quando solicitado |
 | `search_contacts` | `query: string, options?: {connectionId, offset, limit}` | `/user/contacts`; busca por nome/telefone e deduplicação por ID/JID |
 | `search_groups` | `options?: {connectionId, query, include: ['participants'], offset, limit}` | `/group/list`; filtro por nome/JID antes da paginação local |
-| `search_messages` | `options?: {connectionId, conversationId, text, offset, limit}` | `/message/search`; filtros aplicados no provedor |
+| `search_messages` | `options?: {connectionId, conversationId, text, includeReceiptOnly, offset, limit}` | `/message/search`; filtros aplicados no provedor |
 | `get_message` | `messageId?: string, options?: GetMessageOptions` | `/message/status`, mídia e relações autorizadas |
 | `send_message` | `message, options` | Rotas de envio existentes; veja [SEND-MESSAGE.md](SEND-MESSAGE.md) |
 
@@ -42,6 +42,56 @@ Sem `encodingFormat`, `get_message` devolve `connectionId`, `messageId` e `messa
 `encodingFormat` escolhe a representação da resposta da mensagem. Atualmente os formatos binários contêm o anexo selecionado, sem incorporar texto ou outros dados da mensagem nos bytes. Os metadados continuam no JSON que acompanha o recurso. `text/plain` deixou de acionar transcrição/extração: ele só recupera um anexo original com esse MIME. Texto de mensagens permanece em `message.text` no JSON.
 
 `attachmentIndex` seleciona um anexo para retorno binário, começando em 0 (padrão: primeiro). Obtenha os índices por `include: ["attachments"]`. Essa seleção exige um formato de arquivo original; não se aplica a JSON nem à renderização `image/*`. Um MIME específico precisa corresponder ao anexo; `application/octet-stream` aceita qualquer MIME original. A resposta binária anuncia o MIME real. Não há conversão genérica entre formatos.
+
+### Observação e disponibilidade do conteúdo
+
+As mensagens podem incluir `observation` e `delivery` com `version: 1`. `observation.state` aceita `receipt_only`, `pending_decryption` ou `original_received`. `observedAt` usa Unix milliseconds. `timestampSource` é `receipt` no primeiro estado e `message` nos demais. `delivery.state` aceita `sent`, `delivered`, `read` ou `played`; `delivery.at` usa Unix milliseconds. O maior avanço observado não comprova leitura por todos os participantes de um grupo. Provedores antigos e versões desconhecidas preservam o comportamento legado.
+
+`search_messages.options.includeReceiptOnly` é booleano e usa `false` por padrão. `true` permite inspecionar observações de recibo. O provedor aplica esse filtro antes da paginação. Os limites continuam 1–50 e `offset + limit <= 200`. `pending_decryption` aparece na busca sem texto sintético. Polling lê histórico parcial; um recibo não é uma nova mensagem. MIME desconhecido não comprova anexo.
+
+`get_message` em JSON retorna sucesso para os dois estados incompletos, sem `data.error`. A resposta inclui `data.message.observation`, `contentUnavailable: true`, `contentUnavailableReason` com o estado e `data.availability`. Os textos de produto são:
+
+| Estado | `availability.message` |
+| --- | --- |
+| `receipt_only` | WaPilot observed a delivery or read receipt for this message ID, but has not observed the original message in this connection. This record is not message content. |
+| `pending_decryption` | WaPilot observed the message, but its content is awaiting decryption. Content may become available after WhatsApp resends the message; recovery is not guaranteed. |
+
+`receipt_only` usa `direction: "unknown"` e `messageType: "unknown"`, sem autor, timestamp original ou MIME de conteúdo. Os horários de recibo permanecem em `observation` e `delivery`. `pending_decryption` preserva autoria e horário original quando conhecidos.
+
+Exemplo de resultado JSON, com campos opcionais omitidos:
+
+```json
+{
+  "data": {
+    "connectionId": "<connection-id>",
+    "messageId": "<message-id>",
+    "encodingFormat": "application/json",
+    "mimeType": "application/json",
+    "message": {
+      "id": "<message-id>",
+      "direction": "unknown",
+      "messageType": "unknown",
+      "observation": {"version": 1, "state": "receipt_only", "observedAt": 1794790925000, "timestampSource": "receipt"},
+      "contentUnavailable": true,
+      "contentUnavailableReason": "receipt_only"
+    },
+    "availability": {
+      "state": "receipt_only",
+      "reason": "receipt_only",
+      "message": "WaPilot observed a delivery or read receipt for this message ID, but has not observed the original message in this connection. This record is not message content.",
+      "recovery": {
+        "action": "inspect_message",
+        "tool": "get_message",
+        "steps": ["Keep the same connection and message ID. You may inspect this state again later. Do not automatically resend the message or repeatedly request content processing."]
+      }
+    }
+  }
+}
+```
+
+Um formato de conteúdo explícito retorna `message_content_pending`, status de domínio 409 e `retryable: false`, preservando a observação e `availability`. Nenhum processamento é iniciado. Includes opcionais indisponíveis seguem o contrato de resultado parcial e preservam a leitura de estado. Uma citação incompleta inclui a observação do alvo sem falhar a leitura do pai. `retryable: false` impede loops automáticos, sem afirmar perda permanente.
+
+Conteúdo original não retido mantém `message_content_unavailable`/404 e os diagnósticos existentes, com o texto "WaPilot found the message, but its content is not available in retained history. This does not establish deletion or permanent loss." ID ausente mantém `message_not_found`/404. Falhas de infraestrutura continuam erros de infraestrutura.
 
 ### Anexos com links temporários
 

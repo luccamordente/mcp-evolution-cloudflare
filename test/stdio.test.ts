@@ -1,5 +1,5 @@
 import { sendArguments } from './helpers/mcp-arguments';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createServer } from 'node:http';
@@ -228,8 +228,9 @@ it('cleans expired send metadata on startup and during an idle local stdio sessi
   });
   await new Promise<void>(done => upstream.listen(0, '127.0.0.1', done));
   cleanup.push(() => new Promise<void>(done => upstream.close(() => done())));
-  async function open() {
-    const transport = new StdioClientTransport({ command: process.execPath, args: ['scripts/dev-stdio.mjs'], cwd: workspace, stderr: 'pipe', env: {
+  async function open(controlRetentionClock = false) {
+    const args = controlRetentionClock ? ['--import', new URL('./support/stdio-retention-clock.mjs', import.meta.url).href] : [];
+    const transport = new StdioClientTransport({ command: process.execPath, args: [...args, 'scripts/dev-stdio.mjs'], cwd: workspace, stderr: 'pipe', env: {
       PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${(upstream.address() as { port: number }).port}`,
       LOCAL_INSTANCE_ID: 'retention-instance', LOCAL_INSTANCE_TOKEN: 'retention-credential',
     } });
@@ -238,8 +239,6 @@ it('cleans expired send metadata on startup and during an idle local stdio sessi
     const client = new Client({ name: 'retention-tests', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
     const errors: unknown[] = [];
     client.onerror = error => { errors.push(error); };
-    await client.connect(transport);
-    expect((await client.listTools()).tools.length).toBeGreaterThan(0);
     let closed = false;
     const close = async () => {
       if (closed) return;
@@ -252,7 +251,17 @@ it('cleans expired send metadata on startup and during an idle local stdio sessi
       expect(stderr).not.toContain('WaPilot: não foi possível limpar');
     };
     cleanup.push(close);
-    return { client, close };
+    await client.connect(transport);
+    expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+    return {
+      close,
+      async advanceRetentionClock() {
+        const pid = transport.pid;
+        if (pid === null) throw new Error('The stdio process is not running');
+        process.kill(pid, 'SIGUSR2');
+        await vi.waitFor(() => expect(stderr).toContain('Retention clock advanced'), { timeout: 5_000 });
+      },
+    };
   }
   const { getPlatformProxy } = await import('wrangler');
   async function database<T>(run: (db: D1Database) => Promise<T>) {
@@ -274,7 +283,6 @@ it('cleans expired send metadata on startup and during an idle local stdio sessi
   });
   await writeFile(migrationPath, migration);
   const restarted = await open();
-  expect((await restarted.client.listTools()).tools.length).toBeGreaterThan(0);
   await restarted.close();
   const expiresAt = await database(async db => {
     expect((await db.prepare('SELECT id FROM send_operations ORDER BY id').all()).results).toEqual([{ id: 'live' }]);
@@ -285,17 +293,16 @@ it('cleans expired send metadata on startup and during an idle local stdio sessi
     await db.prepare("INSERT INTO send_operations (id,user_id,connection_id,operation,idempotency_key,arguments_hash,state,expires_at) VALUES ('soon',?,?,'send_text','soon','soon-hash','unknown',?)").bind(connectionBefore!.user_id, connectionBefore!.id, expiry).run();
     return expiry;
   });
-  const idle = await open();
+  const idle = await open(true);
   expect(Date.now()).toBeLessThan(expiresAt);
   const count = requests.length;
-  // One real minute exercises Node's production timer while no tool calls keep the process busy.
-  await new Promise(resolve => setTimeout(resolve, 65_000));
-  expect(requests).toHaveLength(count);
+  await idle.advanceRetentionClock();
   await idle.close();
+  expect(requests).toHaveLength(count);
   await database(async db => {
     expect((await db.prepare('SELECT id FROM send_operations ORDER BY id').all()).results).toEqual([{ id: 'live' }]);
     expect(await db.prepare('SELECT * FROM whatsapp_connections').first()).toEqual(connectionBefore);
   });
   expect(await readFile(resolve(workspace, '.wrangler/stdio/encryption.key'), 'utf8')).toBe(keyBefore);
   expect(requests.every(request => request === 'GET /instance/status')).toBe(true);
-}, 100_000);
+}, 60_000);

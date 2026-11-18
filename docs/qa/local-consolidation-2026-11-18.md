@@ -47,6 +47,8 @@ As pontas locais são incorporadas ao histórico do main com uma merge de reconc
 
 ## Validação e limpeza
 
-Executar `npm run check` sobre a árvore reconciliada. Antes de apagar referências locais, conferir que cada ponta é ancestral do main final e que as alterações de conteúdo se limitam aos documentos acima e a este registro. Publicar o main com avanço normal, verificar o SHA remoto e somente então remover as duas worktrees auxiliares e as branches locais diferentes de main.
+`npm run check` passou sobre a árvore reconciliada: 1.006 testes aprovados e 23 ignorados, em 59 arquivos aprovados e dois ignorados. O typecheck e as verificações de assets também passaram. Oito links locais dos documentos reconciliados foram conferidos. A comparação com o main inicial mostrou alterações somente nos quatro documentos listados, sem mudança de runtime.
+
+As 14 pontas locais existentes durante a integração (as 13 originais mais a branch temporária de consolidação) foram conferidas como ancestrais da árvore consolidada. O procedimento de conclusão publica o main com avanço normal, verifica o SHA remoto e remove as duas worktrees auxiliares e as branches locais diferentes de main.
 
 Um bundle Git com os refs iniciais, o patch do checkout e cópias dos arquivos não rastreados foi preservado em diretório privado fora do repositório. O arquivo é recuperação histórica, não uma branch pendente. Nenhum segredo, binding remoto ou estado local ignorado do checkout principal foi removido.

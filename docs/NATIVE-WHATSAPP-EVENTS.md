@@ -2,6 +2,8 @@
 
 Investigação em 11 de novembro de 2026. Este documento explica por que o exemplo `.ics` é um anexo e registra o trabalho necessário para criar um evento com RSVP no WaPilot. Não implementa envio nem comprova suporte em produção.
 
+Os planos detalhados estão separados entre [integração WaPilot](plans/NATIVE-EVENTS-WAPILOT.md) e [handoff Evolution Go](plans/NATIVE-EVENTS-EVO-GO-HANDOFF.md). O handoff é necessário porque o backend ainda não oferece a operação de criação.
+
 ## Por que o exemplo aparece como arquivo
 
 O exemplo relatado nesta sessão usou `message.kind: "document"`, `mimeType: "application/octet-stream"` e `fileName: "wapilot-evento-exemplo.ics"`, com conteúdo `VCALENDAR`. O recebimento como `text/calendar` também foi relatado. Esses resultados operacionais não foram reproduzidos nesta investigação.

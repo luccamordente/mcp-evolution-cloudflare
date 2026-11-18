@@ -32,6 +32,7 @@ it('keeps modern validation strict and session endpoints unavailable', async () 
   expect(response.status).toBe(400);
   for (const method of ['GET','DELETE']) expect((await fixture.fetch('/mcp',{method,headers:{authorization:`Bearer ${account.accessToken}`}})).status).toBe(405);
   expect((await fixture.fetch('/mcp',{method:'POST',headers:{'Cf-Access-Jwt-Assertion':'fake'}})).status).toBe(401);
+  expect((await fixture.fetch('/sse',{headers:{authorization:`Bearer ${account.accessToken}`}})).status).toBe(404);
 });
 
 it('logs protocol diagnostics without tokens or request payloads', async () => {

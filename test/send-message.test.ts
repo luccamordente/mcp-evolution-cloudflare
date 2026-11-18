@@ -36,10 +36,8 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await local.dispose(); });
 
 describe('unified send_message acceptance', () => {
-  it('advertises one send tool and sends a quoted poll through MCP', async () => {
+  it('sends a quoted poll through MCP', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'POLL', meta: { chat: '5511999999999' } } }));
-    const catalog = await rpc('tools/list');
-    expect(catalog.result.tools?.map((tool: { name: string }) => tool.name).filter((name: string) => /^(send_|reply_to_message|forward_message)/.test(name))).toEqual(['send_message']);
     const sent = await rpc('tools/call', { name: 'send_message', arguments: sendArguments({ connectionId, message: {
       kind: 'poll', to: '5511999999999', question: 'Qual horário?', options: ['10h', '14h'], maxAnswers: 1, replyTo: { messageId: 'SOURCE' },
     } }) });

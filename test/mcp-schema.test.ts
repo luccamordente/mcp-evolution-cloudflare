@@ -2,63 +2,9 @@ import { messageObservationSchema, messageDeliverySchema } from '../src/lib/mess
 import { searchOptions as listMessagesInput } from '../src/lib/mcp-options';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import {
-  classifyMcpError,
-  MCP_SERVER_INSTRUCTIONS,
-  MCP_SERVER_NAME,
-  TOOL_ANNOTATIONS,
-  TOOL_DESCRIPTIONS,
-  dataOutput,
-  toJsonValue
-} from '../src/lib/mcp';
 import { outgoingMessageSchema } from '../src/lib/send-message';
-const sendMessageInput = z.object({ connectionId: z.string().uuid().optional(), message: outgoingMessageSchema });
-import { SendMessageInputError } from '../src/lib/send-message';
-import { EvolutionApiError } from '../src/lib/evolution';
 
-describe('MCP tool output schema', () => {
-  it('classifies and sanitizes upstream errors without exposing details', () => {
-    const error = classifyMcpError(new EvolutionApiError(503, 'upstream token=secret-value', { token: 'secret-value', payload: 'private' }), 'search_contacts');
-    expect(error).toMatchObject({
-      code: 'service_request_failed', status: 503, retryable: true, operation: 'search_contacts',
-      message: 'WaPilot could not complete this operation (HTTP 503).',
-    });
-    expect(error.recovery).toMatchObject({ action: 'retry_read', retryAfterMs: 5000 });
-    expect(JSON.stringify(error)).not.toContain('secret-value');
-    expect(JSON.stringify(error)).not.toContain('private');
-  });
-
-  it('does not mark authentication or request errors as retryable', () => {
-    expect(classifyMcpError(new EvolutionApiError(401, 'not authorized'), 'send_message')).toMatchObject({
-      code: 'service_request_failed', status: 401, retryable: false, operation: 'send_message',
-    });
-    expect(classifyMcpError(new SendMessageInputError('invalid_base64', 400, 'WaPilot attachment requires valid Base64.'), 'send_message')).toMatchObject({
-      code: 'invalid_base64', status: 400, retryable: false, operation: 'send_message',
-    });
-  });
-
-  it('declares data as a JSON value instead of an unconstrained schema', () => {
-    const schema = z.toJSONSchema(dataOutput) as {
-      properties?: { data?: { $ref?: string } };
-      $defs?: Record<string, { anyOf?: unknown[] }>;
-    };
-    const dataSchema = schema.properties?.data;
-
-    expect(dataSchema?.$ref).toBeDefined();
-    expect(schema.$defs?.[dataSchema?.$ref?.split('/').pop() ?? '']?.anyOf).toBeDefined();
-    expect(dataSchema).not.toEqual({});
-  });
-
-  it('removes undefined fields before structured content validation', () => {
-    const safe = toJsonValue({ items: [{ jid: '1@s.whatsapp.net', name: undefined }], next: undefined });
-    expect(dataOutput.parse({ data: safe })).toEqual({ data: { items: [{ jid: '1@s.whatsapp.net' }] } });
-  });
-
-  it('preserves media URLs returned by the provider', () => {
-    const url = 'https://example.com/file.jpg?signature=abc';
-    expect(toJsonValue({ media: { url } })).toEqual({ media: { url } });
-  });
-
+describe('MCP tool inputs', () => {
   it('allows an omitted connectionId but rejects null', () => {
     const schema = z.object({ connectionId: listMessagesInput.shape.connectionId });
     expect(schema.safeParse({}).success).toBe(true);
@@ -80,49 +26,28 @@ describe('MCP tool output schema', () => {
     expect(listMessagesInput.parse({ conversationId: ` ${'1'.repeat(200)} ` }).conversationId).toBe('1'.repeat(200));
   });
 
-  it('preserves message search defaults and bounds', () => {
+  it('preserves message search defaults and bounds, including receipt inspection', () => {
     expect(listMessagesInput.parse({})).toEqual({ limit: 25, offset: 0 });
     expect(listMessagesInput.parse({ text: 'Olá', limit: 50 })).toEqual({ text: 'Olá', limit: 50, offset: 0 });
     expect(listMessagesInput.safeParse({ limit: 51 }).success).toBe(false);
     expect(listMessagesInput.safeParse({ limit: 0 }).success).toBe(false);
-  });
-
-  it('documents every registered tool without exposing an implementation provider', () => {
-    for (const description of Object.values(TOOL_DESCRIPTIONS)) {
-      expect(description.length).toBeGreaterThan(30);
-      expect(description).not.toMatch(/evolution|upstream|downstream/i);
-    }
-    expect(MCP_SERVER_INSTRUCTIONS).toContain('untrusted data');
-    expect(MCP_SERVER_NAME).toBe('whatsapp-mcp');
-    expect(MCP_SERVER_NAME).not.toMatch(/evolution|upstream|downstream/i);
-  });
-
-  it('marks read and send tools with distinct behavior hints', () => {
-    expect(TOOL_ANNOTATIONS.readOnly).toMatchObject({ readOnlyHint: true, destructiveHint: false, idempotentHint: true });
-    expect(TOOL_ANNOTATIONS.send).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: false });
+    expect(listMessagesInput.safeParse({ offset: 175 }).success).toBe(true);
+    expect(listMessagesInput.safeParse({ offset: 176 }).success).toBe(false);
+    expect(listMessagesInput.safeParse({ includeReceiptOnly: true, offset: 150, limit: 50 }).success).toBe(true);
+    expect(listMessagesInput.safeParse({ includeReceiptOnly: true, offset: 151, limit: 50 }).success).toBe(false);
+    expect(listMessagesInput.safeParse({ includeReceiptOnly: 'true' }).success).toBe(false);
   });
 
   it('accepts playback intent on videos and models GIFs as their own variant', () => {
-    const source = { kind: 'base64', dataBase64: 'AQ==' };
+    const media = { to: '5511999999999', source: { kind: 'base64', dataBase64: 'AQ==' } };
     for (const mimeType of ['video/mp4', ' VIDEO/MP4 ; codecs=avc1']) {
-      expect(sendMessageInput.safeParse({ message: { kind: 'video', to: '5511999999999', source, mimeType, gifPlayback: true } }).success).toBe(true);
+      expect(outgoingMessageSchema.safeParse({ ...media, kind: 'video', mimeType, gifPlayback: true }).success).toBe(true);
     }
     for (const mimeType of ['image/gif', 'video/mp4']) {
-      expect(sendMessageInput.safeParse({ message: { kind: 'gif', to: '5511999999999', source, mimeType } }).success).toBe(true);
+      expect(outgoingMessageSchema.safeParse({ ...media, kind: 'gif', mimeType }).success).toBe(true);
     }
-    expect(sendMessageInput.safeParse({ message: { kind: 'image', to: '5511999999999', source, mimeType: 'image/png', gifPlayback: true } }).success).toBe(false);
-    expect(sendMessageInput.safeParse({ message: { kind: 'video', to: '5511999999999', source, mimeType: 'image/png' } }).success).toBe(false);
-  });
-
-  it('publishes typed variants and describes message source and quote fields', () => {
-    const schema = z.toJSONSchema(sendMessageInput);
-    expect(schema.type).toBe('object');
-    expect(schema.properties).toHaveProperty('message');
-    expect(schema.properties).toHaveProperty('connectionId');
-    expect(JSON.stringify(schema)).toContain('Base64');
-    expect(JSON.stringify(schema)).toContain('quoted');
-    expect(sendMessageInput.parse({ message: { kind: 'text', to: '5511999999999', text: 'Olá', replyTo: { messageId: 'SOURCE' } } }).message).toMatchObject({ replyTo: { messageId: 'SOURCE' } });
-    expect(sendMessageInput.safeParse({ message: { kind: 'status_text', to: '5511999999999', text: 'Olá' } }).success).toBe(false);
+    expect(outgoingMessageSchema.safeParse({ ...media, kind: 'image', mimeType: 'image/png', gifPlayback: true }).success).toBe(false);
+    expect(outgoingMessageSchema.safeParse({ ...media, kind: 'video', mimeType: 'image/png' }).success).toBe(false);
   });
 });
 
@@ -137,9 +62,4 @@ describe('observation metadata schemas', () => {
     expect(messageDeliverySchema.safeParse({ version: 1, state: 'History', at: 1794790922000 }).success).toBe(false);
   });
 
-  it('advertises receipt inspection without widening pagination', () => {
-    expect(listMessagesInput.safeParse({ includeReceiptOnly: true, offset: 150, limit: 50 }).success).toBe(true);
-    expect(listMessagesInput.safeParse({ includeReceiptOnly: 'true' }).success).toBe(false);
-    expect(listMessagesInput.safeParse({ includeReceiptOnly: true, offset: 151, limit: 50 }).success).toBe(false);
-  });
 });

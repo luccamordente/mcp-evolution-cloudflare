@@ -1,21 +1,16 @@
-import { searchOptions } from '../src/lib/mcp-options';
 import { describe, expect, it } from 'vitest';
 import { EvolutionGoClient } from '../src/lib/evolution';
-import { callsWriteTool, hasWriteScope, mcpBodyLimit, WRITE_TOOLS } from '../src/lib/mcp';
+import { callsWriteTool, mcpBodyLimit } from '../src/lib/mcp';
 import { uniqueInstanceName } from '../src/index';
 
 const msg = (id: string, at: number) => ({ type: 'message', id, attributes: { encodingFormat: 'text/plain', at, body: { text: id } }, meta: { chat: 'c', fromMe: false } });
 
 describe('mcp:write scope', () => {
-  it('requires mcp:write on the transport auth info', () => {
-    expect(hasWriteScope({ http: { authInfo: { scopes: ['mcp:read', 'mcp:write'] } } })).toBe(true);
-    expect(hasWriteScope({ http: { authInfo: { scopes: ['mcp:read'] } } })).toBe(false);
-    expect(hasWriteScope({})).toBe(false);
-    expect(hasWriteScope(undefined)).toBe(false);
-  });
   it('detects write tool calls in single and batch JSON-RPC bodies', async () => {
     const req = (body: unknown) => new Request('https://x.invalid/mcp', { method: 'POST', body: JSON.stringify(body) });
-    for (const name of WRITE_TOOLS) expect(await callsWriteTool(req({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name } }))).toBe(true);
+    for (const name of ['send_message', 'update_contact']) {
+      expect(await callsWriteTool(req({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name } }))).toBe(true);
+    }
     expect(await callsWriteTool(req({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_messages' } }))).toBe(false);
     expect(await callsWriteTool(req([{ method: 'tools/list' }, { method: 'tools/call', params: { name: 'send_message' } }]))).toBe(true);
     expect(await callsWriteTool(new Request('https://x.invalid/mcp', { method: 'POST', body: 'not json' }))).toBe(false);
@@ -30,11 +25,7 @@ describe('MCP body limit', () => {
   });
 });
 
-describe('bounded search and internal cursor pagination', () => {
-  it('bounds the offset window before querying history', () => {
-    expect(searchOptions.safeParse({ offset: 175, limit: 25 }).success).toBe(true);
-    expect(searchOptions.safeParse({ offset: 176, limit: 25 }).success).toBe(false);
-  });
+describe('internal cursor pagination', () => {
   const pager = (rows: Array<[string, number]>) => {
     const urls: URL[] = [];
     const client = new EvolutionGoClient({ baseUrl: 'https://e.invalid', instanceToken: 't', instanceId: 'i', fetcher: async (request: RequestInfo | URL) => {

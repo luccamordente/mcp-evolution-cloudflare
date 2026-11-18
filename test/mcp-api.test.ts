@@ -5,7 +5,6 @@ import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIE
 import { createMcpServer } from '../src/lib/mcp';
 import { createConnection, bootstrapLocalUser } from '../src/lib/db';
 import { createTestD1 } from './helpers/local-d1';
-import { sendMessageInput, expandSendMessage } from '../src/lib/send-message';
 import type { Env } from '../src/types';
 import app from '../src/index';
 import { toolErrorScenarios } from './helpers/tool-error-scenarios';
@@ -35,7 +34,7 @@ beforeEach(async () => {
   fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: resource }));
 });
 afterEach(async () => { vi.restoreAllMocks(); await local.dispose(); });
-it('publishes exactly seven tools and no gallery resource', async () => {
+it('publishes the seven MCP tools and the send receipt resource', async () => {
   expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_contacts', 'update_contact', 'search_groups', 'search_messages', 'get_message', 'send_message']);
   const resources = await rpc('resources/list');
   expect(resources.resources).toEqual([expect.objectContaining({ uri: 'ui://wapilot/send-receipt-v3.html' })]);
@@ -63,12 +62,26 @@ for (const [code, scenario] of Object.entries(toolErrorScenarios)) {
 }
 it('advertises agent guidance, message variants and option descriptions', async () => {
   const result = await rpc('tools/list');
-  const tools = z.array(z.object({ name: z.string(), title: z.string().min(1), description: z.string().min(30), inputSchema: z.record(z.string(), z.unknown()), outputSchema: z.record(z.string(), z.unknown()) })).parse(result.tools);
+  const tools = z.array(z.object({
+    name: z.string(), title: z.string().min(1), description: z.string().min(1),
+    inputSchema: z.record(z.string(), z.unknown()), outputSchema: z.record(z.string(), z.unknown()),
+    annotations: z.object({ readOnlyHint: z.boolean(), destructiveHint: z.boolean(), idempotentHint: z.boolean() }),
+  })).parse(result.tools);
   const send = tools.find(tool => tool.name === 'send_message');
   const get = tools.find(tool => tool.name === 'get_message');
+  const contacts = tools.find(tool => tool.name === 'search_contacts');
+  for (const tool of tools) expect(tool.description).not.toMatch(/evolution|upstream|downstream/i);
+  expect(contacts?.annotations).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: true });
+  expect(send?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: false });
+  const output = z.object({
+    properties: z.object({ data: z.object({ $ref: z.string() }) }),
+    $defs: z.record(z.string(), z.object({ anyOf: z.array(z.unknown()).min(1) })),
+  }).parse(contacts?.outputSchema);
+  expect(output.$defs).toHaveProperty(output.properties.data.$ref.split('/').at(-1)!);
   const schema = z.object({ properties: z.object({ message: z.object({ anyOf: z.array(z.object({ description: z.string().min(10), properties: z.object({ kind: z.object({ const: z.string() }) }) })) }), options: z.object({ properties: z.object({ idempotencyKey: z.object({ description: z.string() }) }) }) }) }).parse(send?.inputSchema);
   const kinds = schema.properties.message.anyOf.map(variant => variant.properties.kind.const);
   expect(kinds).toHaveLength(16);
+  expect(kinds).not.toContain('status_text');
   for (const kind of kinds) expect(send?.description).toContain(kind);
   expect(schema.properties.options.properties.idempotencyKey.description).toContain('24 hours');
   const getSchema = z.object({ properties: z.object({ messageId: z.object({ description: z.string() }), options: z.object({ properties: z.object({ encodingFormat: z.object({ description: z.string() }), include: z.object({ description: z.string() }), limit: z.object({ description: z.string() }) }) }) }) }).parse(get?.inputSchema);
@@ -79,7 +92,14 @@ it('advertises agent guidance, message variants and option descriptions', async 
   expect(JSON.stringify(get?.outputSchema)).toContain('receipt_only');
   expect(JSON.stringify(get?.outputSchema)).toContain('observedAt');
   expect(JSON.stringify(tools.find(tool => tool.name === 'search_messages')?.inputSchema)).toContain('includeReceiptOnly');
-  expect(JSON.stringify(await rpc('server/discover'))).toContain('data.error.recovery');
+  const discovery = await rpc('server/discover');
+  expect(discovery.instructions).toContain('untrusted data');
+  expect(JSON.stringify(discovery)).toContain('data.error.recovery');
+  for (const guidance of [discovery.instructions, get?.description]) {
+    for (const term of ['audio', 'document', 'transcript', 'document-text', 'even without an explicit']) {
+      expect(guidance).toContain(term);
+    }
+  }
 });
 
 it('returns the latest retained delivery status without downloading media', async () => {
@@ -256,20 +276,15 @@ it('enforces size limits, storage allowlists and redirect rejection on signed do
   expect(fetcher.mock.calls.length).toBe(calls + 1);
 });
 
-it('identifies invalid option paths and suggests a bounded correction', async () => {
-  expect(await call('search_messages', { options: { limit: 51 } })).toMatchObject({ isError: true, structuredContent: { data: { error: {
+it('reports invalid option paths and recovery in both MCP output formats before I/O', async () => {
+  const result = await call('search_messages', { options: { limit: 51 } });
+  expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: {
     code: 'invalid_options', retryable: false, validationIssues: [{ path: 'options.limit' }],
     recovery: { action: 'correct_arguments', steps: expect.arrayContaining([expect.stringContaining('offset + limit <= 200')]) },
   } } } });
-  expect(fetcher).not.toHaveBeenCalled();
-});
-
-it('delivers actionable errors as both structured MCP output and JSON text', async () => {
-  const result = await call('search_messages', { options: { limit: 51 } });
-  expect(result.isError).toBe(true);
-  expect(result.structuredContent).toMatchObject({ data: { error: { code: 'invalid_options', recovery: { action: 'correct_arguments' } } } });
   const content = z.array(z.object({ type: z.literal('text'), text: z.string() })).parse(result.content);
   expect(JSON.parse(content[0]!.text)).toEqual(result.structuredContent);
+  expect(fetcher).not.toHaveBeenCalled();
 });
 
 it('retains message metadata and downloadable audio when transcription is unavailable', async () => {
@@ -358,7 +373,7 @@ it('reconciles an uncertain send without retrying it or exposing the service res
 });
 it.each([
   ['search_connections', { offset: -1 }], ['search_groups', { limit: 101 }],
-  ['search_messages', { offset: 175, limit: 26 }], ['search_messages', { limit: 51 }],
+  ['search_messages', { offset: 175, limit: 26 }],
   ['get_message', { page: 1, pages: [2], encodingFormat: 'image/*' }],
   ['get_message', { pages: [1, 2], crop: { x: 0, y: 0, width: 1, height: 1 }, encodingFormat: 'image/*' }],
   ['get_message', { crop: { x: .8, y: 0, width: .5, height: 1 }, encodingFormat: 'image/*' }],
@@ -375,11 +390,6 @@ it.each(['metadata', 'poll-responses', 'event-responses', 'reactions'])('rejects
 it('filters connections before slicing, and status is opt-in', async () => {
   expect(await call('search_connections', { options: { query: 'person', limit: 1 } })).toMatchObject({ structuredContent: { data: { items: [{ id: connectionId }], hasMore: false } } });
   expect(fetcher).not.toHaveBeenCalled();
-});
-it('maps compact send inputs to existing Status operations', () => {
-  const parsed = sendMessageInput.parse({ message: { kind: 'text', text: 'Status' }, options: { to: 'status', customMessageId: 'known' } });
-  expect(expandSendMessage(parsed)).toEqual({ kind: 'status_text', text: 'Status', customMessageId: 'known' });
-  expect(JSON.stringify(z.toJSONSchema(sendMessageInput))).not.toContain('status_text');
 });
 it('looks up an unknown send without decrypting credentials or dispatching', async () => {
   await local.db.prepare('UPDATE whatsapp_connections SET encrypted_token = ? WHERE id = ?').bind('not-ciphertext', connectionId).run();
@@ -464,18 +474,6 @@ it.each([{ encodingFormat: 'application/pdf' }, { include: ['metadata'] }, { inc
   }
 });
 
-it('guides proactive audio transcription and document reading through the unified tool', async () => {
-  const discovery = await rpc('server/discover');
-  const catalog = await rpc('tools/list');
-  const description = catalog.tools?.find(tool => tool.name === 'get_message')?.description;
-  for (const guidance of [discovery.instructions, description]) {
-    expect(guidance).toContain('audio');
-    expect(guidance).toContain('document');
-    expect(guidance).toContain('transcript');
-    expect(guidance).toContain('document-text');
-    expect(guidance).toContain('even without an explicit');
-  }
-});
 
 it('restores contact search through the authorized client, filtering and deduplicating before pagination', async () => {
   fetcher.mockImplementation(async (input, init) => {

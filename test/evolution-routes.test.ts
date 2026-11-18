@@ -181,16 +181,29 @@ describe('Evolution Go route contracts', () => {
     ]);
   });
 
-  it('matches Evolution Go FullName and Jid, and treats whitespace as the whole book', async () => {
-    const client = new EvolutionGoClient({ baseUrl: 'https://evolution.invalid', instanceId: 'ignored', instanceToken: 'secret', fetcher: async () => Response.json({
-      jsonapi: { version: '1.1' },
-      data: [
-        { type: 'chat', id: '555491977284', attributes: { firstName: '', fullName: 'Lucas Lermen', pushName: '', businessName: '' } },
-        { type: 'chat', id: '5511999999999', attributes: { fullName: '', pushName: 'Ana' } },
-      ],
-    }) });
+  it('authenticates contact reads per instance and matches full names and JIDs', async () => {
+    const client = new EvolutionGoClient({
+      baseUrl: 'https://evolution.invalid/', instanceId: 'ignored', instanceToken: 'secret', globalApiKey: 'global',
+      fetcher: async (request, init) => {
+        const url = new URL(String(request));
+        expect(url.pathname).toBe('/user/contacts');
+        expect(url.href).not.toMatch(/secret|global/);
+        const headers = new Headers(init?.headers);
+        expect(headers.get('apikey')).toBe('secret');
+        expect(headers.has('authorization')).toBe(false);
+        return Response.json({
+          jsonapi: { version: '1.1' },
+          data: [
+            { type: 'chat', id: '555491977284', attributes: { firstName: '', fullName: 'Lucas Lermen', pushName: '', businessName: '' } },
+            { type: 'chat', id: '5511999999999', attributes: { fullName: '', pushName: 'Ana' } },
+          ],
+        });
+      },
+    });
 
-    await expect(client.searchContacts('Lucas')).resolves.toMatchObject({ items: [{ jid: '555491977284', name: 'Lucas Lermen' }] });
+    await expect(client.searchContacts('Lucas')).resolves.toEqual({
+      items: [{ id: '555491977284', jid: '555491977284', name: 'Lucas Lermen' }], hasMore: false,
+    });
     await expect(client.searchContacts('lermen')).resolves.toMatchObject({ items: [{ name: 'Lucas Lermen' }] });
     await expect(client.searchContacts('ana')).resolves.toMatchObject({ items: [{ pushName: 'Ana' }] });
     await expect(client.searchContacts(' ')).resolves.toMatchObject({ items: [{ name: 'Lucas Lermen' }, { pushName: 'Ana' }] });

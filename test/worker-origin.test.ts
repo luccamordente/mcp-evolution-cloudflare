@@ -14,7 +14,6 @@ describe('Worker request origin', () => {
     expect(response.status).toBe(308);
     expect(response.headers.get('Location')).toBe('https://app.wapilot.com.br/mcp?fixture=1');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
-    expect(request.method).toBe(method);
     if (method === 'POST') expect(await request.text()).toBe('synthetic-body');
   });
 

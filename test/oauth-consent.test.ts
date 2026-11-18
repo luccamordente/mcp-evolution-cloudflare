@@ -69,7 +69,7 @@ describe('initial OAuth consent', () => {
   it('advertises read and write in discovery and the initial challenge', async () => {
     const { fetch } = await setup();
     const metadata = await fetch('/.well-known/oauth-protected-resource/mcp');
-    expect(await metadata.json()).toMatchObject({ scopes_supported: ['mcp:read', 'mcp:write'] });
+    expect(await metadata.json()).toMatchObject({ resource_name: 'WaPilot', scopes_supported: ['mcp:read', 'mcp:write'] });
     const challenge = await fetch('/mcp');
     expect(challenge.status).toBe(401);
     expect(challenge.headers.get('WWW-Authenticate')).toContain('scope="mcp:read mcp:write"');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adminEmails, buildAdminSnapshot, isAdminOperator, type AdminSnapshotDependencies } from '../src/lib/admin';
+import { buildAdminSnapshot, type AdminSnapshotDependencies } from '../src/lib/admin';
 
 type User = { id: string; email: string; status: string; createdAt: string; updatedAt: string };
 type Connection = {
@@ -59,13 +59,6 @@ function dependencies(overrides: Partial<AdminSnapshotDependencies> = {}): Admin
 }
 
 describe('administrative operational snapshot', () => {
-  it('uses an independent admin allowlist with identical access for Lucca and Heitor', () => {
-    expect(isAdminOperator('LUCCAMORDENTE@GMAIL.COM', {} as any)).toBe(true);
-    expect(isAdminOperator('heitorsalazar@gmail.com', {} as any)).toBe(true);
-    expect(isAdminOperator('other@example.com', {} as any)).toBe(false);
-    expect(adminEmails({ ADMIN_EMAILS: 'admin@example.com' })).toEqual(new Set(['admin@example.com']));
-  });
-
   it('keeps users without connections or authorizations and redacts operational secrets', async () => {
     const users: User[] = [
       { id: 'u-1', email: 'lucca@example.com', status: 'active', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-02T10:00:00Z' },

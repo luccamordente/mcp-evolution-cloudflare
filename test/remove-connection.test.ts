@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { removeUserConnection } from '../src/index';
-import { connectionsPage } from '../src/ui/connections';
 
 type Row = { id: string; user_id: string; instance_id: string; is_default: number; created_at: string };
 function env(rows: Row[], auditInserts: unknown[] = []) {
@@ -67,14 +66,5 @@ describe('removeUserConnection', () => {
     expect(status).toBe(404);
     expect(admin.deleteInstance).not.toHaveBeenCalled();
     expect(rows).toHaveLength(2);
-  });
-});
-
-describe('remove UI', () => {
-  const html = connectionsPage({ id: 'u', email: 'a@example.com', claims: {} } as never);
-  it('hides Remover on the default number and surfaces errors', () => {
-    expect(html).toContain("(connection.isDefault ? '' : '<button class=\"secondary danger\"");
-    expect(html).toContain('Não foi possível remover o número: ');
-    expect(html).toContain('state.connections = state.connections.filter((item) => item.id !== id)');
   });
 });

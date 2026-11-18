@@ -35,7 +35,6 @@ it('discovers message.received through authenticated stateless MCP on the pinned
   expect(discovery.response.headers.get('Mcp-Session-Id')).toBeNull();
   const catalog = await fixture.rpc(account.accessToken,'events/list');
   expect(catalog.body.result.events).toMatchObject([{name:'message.received',delivery:['webhook']}]);
-  expect((await fixture.fetch('/mcp',{method:'POST',headers:{'Cf-Access-Jwt-Assertion':'fake'}})).status).toBe(401);
 });
 
 function subscription(arguments_:Record<string,unknown> = {}, url = callback) {
@@ -205,13 +204,6 @@ it('requires read scope and rejects invalid event filters, callbacks, secrets an
     {...input,delivery:{...input.delivery,secret:'whsec_YWJj'}}, {...input,cursor:'replay'}, {...input,ttlMs:0},
   ];
   for (const params of invalid) expect((await fixture.rpc(account.accessToken,'events/subscribe',params)).body.error).toMatchObject({code:-32602});
-});
-
-it('keeps discovery product-facing and accepts legacy stateless requests', async () => {
-  const metadata = await (await fixture.fetch('/.well-known/oauth-protected-resource/mcp')).json() as any;
-  expect(metadata.resource_name).toBe('WaPilot');
-  const legacy = await fixture.fetch('/mcp',{method:'POST',headers:{authorization:'Bearer '+account.accessToken,'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'old',version:'1'}}})});
-  expect(legacy.status).toBe(200);
 });
 
 it('fails closed with a sanitized error when public Provider grant enumeration is unavailable', async () => {

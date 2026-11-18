@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { JSDOM } from 'jsdom';
+import { describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { adminPage } from '../src/ui/admin';
 
@@ -28,36 +29,49 @@ const dashboardDb = {
 } as unknown as D1Database;
 
 describe('admin operational page', () => {
-  it('renders an explicitly read-only administrative workspace', () => {
-    const html = adminPage();
+  it('filters an operational snapshot locally and fetches only on load and manual refresh', async () => {
+    const users = [
+      { email: 'healthy@example.test', connections: [{ friendlyName: 'Healthy', live: { state: 'connected' } }] },
+      {
+        email: 'offline@example.test', authorizations: { status: 'unavailable' },
+        connections: [{ friendlyName: 'Offline', live: { state: 'offline' }, activityStatus: 'unavailable' }],
+      },
+    ];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ users }));
+    const dom = new JSDOM(adminPage(), {
+      url: 'https://mcp.invalid/admin',
+      runScripts: 'dangerously',
+      beforeParse(window) { window.fetch = fetcher as typeof window.fetch; },
+    });
+    try {
+      const { document, Event } = dom.window;
+      const list = document.querySelector('#users-list')!;
+      await vi.waitFor(() => expect(list.textContent).toContain('healthy@example.test'));
+      expect(list.textContent).toContain('offline@example.test');
+      expect(list.textContent).toContain('OAuth indisponível');
+      expect(list.textContent).toContain('Auditoria indisponível');
+      expect(list.querySelector('button, form')).toBeNull();
 
-    expect(html).toContain('WaPilot · Admin');
-    expect(html).toContain('Modo administrativo');
-    expect(html).toContain('Somente leitura');
-    expect(html).toContain('/admin/data');
-    expect(html).toContain('admin-search');
-    expect(html).toContain('attention-filter');
-    expect(html).toContain('refresh-snapshot');
-    expect(html).toContain('snapshot-generated-at');
-    expect(html).toContain('Nenhum usuário encontrado');
-    expect(html).toContain('OAuth indisponível');
-    expect(html).toContain('Auditoria indisponível');
-    expect(html).toContain('Nenhuma autorização ativa');
-    expect(html).toContain('Atualizar snapshot');
-    expect(html).toContain('Estado live:');
-    expect(html).not.toContain('>Cadastro: ');
-    expect(html).not.toContain('/api/connections/provision');
-    expect(html).not.toContain('revoke');
-    expect(html).not.toContain('method="POST"');
-  });
-
-  it('keeps the client to one snapshot request per manual load', () => {
-    const html = adminPage();
-
-    expect(html.match(/fetch\('\/admin\/data'/g)).toHaveLength(1);
-    expect(html).toContain("refreshButton.addEventListener('click', () => loadSnapshot(true))");
-    expect(html).toContain("searchInput.addEventListener('input'");
-    expect(html).toContain("attentionFilter.addEventListener('change'");
+      const search = document.querySelector<HTMLInputElement>('#admin-search')!;
+      search.value = 'healthy';
+      search.dispatchEvent(new Event('input'));
+      expect(list.textContent).toContain('healthy@example.test');
+      expect(list.textContent).not.toContain('offline@example.test');
+      search.value = '';
+      search.dispatchEvent(new Event('input'));
+      const attention = document.querySelector('select')!;
+      attention.value = 'attention';
+      attention.dispatchEvent(new Event('change'));
+      expect(list.textContent).toContain('offline@example.test');
+      expect(list.textContent).not.toContain('healthy@example.test');
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const refresh = document.querySelector<HTMLButtonElement>('#refresh-snapshot')!;
+      refresh.click();
+      await vi.waitFor(() => expect(refresh.disabled).toBe(false));
+      expect(fetcher.mock.calls.map(([path, init]) => [path, init?.method ?? 'GET'])).toEqual([
+        ['/admin/data', 'GET'], ['/admin/data', 'GET'],
+      ]);
+    } finally { dom.window.close(); }
   });
 
   it('protects both administrative surfaces before loading or producing a snapshot', async () => {
@@ -71,27 +85,17 @@ describe('admin operational page', () => {
     expect((await data.json() as { error: string }).error).toContain('Entre no WaPilot');
   });
 
-  it('gives both operational administrators the same browser-session page and rejects others', async () => {
-    for (const email of ['luccamordente@gmail.com', 'heitorsalazar@gmail.com']) {
-      const response = await app.request('https://mcp.invalid/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: email });
-      expect(response.status).toBe(200);
-    }
-    const outsider = await app.request('https://mcp.invalid/admin', {}, { ...env, DB: dashboardDb, ENVIRONMENT: 'local', LOCAL_DEV_USER_EMAIL: 'other@example.com' });
-    expect(outsider.status).toBe(403);
-  });
-
-  it('uses the dashboard identity for both /connections and /admin', async () => {
-    const sharedAccessEnv = {
-      ...env,
-      DB: dashboardDb,
-      ENVIRONMENT: 'local',
-      LOCAL_DEV_USER_EMAIL: 'luccamordente@gmail.com',
+  it('uses the dashboard identity and applies the independent admin allowlist', async () => {
+    const local = { ...env, DB: dashboardDb, ENVIRONMENT: 'local' };
+    const adminStatus = async (email: string, allowed?: string) => {
+      const response = await app.request('https://mcp.invalid/admin', {}, { ...local, LOCAL_DEV_USER_EMAIL: email, ADMIN_EMAILS: allowed });
+      return response.status;
     };
-
-    const dashboard = await app.request('/connections', {}, sharedAccessEnv);
-    const admin = await app.request('https://mcp.invalid/admin', {}, sharedAccessEnv);
-
-    expect(dashboard.status).toBe(200);
-    expect(admin.status).toBe(200);
+    expect((await app.request('/connections', {}, { ...local, LOCAL_DEV_USER_EMAIL: 'other@example.test' })).status).toBe(200);
+    expect(await adminStatus('LUCCAMORDENTE@GMAIL.COM')).toBe(200);
+    expect(await adminStatus('heitorsalazar@gmail.com')).toBe(200);
+    expect(await adminStatus('other@example.test')).toBe(403);
+    expect(await adminStatus('other@example.test', ' OTHER@EXAMPLE.TEST ')).toBe(200);
+    expect(await adminStatus('luccamordente@gmail.com', 'other@example.test')).toBe(403);
   });
 });

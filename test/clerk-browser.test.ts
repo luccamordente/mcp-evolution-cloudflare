@@ -73,8 +73,12 @@ it('requires the dashboard CSRF token and trusted origin for mutations and alias
   expect(missing.status).toBe(403);
   const malformed = await fixture.fetch('/api/connections/missing/default', { method: 'POST', headers: { cookie: cookie + '; ' + csrfCookie, origin: 'https://mcp.invalid', 'x-wapilot-csrf': 'é'.repeat(43) } });
   expect(malformed.status).toBe(403);
-  const accepted = await fixture.fetch('/connections/api/connections/missing/default', { method: 'POST', headers: { cookie: cookie + '; ' + csrfCookie, origin: 'https://mcp.invalid', 'x-wapilot-csrf': csrf } });
-  expect(accepted.status).toBe(404);
+  const headers = { cookie: cookie + '; ' + csrfCookie, origin: 'https://mcp.invalid', 'x-wapilot-csrf': csrf };
+  for (const [method, suffix] of [['POST', '/default'], ['GET', '/status'], ['DELETE', '']]) {
+    const accepted = await fixture.fetch('/connections/api/connections/missing' + suffix, { method, headers });
+    expect(accepted.status).toBe(404);
+    expect(await accepted.json()).toEqual({ error: 'Connection not found' });
+  }
 });
 
 it('preserves native form origin while requiring explicit Clerk consent and its browser binding', async () => {
@@ -227,8 +231,13 @@ it('reports authorization infrastructure failure without exposing diagnostics or
 it('keeps development APIs JSON even when request headers ask for HTML navigation', async () => {
   const development = await clerkRuntime(undefined, { CLERK_PUBLISHABLE_KEY: 'pk_test_' + Buffer.from('clerk.fixture.invalid$').toString('base64'), CLERK_SECRET_KEY: 'sk_test_synthetic' });
   try {
-    for (const path of ['/connections/data', '/api/connections', '/connections/activity/foreign', '/connections/authorizations', '/api/authorizations', '/admin/data']) {
-      const response = await development.fetch(path, { redirect: 'manual', headers: { accept: 'text/html', 'sec-fetch-dest': 'document' } });
+    for (const [path, method] of [
+      ['/connections/data', 'GET'], ['/api/connections', 'GET'], ['/connections/activity/foreign', 'GET'],
+      ['/api/connections/missing/status', 'GET'], ['/connections/api/connections/missing/status', 'GET'],
+      ['/connections/api/connections/missing', 'DELETE'], ['/connections/authorizations', 'GET'],
+      ['/api/authorizations', 'GET'], ['/admin/data', 'GET'],
+    ]) {
+      const response = await development.fetch(path, { method, redirect: 'manual', headers: { accept: 'text/html', 'sec-fetch-dest': 'document' } });
       expect(response.status, path).toBe(401);
       expect(response.headers.get('content-type')).toContain('application/json');
       expect(response.headers.has('location')).toBe(false);

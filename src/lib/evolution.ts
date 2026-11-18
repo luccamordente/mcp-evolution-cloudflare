@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import {contactResult, ContactUpdateError, type ContactCommand} from './update-contact';
 import { messageObservationSchema, messageDeliverySchema } from './message-observation';
 import { contentDiagnosticSchema, nativeMessageSchema, hasNativeContent, responsePageSchema, type ResponseKind } from './native-message';
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
@@ -283,7 +285,7 @@ function normalizeContact(value: unknown): Contact {
   const id = stringValue(item?.id);
   return {
     id,
-    jid: id,
+    jid: stringValue(attributes.jid) ?? id,
     name: stringValue(attributes.fullName) ?? stringValue(attributes.firstName) ?? stringValue(attributes.name) ?? stringValue(attributes.businessName),
     pushName: stringValue(attributes.pushName),
     phoneNumber: stringValue(attributes.phoneNumber) ?? stringValue(attributes.phone),
@@ -505,6 +507,27 @@ export class EvolutionGoClient {
 
   async status(): Promise<Record<string, unknown>> {
     return this.request('/instance/status');
+  }
+
+  async updateContact(command: ContactCommand) {
+    try {
+      const response = await this.request<unknown>('/user/contact', {method:'POST', body:jsonApiBody({type:'contactUpdate', attributes:{...command}})});
+      return z.object({data:z.object({attributes:contactResult})}).parse(response).data.attributes;
+    } catch(error) {
+      if(error instanceof EvolutionApiError && error.status < 500 && error.status !== 408) throw error;
+      throw new ContactUpdateError('contact_result_unknown','The contact update may have applied. Inspect the contact before making another change.');
+    }
+  }
+
+  async contactManagement(ids:string[]) {
+    const params=new URLSearchParams(ids.map(id=>['contactId',id]));
+    const response=await this.request<unknown>('/user/contact?'+params);
+    return z.object({data:z.object({attributes:z.object({
+      labels:z.array(z.object({id:z.string(),name:z.string()})),labelCatalogAvailable:z.boolean(),labelCatalogComplete:z.boolean(),
+      observedAt:z.string(),operations:z.array(z.string()),
+      contacts:z.array(z.object({contactId:z.string(),labelMembership:z.array(z.string()).nullable(),favorite:z.boolean().nullable(),blocked:z.boolean().nullable(),
+        favoriteObservation:z.object({listedByExactId:z.boolean(),observedAtMs:z.number()}).optional(),observedLabelChanges:z.array(z.object({labelId:z.string(),applied:z.boolean(),observedAtMs:z.number()})).optional()}))
+    })})}).parse(response).data.attributes;
   }
 
   async searchContacts(query: string, cursor?: string, limit = 50): Promise<Page<Contact>> {

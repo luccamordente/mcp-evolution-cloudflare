@@ -17,12 +17,12 @@ let env: Env;
 let connectionId: string;
 let resource: Record<string, unknown>;
 let fetcher: MockInstance<typeof fetch>;
-async function rpc(method: string, params: Record<string, unknown> = {}) {
+async function rpc(method: string, params: Record<string, unknown> = {}, scopes = ['mcp:read', 'mcp:write']) {
   const handler = createMcpHandler(() => createMcpServer(env, user), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST', headers: { 'content-type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(method === 'tools/call' ? { 'Mcp-Name': String(params.name) } : {}) },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: { [PROTOCOL_VERSION_META_KEY]: '2026-07-28', [CLIENT_INFO_META_KEY]: { name: 'api-tests', version: '1' }, [CLIENT_CAPABILITIES_META_KEY]: {} } } }),
-  }), { authInfo: { token: 'synthetic', clientId: 'client', scopes: ['mcp:read', 'mcp:write'] } });
+  }), { authInfo: { token: 'synthetic', clientId: 'client', scopes } });
   return z.object({ result: z.looseObject({ isError: z.boolean().optional(), structuredContent: z.object({ data: z.unknown() }).optional(), tools: z.array(z.looseObject({ name: z.string() })).optional() }) }).parse(await response.json()).result;
 }
 const call = (name: string, args: Record<string, unknown> = {}) => rpc('tools/call', { name, arguments: args });
@@ -35,8 +35,8 @@ beforeEach(async () => {
   fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: resource }));
 });
 afterEach(async () => { vi.restoreAllMocks(); await local.dispose(); });
-it('publishes exactly six tools and no gallery resource', async () => {
-  expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_contacts', 'search_groups', 'search_messages', 'get_message', 'send_message']);
+it('publishes exactly seven tools and no gallery resource', async () => {
+  expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_contacts', 'update_contact', 'search_groups', 'search_messages', 'get_message', 'send_message']);
   const resources = await rpc('resources/list');
   expect(resources.resources).toEqual([expect.objectContaining({ uri: 'ui://wapilot/send-receipt-v3.html' })]);
 });
@@ -515,5 +515,57 @@ it('does not read contacts from another user connection', async () => {
 });
 it.each(['', '   ', 'x'.repeat(201)])('rejects invalid contact query without reading contacts (%s)', async query => {
   expect(await call('search_contacts', { query })).toMatchObject({ isError: true });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('accepts a single contact label operation and replays a completed key without dispatch', async () => {
+  resource = { type: 'contactUpdate', attributes: { contactId: '15550001111@s.whatsapp.net', status: 'accepted', operation: 'add_label' } };
+  const args = { contactId: '15550001111', operation: {kind:'add_label', labelId:'12'}, options:{connectionId,idempotencyKey:'label-once'} };
+  const first = await call('update_contact', args);
+  expect(first.structuredContent?.data).toMatchObject({connectionId,status:'accepted'});
+  expect((await call('update_contact', args)).structuredContent).toEqual(first.structuredContent);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(String(fetcher.mock.calls[0][0])).toContain('/user/contact');
+});
+
+it.skipIf(!process.env.CONTACT_MANAGEMENT_ACCEPTANCE_URL)('uses the connected contact provider through MCP', async () => {
+  fetcher.mockRestore();
+  env.EVOLUTION_BASE_URL = process.env.CONTACT_MANAGEMENT_ACCEPTANCE_URL!;
+  const id = '15550001111';
+  const found = await call('search_contacts',{options:{contactId:id,include:['management']}});
+  expect(found.structuredContent?.data).toMatchObject({labels:[{id:'12',name:'Customer'}],items:[{favorite:null}]});
+  const args={contactId:id,operation:{kind:'add_label',labelId:'12'},options:{idempotencyKey:'once'}};
+  const first=await call('update_contact',args);
+  expect(first.structuredContent?.data).toMatchObject({contactId:id+'@s.whatsapp.net',status:'accepted'});
+  expect((await call('update_contact',args)).structuredContent).toEqual(first.structuredContent);
+  for(const [kind,status] of [['block','confirmed'],['block','unchanged'],['unblock','confirmed'],['remove_label','accepted']] as const) {
+    const operation=kind==='remove_label'?{kind,labelId:'12'}:{kind};
+    const result=await call('update_contact',{contactId:id,operation});
+    expect(result.structuredContent?.data).toMatchObject({operation:kind,status});
+  }
+
+});
+
+it('rejects foreign connections and extra fields before a contact write', async () => {
+  const args={contactId:'15550001111',operation:{kind:'block'}};
+  const foreign=await call('update_contact',{...args,options:{connectionId:crypto.randomUUID()}});
+  expect(foreign.isError).toBe(true);
+  const wrong=await call('update_contact',{...args,operation:{kind:'block',labelId:'12'}});
+  expect(wrong.isError).toBe(true);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('retains uncertainty after a contact dispatch timeout', async () => {
+  fetcher.mockRejectedValue(new TypeError('connection lost'));
+  const args={contactId:'15550001111',operation:{kind:'block'},options:{connectionId,idempotencyKey:'lost'}};
+  for(let attempt=0;attempt<2;attempt++){
+    expect((await call('update_contact',args)).structuredContent?.data).toMatchObject({outcome:'unknown',error:{retryable:false,code:'contact_result_unknown'}});
+  }
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('requires write authorization before accessing a contact', async () => {
+  const result=await rpc('tools/call',{name:'update_contact',arguments:{contactId:'15550001111',operation:{kind:'block'}}},['mcp:read']);
+  expect(result.structuredContent?.data).toMatchObject({error:{code:'insufficient_scope'}});
   expect(fetcher).not.toHaveBeenCalled();
 });

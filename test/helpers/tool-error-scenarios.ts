@@ -1,3 +1,4 @@
+import {ContactUpdateError} from '../../src/lib/update-contact';
 import { AttachmentError } from '../../src/lib/attachments';
 import { AudioTranscriptionError } from '../../src/lib/audio-transcription';
 import { DocumentReadingError } from '../../src/lib/document-reading';
@@ -24,6 +25,8 @@ const choose = { status: 409, retryable: false, action: 'select_connection', too
 const classified = (error: () => Error, expectation: Expectation, operation = 'get_message'): ErrorScenario => ({ kind: 'classifier', error, operation, ...expectation });
 
 export const toolErrorScenarios: Record<McpErrorCode, ErrorScenario> = {
+  contact_result_unknown: classified(() => new ContactUpdateError("contact_result_unknown","Inspect the contact."), {status:409,retryable:false,action:"stop"}, "update_contact"),
+  contact_update_pending: classified(() => new ContactUpdateError("contact_update_pending","Inspect the contact."), {status:409,retryable:false,action:"stop"}, "update_contact"),
   idempotency_conflict: classified(() => new SendOperationError('idempotency_conflict', 'WaPilot received different arguments for the same action key.'), reconcile, 'send_message'),
   send_in_progress: classified(() => new SendOperationError('send_in_progress', 'WaPilot cannot confirm this send yet.'), reconcile, 'send_message'),
   send_result_unknown: classified(() => new SendOperationError('send_result_unknown', 'WaPilot could not confirm the earlier send.'), reconcile, 'send_message'),

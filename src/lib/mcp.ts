@@ -1,3 +1,4 @@
+import { ContactUpdateError, reservedContactUpdate, updateContactInput } from './update-contact';
 import { pendingAvailability, messageObservationSchema, messageDeliverySchema, MESSAGE_CONTENT_NOT_RETAINED } from './message-observation';
 import { evolutionState, extractPhone } from './connection-status';
 import { Buffer } from 'node:buffer';
@@ -70,6 +71,7 @@ export const TOOL_DESCRIPTIONS = {
 name, phone number, or instance ID. Returns a paginated list.
 Add options.include: ["status"] for live connection status.
 Use a returned connection ID to select a connection in other tools.`,
+  update_contact: `Change one contact on the selected connection. Block, unblock, or add or remove one Business label by ID.`,
   search_contacts: `Find contacts by name, display name, phone number, or WhatsApp address
 (JID). Requires query. Returns matching contacts and their identifiers
 in a paginated list. Use this tool to resolve a person before sending.`,
@@ -109,6 +111,7 @@ send with get_message before considering another send.`,
 export const TOOL_TITLES = {
   search_connections: 'Search connections',
   search_contacts: 'Search contacts',
+  update_contact: 'Update contact',
   search_groups: 'Search groups',
   search_messages: 'Search messages',
   get_message: 'Get message',
@@ -140,7 +143,7 @@ const readOnlyAnnotations = TOOL_ANNOTATIONS.readOnly;
 const sendAnnotations = TOOL_ANNOTATIONS.send;
 
 /** Tools that create WhatsApp side effects and therefore need the mcp:write scope. */
-export const WRITE_TOOLS: ReadonlySet<string> = new Set(['send_message']);
+export const WRITE_TOOLS: ReadonlySet<string> = new Set(['send_message','update_contact']);
 export const WRITE_SCOPE = 'mcp:write';
 
 /** True when the transport-validated token carries mcp:write. Missing auth info is denied. */
@@ -184,6 +187,7 @@ function ok(data: unknown) {
 }
 
 export type McpErrorCode =
+  | 'contact_result_unknown' | 'contact_update_pending'
   | 'idempotency_conflict'
   | 'send_in_progress'
   | 'send_result_unknown'
@@ -309,14 +313,15 @@ function classifyBaseError(error: unknown, operation: string): Omit<McpToolError
 }
 
 export function classifyMcpError(error: unknown, operation: string): McpToolError {
+  if(error instanceof ContactUpdateError) return {code:error.code,status:409,operation,message:error.message,retryable:false,hint:error.message,recovery:{action:'stop',steps:[error.message]}};
   const classified = classifyBaseError(error, operation);
   const recovery = recoveryFor(classified);
-  return { ...classified, retryable: operation === 'send_message' ? false : classified.retryable, hint: recovery.steps.join(' '), recovery };
+  return { ...classified, retryable: WRITE_TOOLS.has(operation) ? false : classified.retryable, hint: recovery.steps.join(' '), recovery };
 }
 
 function fail(operation: string, error: unknown, identity?: { connectionId: string; messageId?: string } | { outcome: 'failed'; dispatchState: 'not_started' }) {
   const errorData = classifyMcpError(error, operation);
-  const payload = { ...identity, ...(error instanceof MessageReadError && error.code === 'message_content_unavailable' ? {contentUnavailable: true, contentUnavailableReason: error.contentUnavailableReason, ...(error.contentDiagnostic ? { contentDiagnostic: error.contentDiagnostic } : {}), messageType: error.messageType ?? 'unknown'} : {}), error: errorData };
+  const payload = { ...identity, ...(error instanceof ContactUpdateError && error.code==="contact_result_unknown"?{outcome:"unknown"}:{}), ...(error instanceof MessageReadError && error.code === 'message_content_unavailable' ? {contentUnavailable: true, contentUnavailableReason: error.contentUnavailableReason, ...(error.contentDiagnostic ? { contentDiagnostic: error.contentDiagnostic } : {}), messageType: error.messageType ?? 'unknown'} : {}), error: errorData };
   return { ...ok(payload), isError: true };
 }
 
@@ -387,8 +392,32 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
     if (!parsed.success) return fail('search_contacts', invalidOptions(parsed.error));
     const o = parsed.data;
     return read('search_contacts', o.connectionId, async (c, id) => {
+      if(o.contactId && !query && o.include?.includes('management')) {
+        const {contacts,...catalog}=await c.contactManagement([o.contactId]);
+        return {connectionId:id,items:contacts,...catalog,hasMore:false};
+      }
+      if(!query || o.contactId) throw new OptionsError('invalid_options','Supply a query or one exact contact ID with the management include.');
       const { items, hasMore } = await c.searchContacts(query, String(o.offset), o.limit);
+      if(o.include?.includes("management")) {
+        const ids=items.flatMap(item=>item.jid?[item.jid]:[]);
+        if(!ids.length) return {connectionId:id,items,hasMore};
+        const {contacts:observations,...catalog}=await c.contactManagement(ids);
+        const byId=new Map(observations.map(item=>[item.contactId,item]));
+        return {connectionId:id,items:items.map(item=>({...item,management:item.jid?byId.get(item.jid):undefined})),hasMore,...catalog};
+      }
       return { connectionId: id, items, hasMore, ...(!items.length ? { hint: 'No contacts matched this page. Reset options.offset to 0 and try a shorter name, display name, phone number, or WhatsApp address. Use search_groups for group recipients. Do not guess a recipient.' } : {}) };
+    });
+  });
+  server.registerTool('update_contact', {title:TOOL_TITLES.update_contact,description:TOOL_DESCRIPTIONS.update_contact,inputSchema:updateContactInput,outputSchema:dataOutput,annotations:{...sendAnnotations,destructiveHint:true}}, async (input,ctx) => {
+    if(!canWrite(ctx)) return fail('update_contact',new InsufficientScopeError());
+    return read('update_contact',input.options?.connectionId,async (client,connectionId)=>{
+      const id=input.contactId.replace(/^\+/, '');
+      const command={contactId:id.includes('@')?id:id+'@s.whatsapp.net',operation:input.operation};
+      const dispatch=()=>client.updateContact(command);
+      const result=input.options?.idempotencyKey
+        ? await reservedContactUpdate(env.DB,ensured.id,connectionId,input.options.idempotencyKey,command,dispatch)
+        : await dispatch();
+      return {connectionId,...result};
     });
   });
   server.registerTool('search_groups', { title: TOOL_TITLES.search_groups, description: TOOL_DESCRIPTIONS.search_groups, inputSchema: searchGroupsInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ options }) => {

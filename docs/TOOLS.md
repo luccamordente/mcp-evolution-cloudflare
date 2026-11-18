@@ -237,3 +237,19 @@ Falhas de envio acrescentam `dispatchState`. `not_started` confirma que a tentat
 Provedores antigos sem esse anúncio conservam a paginação por timestamp. Um grupo de horários iguais maior que uma página pode ficar incompleto nesse contrato antigo. A busca lê o histórico atual, sem cache ou snapshot. Mudanças ou remoção da âncora entre consultas podem alterar a continuação.
 
 Se o provedor deixar de anunciar a capacidade durante uma continuação por ID, a consulta falha com erro 502 sanitizado. O cliente não reinicia silenciosamente a busca nem repete páginas. Uma nova consulta explícita pode usar o contrato anunciado naquele momento.
+
+### update_contact
+
+Altera um contato por chamada. Use o número internacional ou JID individual em
+`contactId`. Os tipos disponíveis em `operation.kind` são `block`, `unblock`,
+`add_label` e `remove_label`. As operações de etiqueta exigem `labelId`.
+Consulte as etiquetas da conexão com
+`search_contacts({options:{contactId,include:["management"]}})`.
+O catálogo e as associações observadas podem estar incompletos. Um campo nulo
+indica estado desconhecido. Favoritos e gravação de nomes aguardam verificação.
+
+`options.connectionId` seleciona a conexão. `options.idempotencyKey` protege uma
+intenção por 24 horas. `accepted` indica aceite, `confirmed` indica confirmação
+pelo estado retornado e `unchanged` indica que o estado já estava correto.
+Em caso de resultado desconhecido, consulte o contato antes de decidir se uma
+nova alteração é necessária.

@@ -2,7 +2,7 @@
 
 O [checkpoint Clerk de 16/11/2026](docs/qa/clerk-stabilization-2026-11-16.md) registra os dois usuários ativos vinculados em produção e os gates ainda pendentes. O vínculo administrativo não substitui a sessão real no dashboard/API, e o fim do prazo de 24 horas não encerra sozinho a estabilização.
 
-O catálogo MCP atual usa somente `search_connections`, `search_contacts`, `search_groups`, `search_messages`, `get_message` e `send_message`. Para os argumentos e limites, consulte [o contrato atual](docs/TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. A consulta operacional por chave usa `get_message` com `options.idempotencyKey`.
+O catálogo MCP atual usa `search_connections`, `search_contacts`, `update_contact`, `search_groups`, `search_messages`, `get_message` e `send_message`. Para os argumentos e limites, consulte [o contrato atual](docs/TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. A consulta operacional por chave usa `get_message` com `options.idempotencyKey`.
 
 
 Instale Node 22+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.

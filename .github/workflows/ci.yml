@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Determine whether tests are needed
+        id: scope
+        shell: bash
+        run: |
+          # The first parent of the PR merge commit is the base used for this checkout.
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]] &&
+             git rev-parse --verify --quiet HEAD^2 >/dev/null &&
+             git diff --quiet --no-renames HEAD^1 HEAD -- . \
+               ':(exclude,top)README.md' \
+               ':(exclude,top)DEVELOPMENT.md' \
+               ':(exclude,top,glob)docs/**/*.md'; then
+            echo 'check=false' >> "$GITHUB_OUTPUT"
+            echo 'No test inputs changed. Skipping dependency installation and tests.'
+          else
+            echo 'check=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.scope.outputs.check != 'false'
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.scope.outputs.check != 'false'
+        run: npm ci --no-audit --no-fund
+
+      - name: Check assets, types and tests
+        if: steps.scope.outputs.check != 'false'
+        run: npm run check
+
+      - name: Test the callback sender
+        if: steps.scope.outputs.check != 'false'
+        run: npm --prefix sender test

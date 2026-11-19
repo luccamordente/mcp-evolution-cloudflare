@@ -387,7 +387,8 @@ it.each(['application/pdf', 'image/*'])('rejects incompatible text encoding %s',
 it.each(['metadata', 'poll-responses', 'event-responses', 'reactions'])('rejects unavailable include %s explicitly', async include => {
   expect(await call('get_message', { messageId: 'm1', options: { include: [include] } })).toMatchObject({ isError: true, structuredContent: { data: { error: { code: include === 'reactions' ? 'unsupported_include' : 'incompatible_include' } } } });
 });
-it('filters connections before slicing, and status is opt-in', async () => {
+it('filters connections before slicing and uses a saved number without a live request', async () => {
+  await env.DB.prepare('UPDATE whatsapp_connections SET phone_number = ? WHERE id = ?').bind('15555550100', connectionId).run();
   expect(await call('search_connections', { options: { query: 'person', limit: 1 } })).toMatchObject({ structuredContent: { data: { items: [{ id: connectionId }], hasMore: false } } });
   expect(fetcher).not.toHaveBeenCalled();
 });
@@ -566,4 +567,34 @@ it('requires write authorization before accessing a contact', async () => {
   const result=await rpc('tools/call',{name:'update_contact',arguments:{contactId:'15550001111',operation:{kind:'block'}}},['mcp:read']);
   expect(result.structuredContent?.data).toMatchObject({error:{code:'insufficient_scope'}});
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each([{}, { include: ['status'] }])('returns the paired account number when the saved number is missing (%j)', async options => {
+  env.EVOLUTION_GLOBAL_API_KEY = 'admin-test-key';
+  fetcher.mockImplementation(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    const info = path === '/instance/info/authenticated-instance';
+    expect(['/instance/status', '/instance/info/authenticated-instance']).toContain(path);
+    expect(new Headers(init?.headers).get('apikey')).toBe(info ? 'admin-test-key' : 'synthetic-token');
+    return Response.json({ jsonapi: { version: '1.1' }, data: {
+      type: 'connection', id: 'authenticated-instance', attributes: { connected: true, loggedIn: true },
+      ...(info ? { meta: { jid: '5511999999999:21@s.whatsapp.net', token: 'private-info-token' } } : {}),
+    } });
+  });
+  const result = await call('search_connections', { options });
+  expect(result).toMatchObject({ structuredContent: { data: { items: [{
+    id: connectionId, phoneNumber: '5511999999999',
+    ...(options.include ? { status: { state: 'connected', phoneNumber: '5511999999999' } } : {}),
+  }] } } });
+  expect(JSON.stringify(result)).not.toContain('private-info-token');
+});
+
+it('prefers the live account number when the saved connection has a different number', async () => {
+  await env.DB.prepare('UPDATE whatsapp_connections SET phone_number = ? WHERE id = ?').bind('15555550100', connectionId).run();
+  env.EVOLUTION_GLOBAL_API_KEY = 'admin-test-key';
+  resource = { type: 'connection', attributes: { connected: true, loggedIn: true }, meta: { jid: '15555550101:7@s.whatsapp.net' } };
+  expect(await call('search_connections', { options: { include: ['status'] } })).toMatchObject({
+    structuredContent: { data: { items: [{ phoneNumber: '15555550101', status: { phoneNumber: '15555550101' } }] } },
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });

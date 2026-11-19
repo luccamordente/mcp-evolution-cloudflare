@@ -13,7 +13,7 @@ import { approvedMediaOrigins } from './media-origins';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { AuthenticatedUser, Env, Message } from '../types';
-import { EvolutionGoClient, EvolutionApiError, MessageImageError } from './evolution';
+import { connectionIdFromResponse, EvolutionGoAdminClient, EvolutionGoClient, EvolutionApiError, MessageImageError } from './evolution';
 import { AUDIO_TRANSCRIPTION_TIMEOUT_MS, AudioTranscriptionError, transcribeMessageAudio } from './audio-transcription';
 import { PDF_TIMEOUT_MS, PdfProcessingError, readDocumentPages } from './pdf-processing';
 import { DocumentReadingError, readMessageDocument } from './document-reading';
@@ -68,8 +68,8 @@ export const MCP_SERVER_INSTRUCTIONS = MCP_COMMON_INSTRUCTIONS;
 export const MCP_SERVER_NAME = 'whatsapp-mcp';
 export const TOOL_DESCRIPTIONS = {
   search_connections: `Find your WaPilot connections and their identifiers. Filter by connection
-name, phone number, or instance ID. Returns a paginated list.
-Add options.include: ["status"] for live connection status.
+name, saved phone number, or instance ID. Each item includes the account phoneNumber when available.
+Add options.include: ["status"] to refresh the number and see live connection status.
 Use a returned connection ID to select a connection in other tools.`,
   update_contact: `Change one contact on the selected connection. Block, unblock, or add or remove one Business label by ID.`,
   search_contacts: `Find contacts by name, display name, phone number, or WhatsApp address
@@ -373,13 +373,34 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       const query = o.query?.toLowerCase();
       const rows = (await listConnections(env.DB, ensured.id)).filter(c => !query || [c.friendlyName, c.phoneNumber, c.instanceId].some(v => v?.toLowerCase().includes(query)));
       const errors: { part: string; connectionId: string; error: McpToolError }[] = [];
+      const admin = env.EVOLUTION_GLOBAL_API_KEY && new EvolutionGoAdminClient({
+        baseUrl: env.EVOLUTION_BASE_URL, globalApiKey: env.EVOLUTION_GLOBAL_API_KEY,
+      });
+      async function accountNumber(live: unknown) {
+        const phone = extractPhone(live);
+        if (phone) return phone;
+        const instanceId = connectionIdFromResponse(live);
+        if (!admin || !instanceId) return undefined;
+        try {
+          return extractPhone(await admin.instanceInfo(instanceId));
+        } catch {
+          // Account metadata is optional. The connection and its status remain available.
+          return undefined;
+        }
+      }
       const items = await Promise.all(rows.slice(o.offset, o.offset + o.limit).map(async c => {
-        if (!o.include?.includes('status')) return c;
+        const includeStatus = o.include?.includes('status');
+        if (!includeStatus && c.phoneNumber) return c;
         try {
           const { client } = await clientFor(c.id);
           const live = await client.status();
-          return { ...c, status: { state: evolutionState(live), phoneNumber: extractPhone(live) } };
+          const state = evolutionState(live);
+          const phoneNumber = state === 'connected'
+            ? await accountNumber(live)
+            : undefined;
+          return { ...c, phoneNumber: phoneNumber ?? c.phoneNumber ?? null, ...(includeStatus ? { status: { state, phoneNumber: phoneNumber ?? null } } : {}) };
         } catch (error) {
+          if (!includeStatus) return c;
           errors.push({ part: 'status', connectionId: c.id, error: classifyMcpError(error, 'search_connections') });
           return { ...c, statusUnavailable: true };
         }

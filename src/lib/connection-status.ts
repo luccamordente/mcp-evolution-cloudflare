@@ -50,10 +50,7 @@ export function extractPhone(payload: unknown): string | undefined {
 export function normalizePhoneNumber(value: string | undefined): string | undefined {
   const candidate = value?.trim();
   if (!candidate) return undefined;
-  const [rawUser] = candidate.split('@', 2);
-  const user = rawUser.replace(/^\+/, '').split(':', 1)[0];
-  if (!/^\d+$/.test(user) || user.length < 8) return undefined;
-  return user;
+  return /^\+?(\d{8,15})(?::\d+)?(?:@(?:s\.whatsapp\.net|c\.us))?$/.exec(candidate)?.[1];
 }
 
 /** Build the regular user JID accepted by Evolution Go's profile endpoint. */

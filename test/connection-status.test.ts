@@ -71,3 +71,7 @@ describe('Evolution profile response helpers', () => {
     expect(extractAvatarUrl({ data: { URL: '' } })).toBeUndefined();
   });
 });
+
+it.each(['123456789012345@lid', '1234567890123@g.us'])('excludes non-phone account identifiers (%s)', jid => {
+  expect(avatarLookupJidFromPhone(jid)).toBeUndefined();
+});

@@ -1,6 +1,6 @@
 import { ContactUpdateError, reservedContactUpdate, updateContactInput } from './update-contact';
 import { pendingAvailability, messageObservationSchema, messageDeliverySchema, MESSAGE_CONTENT_NOT_RETAINED } from './message-observation';
-import { evolutionState, extractPhone } from './connection-status';
+import { avatarLookupJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone } from './connection-status';
 import { Buffer } from 'node:buffer';
 import { AttachmentError, attachmentMetadata, downloadAttachment, messageAttachments } from './attachments';
 import { OptionsError, invalidOptions, contactOptions, searchContactsInput, connectionOptions, groupOptions, searchOptions, getOptions, searchConnectionsInput, searchGroupsInput, searchMessagesInput, getMessageInput } from './mcp-options';
@@ -70,6 +70,7 @@ export const TOOL_DESCRIPTIONS = {
   search_connections: `Find your WaPilot connections and their identifiers. Filter by connection
 name, saved phone number, or instance ID. Each item includes the account phoneNumber when available.
 Add options.include: ["status"] to refresh the number and see live connection status.
+Include "profile" for the current account’s WhatsApp display name, address (jid), and profile picture (avatarUrl).
 Use a returned connection ID to select a connection in other tools.`,
   update_contact: `Change one contact on the selected connection. Block, unblock, or add or remove one Business label by ID.`,
   search_contacts: `Find contacts by name, display name, phone number, or WhatsApp address
@@ -390,7 +391,8 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       }
       const items = await Promise.all(rows.slice(o.offset, o.offset + o.limit).map(async c => {
         const includeStatus = o.include?.includes('status');
-        if (!includeStatus && c.phoneNumber) return c;
+        const includeProfile = o.include?.includes('profile');
+        if (!includeStatus && !includeProfile && c.phoneNumber) return c;
         try {
           const { client } = await clientFor(c.id);
           const live = await client.status();
@@ -398,11 +400,21 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
           const phoneNumber = state === 'connected'
             ? await accountNumber(live)
             : undefined;
-          return { ...c, phoneNumber: phoneNumber ?? c.phoneNumber ?? null, ...(includeStatus ? { status: { state, phoneNumber: phoneNumber ?? null } } : {}) };
+          let profile = null;
+          if (includeProfile && state === 'connected') {
+            const jid = avatarLookupJidFromPhone(phoneNumber);
+            const avatarUrl = jid ? await client.avatar(jid).then(extractAvatarUrl).catch(() => undefined) : undefined;
+            profile = { displayName: extractDisplayName(live) ?? null, jid: jid ?? null, avatarUrl: avatarUrl ?? null };
+          }
+          return {
+            ...c, phoneNumber: phoneNumber ?? c.phoneNumber ?? null,
+            ...(includeStatus ? { status: { state, phoneNumber: phoneNumber ?? null } } : {}),
+            ...(includeProfile ? { profile } : {}),
+          };
         } catch (error) {
-          if (!includeStatus) return c;
-          errors.push({ part: 'status', connectionId: c.id, error: classifyMcpError(error, 'search_connections') });
-          return { ...c, statusUnavailable: true };
+          if (!includeStatus && !includeProfile) return c;
+          errors.push({ part: includeStatus ? 'status' : 'profile', connectionId: c.id, error: classifyMcpError(error, 'search_connections') });
+          return { ...c, ...(includeStatus ? { statusUnavailable: true } : {}), ...(includeProfile ? { profile: null } : {}) };
         }
       }));
       return { ...ok({ items, offset: o.offset, hasMore: o.offset + items.length < rows.length, ...(errors.length ? { partial: true, error: errors[0]?.error, errors } : {}), ...(!items.length ? { hint: 'No connections matched this page. Retry with offset: 0 and no query. If the list is still empty, ask the user to connect WhatsApp through WaPilot.' } : {}) }), ...(errors.length ? { isError: true } : {}) };

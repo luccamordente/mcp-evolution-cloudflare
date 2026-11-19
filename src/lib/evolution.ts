@@ -185,7 +185,14 @@ async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: stri
   throw new EvolutionApiError(status, message, lastPayload, timeoutSource);
 }
 
-/** Administrative client used only by the owner-protected provisioning route. */
+function avatarRequest(jid: string, timeoutMs: number): EvolutionRequestInit {
+  return {
+    method: 'POST',
+    timeoutMs: Math.min(timeoutMs, AVATAR_REQUEST_TIMEOUT_MS),
+    body: jsonApiBody({ type: 'chat', id: jid, attributes: { preview: true } }),
+  };
+}
+
 export class EvolutionGoAdminClient {
   private readonly fetcher: typeof fetch;
   private readonly baseUrl: string;
@@ -266,11 +273,7 @@ export class EvolutionGoAdminClient {
   }
 
   async avatar(token: string, number: string): Promise<unknown> {
-    return this.request('/user/avatar', token, {
-      method: 'POST',
-      timeoutMs: Math.min(this.timeoutMs, AVATAR_REQUEST_TIMEOUT_MS),
-      body: jsonApiBody({ type: 'chat', id: number, attributes: { preview: true } }),
-    });
+    return this.request('/user/avatar', token, avatarRequest(number, this.timeoutMs));
   }
 
   async listInstances(): Promise<unknown> {
@@ -507,6 +510,10 @@ export class EvolutionGoClient {
 
   async status(): Promise<Record<string, unknown>> {
     return this.request('/instance/status');
+  }
+
+  async avatar(jid: string): Promise<unknown> {
+    return this.request('/user/avatar', avatarRequest(jid, this.timeoutMs));
   }
 
   async updateContact(command: ContactCommand) {

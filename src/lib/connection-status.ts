@@ -84,7 +84,14 @@ function extractStringByKeys(payload: unknown, wantedKeys: string[]): string | u
 }
 
 export function extractDisplayName(payload: unknown): string | undefined {
-  return extractStringByKeys(payload, ['displayName', 'profileName', 'pushName', 'name', 'fullName']);
+  const resource = connectionResourceParts(payload);
+  if (!resource) return undefined;
+  for (const key of ['profileName', 'pushName', 'displayName', 'name', 'fullName']) {
+    for (const value of [resource.attributes[key], resource.meta?.[key]]) {
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  }
+  return undefined;
 }
 
 export function extractAvatarUrl(payload: unknown): string | undefined {

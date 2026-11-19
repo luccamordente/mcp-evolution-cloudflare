@@ -598,3 +598,36 @@ it('prefers the live account number when the saved connection has a different nu
   });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it.each([200, 404])('returns the connected account profile when the picture lookup returns %i', async status => {
+  const avatarUrl = 'https://pps.whatsapp.net/self.jpg';
+  fetcher.mockImplementation(async (input, init) => {
+    if (new URL(String(input)).pathname === '/instance/status') {
+      return Response.json({ jsonapi: { version: '1.1' }, data: {
+        type: 'connection', attributes: { connected: true, loggedIn: true, name: 'Instance alias' },
+        meta: { jid: '15555550101:7@s.whatsapp.net', profileName: 'Account display name' },
+      } });
+    }
+    expect(new URL(String(input)).pathname).toBe('/user/avatar');
+    expect(new Headers(init?.headers).get('apikey')).toBe('synthetic-token');
+    expect(JSON.parse(String(init?.body)).data).toMatchObject({ id: '15555550101@s.whatsapp.net', attributes: { preview: true } });
+    return Response.json({ jsonapi: { version: '1.1' }, data: { type: 'avatar', attributes: { url: avatarUrl } } }, { status });
+  });
+  const result = await call('search_connections', { options: { include: ['status', 'profile'] } });
+  expect(result.isError).not.toBe(true);
+  expect(result).toMatchObject({ structuredContent: { data: { items: [{
+    friendlyName: 'Personal', status: { state: 'connected' }, profile: {
+      displayName: 'Account display name', jid: '15555550101@s.whatsapp.net', avatarUrl: status === 200 ? avatarUrl : null,
+    },
+  }] } } });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it('returns a null profile for an unpaired connection without looking up its saved phone', async () => {
+  await env.DB.prepare('UPDATE whatsapp_connections SET phone_number = ? WHERE id = ?').bind('15555550100', connectionId).run();
+  resource = { type: 'connection', attributes: { connected: false, loggedIn: false } };
+  expect(await call('search_connections', { options: { include: ['profile'] } })).toMatchObject({
+    structuredContent: { data: { items: [{ profile: null, phoneNumber: '15555550100' }] } },
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

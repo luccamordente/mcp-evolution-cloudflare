@@ -4,7 +4,7 @@ O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Títu
 
 | Ferramenta | Argumentos | Fonte interna |
 | --- | --- | --- |
-| `search_connections` | `options?: {query, include: ['status'], offset, limit}` | D1 do usuário; consulta ao vivo quando falta o número salvo ou quando o status é solicitado |
+| `search_connections` | `options?: {query, include: ('status' | 'profile')[], offset, limit}` | D1 do usuário; consulta ao vivo quando falta o número salvo ou quando o status é solicitado |
 | `search_contacts` | `query: string, options?: {connectionId, offset, limit}` | `/user/contacts`; busca por nome/telefone e deduplicação por ID/JID |
 | `search_groups` | `options?: {connectionId, query, include: ['participants'], offset, limit}` | `/group/list`; filtro por nome/JID antes da paginação local |
 | `search_messages` | `options?: {connectionId, conversationId, text, includeReceiptOnly, offset, limit}` | `/message/search`; filtros aplicados no provedor |
@@ -16,6 +16,8 @@ Não há ferramentas separadas de status, galeria, respostas ou mídia. A UI de 
 ## Busca e paginação
 
 Cada conexão retorna `phoneNumber` com o telefone da conta WhatsApp em dígitos internacionais ou `null` quando indisponível. A listagem usa o número salvo quando disponível. Com `include: ["status"]`, `status.phoneNumber` identifica a conta conectada e pode ser `null`. Um número obtido ao vivo também tem prioridade em `phoneNumber`. O filtro de telefone consulta os números salvos.
+
+Com `include: ["profile"]`, `profile.displayName` mostra o nome da conta no WhatsApp, `profile.jid` traz o endereço da conta e `profile.avatarUrl` traz a URL da prévia da foto. A URL pode expirar. Campos indisponíveis retornam `null`. Sem uma conta conectada, o perfil inteiro é `null`. Combine `profile` e `status` na mesma chamada para identificar a conta e verificar sua disponibilidade.
 
 `offset` é inteiro não negativo. `search_connections` e `search_groups` usam limite padrão 50, máximo 100. `query` filtra conexões por nome amigável, telefone ou ID de instância; grupos por nome ou JID. Participantes só aparecem quando solicitados. As respostas incluem `items` e `hasMore`.
 

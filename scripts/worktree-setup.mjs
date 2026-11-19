@@ -38,11 +38,15 @@ try {
     config[key] = [...new Set([...(config[key] ?? []), ...values])].sort();
   }
 
-  const changed = JSON.stringify(config) !== before;
-  if (changed) writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const searchOptionsChanged = JSON.stringify(config) !== before;
+  // O Orca pode renomear a branch depois do setup, ao receber a primeira mensagem.
+  if (searchOptionsChanged || config.auto_track !== true) {
+    config.auto_track = true;
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  }
   // init registra main; a branch da worktree precisa ser rastreada explicitamente.
   run('branch', 'add');
-  run('sync', ...(changed ? ['--force'] : []));
+  run('sync', ...(searchOptionsChanged ? ['--force'] : []));
   console.log('Índice TokenSave desta worktree pronto.');
 } catch (error) {
   // Ferramenta opcional: sua ausência ou falha não impede o setup do workspace.

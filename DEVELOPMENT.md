@@ -29,7 +29,7 @@ O Orca executa esse comando no setup de novas worktrees via `orca.yaml`, com a l
 
 Depois da cópia, o comando cria ou atualiza o índice local em `.tokensave/` (ignorado pelo Git), inclui `wrangler.jsonc`, HTML, CSS e `.github/` nas buscas e preserva configurações existentes. A ferramenta é opcional: sua ausência ou falha não interrompe o setup. D1/KV, grants, chaves de cifra/consentimento, configurações geradas e índices não são copiados; cada worktree prepara seus próprios estados.
 
-Cada worktree precisa do próprio índice. Depois de criá-lo, reinicie a conexão MCP do agente se ela ainda estiver usando o índice da worktree principal. Para atualizar um índice existente após mudanças no código, use `tokensave sync`.
+O setup registra a branch atual e habilita o rastreamento automático para quando o Orca renomear a branch após a primeira mensagem. Se uma conexão MCP já tiver aberto outro índice, reinicie-a na worktree correta. Para atualizar um índice existente após mudanças no código, use `tokensave sync`.
 
 ## Desenvolvimento local
 

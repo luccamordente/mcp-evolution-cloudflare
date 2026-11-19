@@ -36,7 +36,7 @@ fs.appendFileSync('calls', args.join(' ') + '\\n');
 if (args[0] === 'init') {
   fs.mkdirSync('.tokensave');
   fs.writeFileSync('.tokensave/config.json', JSON.stringify({
-    root_dir: process.cwd(), cpu_usage: 'balanced', git_ignore: true,
+    root_dir: process.cwd(), cpu_usage: 'balanced', git_ignore: true, auto_track: false,
     exclude: ['custom/**'], artifact_extensions: ['md'],
   }));
 }
@@ -49,14 +49,19 @@ if (args[0] === 'init') {
     root_dir: workspace,
     cpu_usage: 'balanced',
     git_ignore: true,
+    auto_track: true,
     exclude: expect.arrayContaining(['custom/**', '**/.agents/**']),
     artifact_extensions: expect.arrayContaining(['md', 'jsonc', 'html', 'css', 'webmanifest']),
     include: expect.arrayContaining(['.github/**', '.scratch/*.md']),
   });
   expect(run(workspace, path).status).toBe(0);
   expect(readFileSync(configPath, 'utf8')).toBe(firstConfig);
+  writeFileSync(configPath, JSON.stringify({ ...JSON.parse(firstConfig), auto_track: false }));
+  expect(run(workspace, path).status).toBe(0);
+  expect(readFileSync(configPath, 'utf8')).toBe(firstConfig);
   expect(readFileSync(join(workspace, 'calls'), 'utf8').trim().split('\n')).toEqual([
     '--version', 'init --cpu-usage balanced --no-git-hook', 'branch add', 'sync --force',
+    '--version', 'branch add', 'sync',
     '--version', 'branch add', 'sync',
   ]);
 });

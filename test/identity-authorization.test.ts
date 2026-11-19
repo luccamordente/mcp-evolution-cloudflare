@@ -65,6 +65,7 @@ it('adds unique Clerk links without rewriting existing identities, connection de
     await legacy.db.batch(unstable_splitSqlQuery(migration).map(sql => legacy.db.prepare(sql)));
     await legacy.db.prepare("UPDATE users SET clerk_user_id = 'user_linked' WHERE id = ?").bind(account.userId).run();
     expect((await legacy.db.prepare('SELECT * FROM whatsapp_connections WHERE user_id = ? ORDER BY id').bind(account.userId).all()).results).toEqual(before.results);
+    await legacy.migrate('0011_clerk_identity.sql');
     const listed = await legacy.rpc(account.accessToken, 'tools/call', { name: 'search_connections', arguments: {} }, { 'Mcp-Name': 'search_connections' });
     expect(listed.response.status).toBe(200);
     expect(listed.body.result.isError).not.toBe(true);

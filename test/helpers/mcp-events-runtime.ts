@@ -113,11 +113,15 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
   });
   const runtime = new Miniflare(options());
   let db = await runtime.getD1Database('DB');
-  for (const file of (await readdir('migrations')).filter(f=>f.endsWith('.sql') && f <= migrationThrough).sort()) {
-    await db.batch(unstable_splitSqlQuery(await readFile(`migrations/${file}`,'utf8')).map(sql=>db.prepare(sql)));
+  async function migrate(after: string, through = '9999') {
+    const files = (await readdir('migrations')).filter(file => file.endsWith('.sql') && file > after && file <= through).sort();
+    for (const file of files) {
+      await db.batch(unstable_splitSqlQuery(await readFile(`migrations/${file}`, 'utf8')).map(sql => db.prepare(sql)));
+    }
   }
+  await migrate('', migrationThrough);
   const fetch = (path:string, init?:Parameters<Miniflare['dispatchFetch']>[1]) => runtime.dispatchFetch('https://mcp.invalid'+path,init);
-  return { runtime, get db() {return db;}, fetch, published, logs,
+  return { runtime, migrate, get db() {return db;}, fetch, published, logs,
     async webhook(connectionId:string) { return await (await fetch('/fixture/webhook?'+new URLSearchParams({connectionId}))).json() as {path:string;instanceId:string}; },
     async queue(ids:unknown[], name='wapilot-events') { return (await runtime.getWorker()).queue(name,ids.map((body,index)=>({id:'fixture-'+index,timestamp:new Date(),attempts:1,body}))); },
     async clock(now?:number) { await fetch('/fixture/clock'+(now === undefined ? '' : '?now='+now)); },

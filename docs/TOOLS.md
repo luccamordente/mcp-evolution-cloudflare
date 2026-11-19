@@ -15,6 +15,8 @@ Não há ferramentas separadas de status, galeria, respostas ou mídia. A UI de 
 
 ## Busca e paginação
 
+Cada item inclui `lastConnectedAt` em ISO 8601 UTC, inclusive quando a conta está offline. Ele registra o evento de conexão ou pareamento bem-sucedido mais recente com horário de origem. Sem um evento datado para a instância atual, o campo é `null`.
+
 Cada conexão retorna `phoneNumber` com o telefone da conta WhatsApp em dígitos internacionais ou `null` quando indisponível. A listagem usa o número salvo quando disponível. Com `include: ["status"]`, `status.phoneNumber` identifica a conta conectada e pode ser `null`. Um número obtido ao vivo também tem prioridade em `phoneNumber`. O filtro de telefone consulta os números salvos.
 
 Com `include: ["profile"]`, `profile.displayName` mostra o nome da conta no WhatsApp, `profile.jid` traz o endereço da conta e `profile.avatarUrl` traz a URL da prévia da foto. A URL pode expirar. Campos indisponíveis retornam `null`. Sem uma conta conectada, o perfil inteiro é `null`. Combine `profile` e `status` na mesma chamada para identificar a conta e verificar sua disponibilidade.

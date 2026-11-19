@@ -50,6 +50,7 @@ export interface ConnectionRecord {
 }
 
 export interface ConnectionSummary {
+  lastConnectedAt?: string | null;
   id: string;
   friendlyName: string;
   instanceId: string;

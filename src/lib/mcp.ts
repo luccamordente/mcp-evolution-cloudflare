@@ -69,6 +69,7 @@ export const MCP_SERVER_NAME = 'whatsapp-mcp';
 export const TOOL_DESCRIPTIONS = {
   search_connections: `Find your WaPilot connections and their identifiers. Filter by connection
 name, saved phone number, or instance ID. Each item includes the account phoneNumber when available.
+lastConnectedAt is the latest recorded successful connection time in UTC, or null if unknown.
 Add options.include: ["status"] to refresh the number and see live connection status.
 Include "profile" for the current account’s WhatsApp display name, address (jid), and profile picture (avatarUrl).
 Use a returned connection ID to select a connection in other tools.`,

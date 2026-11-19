@@ -60,6 +60,7 @@ it('removes legacy content on upgrade, preserves identity and operational state,
     const connection = await fixture.db.prepare('SELECT encrypted_token FROM whatsapp_connections WHERE id = ?').bind(connectionId).first<{ encrypted_token: string }>();
     expect(await decryptToken(connection!.encrypted_token, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')).toBe('synthetic-instance');
     expect(await (await fixture.fetch('/fixture/grants?'+new URLSearchParams({ user: encodeURIComponent('fixture-a@example.test') }))).json()).toEqual(grants);
+    await fixture.migrate('0009_drop_legacy_message_storage.sql');
     const call = async (name: string, args: Record<string, unknown> = {}) => {
       const params = { name, arguments: args };
       return (await fixture.rpc(account.accessToken, 'tools/call', params, { 'Mcp-Name': String(params.name) })).body.result;

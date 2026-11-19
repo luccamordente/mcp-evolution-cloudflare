@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createHmac } from 'node:crypto';
+import { repointConnection } from '../src/lib/db';
 import { eventRuntime } from './helpers/mcp-events-runtime';
 
 const secret = 'whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
@@ -344,4 +345,33 @@ it.each([
     expect(requests).toHaveLength(before);
     expect((await fixture.db.prepare('SELECT COUNT(*) AS count FROM event_deliveries WHERE subscription_id IN (SELECT id FROM event_subscriptions WHERE connection_id = ?)').bind(owner.connections[0]).first())?.count).toBe(0);
   } finally { hook=original; }
+});
+
+it('returns the latest observed connection event time even after disconnect and redelivery', async () => {
+  const connectionId = account.connections[0];
+  const list = async () => {
+    const params = { name: 'search_connections', arguments: {} };
+    const result = await fixture.rpc(account.accessToken, 'tools/call', params, { 'Mcp-Name': params.name });
+    return result.body.result.structuredContent.data.items.find((item: { id: string }) => item.id === connectionId);
+  };
+  const notify = async (event: string, at: number, id = hook.instanceId) => {
+    const connected = event !== 'Disconnected';
+    const payload = { jsonapi: { version: '1.1' }, meta: { event, instanceId: hook.instanceId },
+      data: { type: 'connection', id, attributes: { connected, loggedIn: connected, at } } };
+    expect((await ingress(payload)).status).toBe(202);
+  };
+  expect((await list()).lastConnectedAt).toBeNull();
+  const at = Date.now() - 60000;
+  await notify('PairSuccess', at);
+  expect((await list()).lastConnectedAt).toBe(new Date(at).toISOString());
+  await notify('Connected', at + 500);
+  await notify('Disconnected', at + 1000);
+  await notify('PairSuccess', at);
+  await notify('Connected', at + 5000, 'other-instance');
+  expect((await list()).lastConnectedAt).toBe(new Date(at + 500).toISOString());
+  const key = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  await repointConnection(fixture.db, key, account.userId, connectionId, { instanceId: hook.instanceId, token: 'rotated' });
+  expect((await list()).lastConnectedAt).toBe(new Date(at + 500).toISOString());
+  await repointConnection(fixture.db, key, account.userId, connectionId, { instanceId: 'new-instance', token: 'new-token' });
+  expect((await list()).lastConnectedAt).toBeNull();
 });

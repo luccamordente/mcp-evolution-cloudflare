@@ -15,7 +15,7 @@ export async function bootstrapLocalUser(db: D1Database, user: AuthenticatedUser
 }
 
 export async function listConnections(db: D1Database, userId: string): Promise<ConnectionSummary[]> {
-  const result = await db.prepare('SELECT id, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, is_default as isDefault, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE user_id = ?1 ORDER BY is_default DESC, friendly_name').bind(userId).all<ConnectionSummary>();
+  const result = await db.prepare('SELECT id, friendly_name as friendlyName, instance_id as instanceId, phone_number as phoneNumber, last_connected_at as lastConnectedAt, is_default as isDefault, created_at as createdAt, updated_at as updatedAt FROM whatsapp_connections WHERE user_id = ?1 ORDER BY is_default DESC, friendly_name').bind(userId).all<ConnectionSummary>();
   return result.results ?? [];
 }
 
@@ -159,7 +159,7 @@ export async function audit(db: D1Database, input: { userId: string; connectionI
   await db.prepare('INSERT INTO audit_log (id, user_id, connection_id, operation, outcome, metadata_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(crypto.randomUUID(), input.userId, input.connectionId ?? null, input.operation, input.outcome, input.metadata ? JSON.stringify(input.metadata) : null).run();
 }
 
-export async function validateWebhookEvent(db: D1Database, secret: string, payload: unknown): Promise<{ accepted: boolean; status: number; error?: string; connection?: {id:string;userId:string}; eventName?:string; resources?:Record<string,unknown>[] }> {
+export async function validateWebhookEvent(db: D1Database, secret: string, payload: unknown): Promise<{ accepted: boolean; status: number; error?: string; connection?: {id:string;userId:string;instanceId:string}; eventName?:string; resources?:Record<string,unknown>[] }> {
   const hash = await sha256(secret);
   const connection = await db.prepare('SELECT id, user_id as userId, instance_id as instanceId FROM whatsapp_connections WHERE webhook_secret_hash = ?1').bind(hash).first<{ id: string; userId: string; instanceId: string }>();
   if (!connection) return { accepted: false, status: 404, error: 'Unknown webhook' };
@@ -176,7 +176,7 @@ export async function validateWebhookEvent(db: D1Database, secret: string, paylo
   if (resources.some((resource) => !isJsonApiResource(resource))) {
     return { accepted: false, status: 400, error: 'Invalid JSON:API data' };
   }
-  return { accepted: true, status: 202, connection: {id:connection.id,userId:connection.userId}, eventName, resources };
+  return { accepted: true, status: 202, connection, eventName, resources };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -202,11 +202,11 @@ export async function sha256(value: string | ArrayBuffer): Promise<string> {
 }
 
 /** Repoint an existing connection to another Evolution instance in place.
- * Only instance_id and encrypted_token change; id, is_default and
+ * A different instance starts with no recorded connection time. id, is_default and
  * webhook_secret_hash (and therefore MCP grants and the webhook URL) are kept. */
 export async function repointConnection(db: D1Database, encryptionKey: string, userId: string, connectionId: string, input: { instanceId: string; token: string }): Promise<boolean> {
   const encryptedToken = await encryptToken(input.token, encryptionKey);
-  const result = await db.prepare("UPDATE whatsapp_connections SET instance_id = ?1, encrypted_token = ?2, updated_at = datetime('now') WHERE id = ?3 AND user_id = ?4").bind(input.instanceId, encryptedToken, connectionId, userId).run();
+  const result = await db.prepare("UPDATE whatsapp_connections SET instance_id = ?1, encrypted_token = ?2, last_connected_at = CASE WHEN instance_id = ?1 THEN last_connected_at END, updated_at = datetime('now') WHERE id = ?3 AND user_id = ?4").bind(input.instanceId, encryptedToken, connectionId, userId).run();
   const changes = (result as { meta?: { changes?: number } })?.meta?.changes;
   return changes === undefined ? true : changes > 0;
 }

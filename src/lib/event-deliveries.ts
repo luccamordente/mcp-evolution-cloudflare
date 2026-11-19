@@ -51,7 +51,24 @@ function conversationIds(item:Record<string,unknown>, chat:string): string[] {
 }
 
 /** A candidate marker gates the entire fan-out in one transaction, including no-interest sources. */
-export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, connection:{id:string;userId:string}, eventName:string, resources:Record<string,unknown>[]): Promise<void> {
+export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, connection:{id:string;userId:string;instanceId:string}, eventName:string, resources:Record<string,unknown>[]): Promise<void> {
+  if (eventName === 'Connected' || eventName === 'PairSuccess') {
+    let latest = 0;
+    for (const resource of resources) {
+      const { connected, loggedIn, at } = record(resource.attributes);
+      if (resource.type === 'connection' && resource.id === connection.instanceId && connected === true && loggedIn === true
+        && typeof at === 'number' && Number.isSafeInteger(at) && at < Date.UTC(10000, 0)) {
+        latest = Math.max(latest, at);
+      }
+    }
+    if (latest > 0) {
+      await env.DB.prepare(`UPDATE whatsapp_connections SET last_connected_at = ?1
+        WHERE id = ?2 AND user_id = ?3 AND instance_id = ?4
+        AND (last_connected_at IS NULL OR last_connected_at < ?1)`)
+        .bind(new Date(latest).toISOString(), connection.id, connection.userId, connection.instanceId).run();
+    }
+    return;
+  }
   const drops={invalid:0,unsupported:0,oversized:0};
   if (eventName !== 'Message') {console.log(JSON.stringify({event:'mcp_events_ingress',connectionId:connection.id,...drops,unsupported:resources.length}));return;}
   for (const item of resources) {

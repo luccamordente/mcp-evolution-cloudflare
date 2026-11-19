@@ -13,7 +13,7 @@ Pare `dev:clerk` antes da suíte completa: a fixture HTTPS usa as portas locais 
 
 O check `CI / Check` valida PRs e aceita execução manual. Um único runner Linux usa Node 24, cache de downloads do npm e `npm ci`. Ao receber uma revisão nova, o GitHub cancela a execução anterior do mesmo PR.
 
-PRs que alteram somente `README.md`, `DEVELOPMENT.md` ou Markdown em `docs/` terminam após o checkout e a comparação com a base do merge. Qualquer outro caminho, diff inconclusivo ou execução manual roda `npm run check` e `npm --prefix sender test` com fixtures locais. Para feedback antes de abrir o PR, use `npx vitest run test/<arquivo>.test.ts` e `npm run check`.
+PRs que alteram somente `README.md`, `DEVELOPMENT.md`, `GLOSSARY.md` ou Markdown em `docs/` terminam após o checkout e a comparação com a base do merge. Qualquer outro caminho, diff inconclusivo ou execução manual roda `npm run check` e `npm --prefix sender test` com fixtures locais. Para feedback antes de abrir o PR, use `npx vitest run test/<arquivo>.test.ts` e `npm run check`.
 
 Para validar uma revisão de release, use também `npx wrangler deploy --dry-run` e, quando houver mudanças no sender ou na integração com ele, as suítes Docker descritas abaixo. Essas verificações são sob demanda. A configuração do Workers Builds é operada separadamente. Consulte [o procedimento de publicação](docs/DEPLOY.md#deploy-automático).
 

@@ -34,6 +34,7 @@ jobs:
              git diff --quiet --no-renames HEAD^1 HEAD -- . \
                ':(exclude,top)README.md' \
                ':(exclude,top)DEVELOPMENT.md' \
+               ':(exclude,top)GLOSSARY.md' \
                ':(exclude,top,glob)docs/**/*.md'; then
             echo 'check=false' >> "$GITHUB_OUTPUT"
             echo 'No test inputs changed. Skipping dependency installation and tests.'

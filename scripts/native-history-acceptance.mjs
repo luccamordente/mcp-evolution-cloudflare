@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const root = resolve(import.meta.dirname, '..');
-const backend = join(root, '.scratch', 'evolution-go');
+const backend = process.env.MESSAGE_HISTORY_PROVIDER_DIR ?? join(root, '.scratch', 'evolution-go');
 const dsn = process.env.MESSAGE_HISTORY_TEST_DSN;
 if (!dsn) throw new Error('Set MESSAGE_HISTORY_TEST_DSN to an isolated local PostgreSQL keyword DSN.');
 const parameters = new Map();

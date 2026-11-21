@@ -89,7 +89,7 @@ async function call(name: string, args: Record<string, unknown>) {
     method: 'POST', headers: { 'content-type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, _meta: { [PROTOCOL_VERSION_META_KEY]: '2026-07-28', [CLIENT_INFO_META_KEY]: { name: 'history-acceptance', version: '1' }, [CLIENT_CAPABILITIES_META_KEY]: {} } } }),
   }), { authInfo: { token: 'test', clientId: 'history-acceptance', scopes: ['mcp:read'] } });
-  return z.object({ result: z.object({ isError: z.boolean().optional(), structuredContent: z.object({ data: z.object({ message: nativeMessageSchema.optional(), items: z.array(z.object({ id: z.string() })).optional(), meta: z.object({ coverage: z.string() }).optional(), nextCursor: z.string().optional() }).loose() }) }) }).parse(await response.json());
+  return z.object({ result: z.object({ isError: z.boolean().optional(), structuredContent: z.object({ data: z.object({ message: nativeMessageSchema.loose().optional(), items: z.array(z.object({ id: z.string() }).loose()).optional(), meta: z.object({ coverage: z.string() }).optional(), nextCursor: z.string().optional() }).loose() }) }) }).parse(await response.json());
 }
 
 describe.runIf(Boolean(backendUrl))('H-A8 real MCP and Go HTTP history', () => {
@@ -101,6 +101,20 @@ describe.runIf(Boolean(backendUrl))('H-A8 real MCP and Go HTTP history', () => {
     env = { DB: local.db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: backendUrl ?? '', ENVIRONMENT: 'local' };
   });
   afterAll(async () => local?.dispose());
+  it('reads active group reactions on the original without adding timeline rows', async () => {
+    const options = { conversationId: '120363000000000001@g.us', limit: 10 };
+    const plain = await call('search_messages', { options });
+    const enriched = await call('search_messages', { options: { ...options, include: ['reactions'] } });
+    const direct = await call('get_message', { messageId: 'reaction-parent', options: { include: ['reactions'] } });
+    const expected = [
+      { reactor: '12025550113@s.whatsapp.net', emoji: '❤️' },
+      { reactor: '12025550114@s.whatsapp.net', emoji: '😂' },
+    ];
+    expect(plain.result.structuredContent.data.items?.map(item => item.id)).toEqual(['reaction-parent']);
+    expect(plain.result.structuredContent.data.items?.[0]).not.toHaveProperty('reactions');
+    expect(enriched.result.structuredContent.data.items).toMatchObject([{ id: 'reaction-parent', reactions: expected }]);
+    expect(direct.result.structuredContent.data.message).toMatchObject({ id: 'reaction-parent', reactions: expected });
+  });
   it('reads structured-only messages and follows both authenticated relationships across pages', async () => {
     const listing = await call("search_messages", { options: { limit: 50 } });
     expect(listing.result?.isError, JSON.stringify(listing)).not.toBe(true);

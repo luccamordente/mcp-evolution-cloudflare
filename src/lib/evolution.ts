@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {contactResult, ContactUpdateError, type ContactCommand} from './update-contact';
 import { messageObservationSchema, messageDeliverySchema } from './message-observation';
-import { contentDiagnosticSchema, nativeMessageSchema, hasNativeContent, responsePageSchema, type ResponseKind } from './native-message';
+import { activeReactionsSchema, contentDiagnosticSchema, nativeMessageSchema, hasNativeContent, responsePageSchema, type ResponseKind } from './native-message';
 import type { Contact, Group, Message, Page, SendMessageResult } from '../types';
 import { Buffer } from 'node:buffer';
 import { AudioTranscriptionError } from './audio-transcription';
@@ -312,7 +312,7 @@ function normalizeGroup(value: unknown): Group {
   };
 }
 
-function normalizeMessage(value: unknown): Message {
+function normalizeMessage(value: unknown, includeReactions = false): Message {
   const item = resource(value);
   const attributes = resourceAttributes(value);
   const body = asRecord(attributes.body) ?? {};
@@ -333,6 +333,10 @@ function normalizeMessage(value: unknown): Message {
     type: stringValue(attributes.encodingFormat),
     messageType: stringValue(attributes.encodingFormat) ?? 'unknown',
   };
+  if (includeReactions) {
+    const reactions = activeReactionsSchema.safeParse(attributes.reactions);
+    if (reactions.success) message.reactions = reactions.data;
+  }
   const observation = messageObservationSchema.safeParse(meta.observation);
   if (observation.success) message.observation = observation.data;
   const delivery = messageDeliverySchema.safeParse(meta.delivery);
@@ -573,13 +577,13 @@ export class EvolutionGoClient {
     return { items, hasMore: options.offset + items.length < groups.length };
   }
 
-  async searchMessages(options: { text?: string; conversationId?: string; includeReceiptOnly?: boolean; offset: number; limit: number }): Promise<Page<Message>> {
+  async searchMessages(options: { text?: string; conversationId?: string; includeReceiptOnly?: boolean; include?: ('attachments' | 'reactions')[]; offset: number; limit: number }): Promise<Page<Message>> {
     const rows: Message[] = [];
     let cursor: string | undefined;
     let hasMore = false;
     const seen = new Set<string>();
     while (rows.length < options.offset + options.limit) {
-      const page = await this.listMessages(options.text, Math.min(50, options.offset + options.limit - rows.length), options.conversationId, undefined, cursor, options.includeReceiptOnly);
+      const page = await this.listMessages(options.text, Math.min(50, options.offset + options.limit - rows.length), options.conversationId, undefined, cursor, options.includeReceiptOnly, options.include?.includes('reactions'));
       rows.push(...page.items);
       hasMore = page.hasMore;
       if (!page.hasMore || !page.nextCursor || seen.has(page.nextCursor)) break;
@@ -604,7 +608,7 @@ export class EvolutionGoClient {
     return { items: rows.slice(offset, offset + limit), hasMore: page.hasMore, meta: page.meta };
   }
 
-  async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*', cursor?: string, includeReceiptOnly?: boolean): Promise<Page<Message>> {
+  async listMessages(text?: string, limit = 50, conversationId?: string, encodingFormat?: 'image/*', cursor?: string, includeReceiptOnly?: boolean, includeReactions = false): Promise<Page<Message>> {
     const boundedLimit = Math.min(Math.max(limit, 1), 50);
     const query = text?.trim() ?? '';
     // Evolution Go caps limit at 50 (anything above falls back to 25), so look one row
@@ -615,6 +619,7 @@ export class EvolutionGoClient {
     const search = async (rowLimit: number, before?: string) => {
       const params = new URLSearchParams({ limit: String(rowLimit) });
       if (includeReceiptOnly !== undefined) params.set('includeReceiptOnly', String(includeReceiptOnly));
+      if (includeReactions) params.set('include', 'reactions');
       if (query) params.set('q', query);
       if (conversationId !== undefined) params.set('identifier', conversationId);
       if (encodingFormat) params.set('encodingFormat', encodingFormat);
@@ -627,7 +632,7 @@ export class EvolutionGoClient {
         throw new EvolutionApiError(502, 'WaPilot could not continue this history search. Please start a new search.');
       }
       return this.page(payload, 'message', value => {
-        const message = normalizeMessage(value);
+        const message = normalizeMessage(value, includeReactions);
         const at = resourceAttributes(value).at;
         if (typeof at === 'number' && Number.isFinite(at)) timestamps.set(message, at);
         return message;
@@ -666,18 +671,18 @@ export class EvolutionGoClient {
 
   /** Fetch one stored message by id (Evolution Go POST /message/status).
    * Returns undefined when Evolution Go did not store it. */
-  async getMessage(messageId: string, signal?: AbortSignal): Promise<Message | undefined> {
+  async getMessage(messageId: string, signal?: AbortSignal, includeReactions = false): Promise<Message | undefined> {
     try {
-      const payload = await this.request<unknown>('/message/status', {
+      const payload = await this.request<unknown>(includeReactions ? '/message/status?include=reactions' : '/message/status', {
         method: 'POST',
         body: jsonApiBody({ type: 'message', id: messageId }),
         signal,
       });
       const item = documentData(payload);
       if (resource(item)?.type !== 'message' || resource(item)?.id !== messageId) return undefined;
-      return normalizeMessage(item);
+      return normalizeMessage(item, includeReactions);
     } catch (error) {
-      if (error instanceof EvolutionApiError && (error.status === 404 || error.status === 400)) return undefined;
+      if (error instanceof EvolutionApiError && (error.status === 404 || (error.status === 400 && !includeReactions))) return undefined;
       throw error;
     }
   }

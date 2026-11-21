@@ -5,7 +5,7 @@ import { Buffer } from 'node:buffer';
 import { AttachmentError, attachmentMetadata, downloadAttachment, messageAttachments } from './attachments';
 import { OptionsError, invalidOptions, contactOptions, searchContactsInput, connectionOptions, groupOptions, searchOptions, getOptions, searchConnectionsInput, searchGroupsInput, searchMessagesInput, getMessageInput } from './mcp-options';
 import { recoveryFor, type ErrorRecovery } from './tool-recovery';
-import { hasNativeContent } from './native-message';
+import { activeReactionsSchema, hasNativeContent, nativeMessageSchema } from './native-message';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { SEND_RECEIPT_HTML } from '../generated/send-receipt';
 import { SEND_RECEIPT_LABELS, type SendReceipt } from './send-receipt';
@@ -87,7 +87,8 @@ Explicit receipt_only records are excluded by default. Set
 options.includeReceiptOnly: true to inspect them. pending_decryption remains
 visible without original content. Polling reads partial retained history.
 Add options.include: ["attachments"] for attachment metadata and temporary
-download links. Use get_message to retrieve or process a specific message.`,
+download links. Include reactions to read the active retained emoji and reactor
+pairs on each returned message. Use get_message to retrieve or process a specific message.`,
   get_message: `Retrieve one message with its text, stored status, and attachment metadata.
 The default representation is application/json. receipt_only and pending_decryption
 return successful state reads with observation and availability, without original
@@ -95,6 +96,7 @@ content. Explicit content formats return message_content_pending (409), with
 retryable: false. Recovery is not guaranteed. Unknown MIME does not establish
 an attachment. Use options.include for
 attachment download links, audio transcription, PDF document text, or message relations.
+Include reactions to read the active retained emoji and reactor pairs on this message.
 Use include: ["transcript"] or ["document-text"] whenever the content is needed
 for the user's task, even without an explicit transcription or reading request.
 Use options.encodingFormat for native images, rendered PDF pages, or an
@@ -124,11 +126,15 @@ export const TOOL_TITLES = {
 // at all and causes MCP clients to report a malformed output schema. `z.json()`
 // keeps the payload intentionally free-form while declaring every JSON value.
 export const dataOutput = z.object({ data: z.json() });
+const retainedMessageOutput = z.object({
+  observation: messageObservationSchema.optional(),
+  delivery: messageDeliverySchema.optional(),
+  reactions: activeReactionsSchema.optional(),
+  reaction: nativeMessageSchema.shape.reaction,
+}).catchall(z.json());
+const messageSearchOutput = z.object({ data: z.object({ items: z.array(retainedMessageOutput).optional() }).catchall(z.json()) });
 const messageOutput = z.object({ data: z.object({
-  message: z.object({
-    observation: messageObservationSchema.optional(),
-    delivery: messageDeliverySchema.optional(),
-  }).catchall(z.json()).optional(),
+  message: retainedMessageOutput.optional(),
   availability: z.object({
     state: z.enum(['receipt_only', 'pending_decryption']),
     reason: z.enum(['receipt_only', 'pending_decryption']),
@@ -227,7 +233,7 @@ export type McpErrorCode =
   | 'media_origin_not_allowed'
   | 'attachment_not_found' | 'attachment_source_unavailable' | 'attachment_download_failed' | 'attachment_links_unavailable' | 'attachment_link_invalid' | 'attachment_link_expired' | 'attachment_configuration_error'
   | 'responses_unavailable'
-  | 'invalid_options' | 'incompatible_include' | 'unsupported_include' | 'incompatible_encoding_format'
+  | 'invalid_options' | 'incompatible_include' | 'reactions_unavailable' | 'incompatible_encoding_format'
   | 'unexpected_error';
 
 export interface McpToolError {
@@ -243,6 +249,9 @@ export interface McpToolError {
 
 class MessageReadError extends Error {
   constructor(public readonly code: 'message_not_found' | 'message_content_unavailable' | 'message_unavailable' | 'message_content_pending', public readonly status: number, message: string, public readonly messageType?: string, public readonly contentUnavailableReason: Message['contentUnavailableReason'] = 'not_retained_or_unknown', public readonly contentDiagnostic?: Message['contentDiagnostic']) { super(message); }
+}
+class ReactionsUnavailableError extends Error {
+  constructor() { super('WaPilot could not retrieve active reactions for this message.'); }
 }
 class MessageResponsesError extends Error {
   constructor() { super('WaPilot has no retained response relationship for this message. The poll or event itself may still be available.'); }
@@ -260,6 +269,7 @@ function sanitizedMessage(error: unknown, fallback: string): string {
 }
 
 function classifyBaseError(error: unknown, operation: string): Omit<McpToolError, 'recovery'> {
+  if (error instanceof ReactionsUnavailableError) return { code: 'reactions_unavailable', status: 502, retryable: false, operation, message: error.message, hint: '' };
   if (error instanceof MessageResponsesError) return { code: 'responses_unavailable', status: 404, retryable: false, operation, message: error.message, hint: '' };
   if (error instanceof OptionsError) return { code: error.code, status: 400, retryable: false, operation, message: sanitizedMessage(error, 'WaPilot options are invalid.'), hint: 'Correct the requested WaPilot options.', validationIssues: error.validationIssues?.map(issue => ({ ...issue, path: sanitizedMessage(new Error(issue.path), 'arguments'), message: sanitizedMessage(new Error(issue.message), 'Invalid field.') })) };
   if (error instanceof Error && error.name === 'AbortError') return { code: 'request_cancelled', status: 499, retryable: false, operation, message: 'WaPilot request was cancelled.', hint: 'Stop automatic retries.' };
@@ -463,7 +473,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       return { ...page, ...(!page.items.length ? { hint: 'No groups matched this page. Retry with offset: 0 and no query, then inspect returned group names and JIDs. If needed, choose another authorized connection with search_connections.' } : {}) };
     });
   });
-  server.registerTool('search_messages', { title: TOOL_TITLES.search_messages, description: TOOL_DESCRIPTIONS.search_messages, inputSchema: searchMessagesInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ options }) => {
+  server.registerTool('search_messages', { title: TOOL_TITLES.search_messages, description: TOOL_DESCRIPTIONS.search_messages, inputSchema: searchMessagesInput, annotations: readOnlyAnnotations, outputSchema: messageSearchOutput }, async ({ options }) => {
     const parsed = searchOptions.safeParse(options ?? {});
     if (!parsed.success) return fail('search_messages', invalidOptions(parsed.error));
     const o = parsed.data;
@@ -471,6 +481,9 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       const page = await c.searchMessages(o);
       const errors: { part: string; error: McpToolError }[] = [];
       const items = await Promise.all(page.items.map(async (m, index) => {
+        if (o.include?.includes('reactions') && m.reactions === undefined) {
+          errors.push({ part: `items.${index}.reactions`, error: classifyMcpError(new ReactionsUnavailableError(), 'search_messages') });
+        }
         if (!o.include?.includes('attachments')) return messageForClient(m, own);
         const attachments = await attachmentMetadata(m, env, ensured.id, id);
         for (const attachment of attachments) if ('error' in attachment && attachment.error) errors.push({ part: `items.${index}.attachments.${attachment.index}.download`, error: attachment.error });
@@ -494,7 +507,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
     return read('get_message', o.connectionId, async (c, id, own): Promise<CallToolResult> => {
       const startedAt = Date.now();
       let message: Message | undefined;
-      try { message = await c.getMessage(messageId, ctx.mcpReq.signal); }
+      try { message = await c.getMessage(messageId, ctx.mcpReq.signal, o.include?.includes('reactions')); }
       catch (error) {
         if (error instanceof EvolutionApiError && error.timeoutSource) throw error;
         const status = error instanceof EvolutionApiError ? error.status : 502;
@@ -552,7 +565,9 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
               break;
             case 'poll-responses': data[include] = await c.searchMessageResponses(messageId, 'votes', o.offset, o.limit, signal); break;
             case 'event-responses': data[include] = await c.searchMessageResponses(messageId, 'eventResponses', o.offset, o.limit, signal); break;
-            case 'reactions': throw new OptionsError('unsupported_include', 'WaPilot cannot retrieve reactions for this message.');
+            case 'reactions':
+              if (message.reactions === undefined) throw new ReactionsUnavailableError();
+              break;
           }
         });
         if (format !== 'application/json') await attempt('encodingFormat', async () => {

@@ -1,5 +1,5 @@
 import type { MessageObservation, MessageDelivery } from './lib/message-observation';
-import type { NativeMessage, ContentDiagnostic } from './lib/native-message';
+import type { NativeMessage, ContentDiagnostic, ActiveReactions } from './lib/native-message';
 import type { CallbackSender } from './lib/sender-container';
 import type { ContentUnavailableReason, MessageUpdate } from './lib/message-update';
 
@@ -117,6 +117,7 @@ export interface MessageMediaItem {
 }
 
 export interface Message extends NativeMessage {
+  reactions?: ActiveReactions;
   observation?: MessageObservation;
   delivery?: MessageDelivery;
   contentDiagnostic?: ContentDiagnostic;

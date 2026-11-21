@@ -30,6 +30,17 @@ describe('receipt search pagination', () => {
     expect([...first.items, ...last.items].map(row => row.id)).toEqual(rows.map(row => row.id));
     expect(urls.every(url => Number(url.searchParams.get('limit')) <= 50 && url.searchParams.get('includeReceiptOnly') === 'true')).toBe(true);
   });
+  it('forwards the reaction include through cursor and look-ahead requests without changing page membership', async () => {
+    const { client, urls } = receiptPager(60);
+    const search = { offset: 50, limit: 8, includeReceiptOnly: true };
+    const plain = await client.searchMessages(search);
+    urls.length = 0;
+    const enriched = await client.searchMessages({ ...search, include: ['reactions'] });
+    expect(enriched.items.map(row => row.id)).toEqual(plain.items.map(row => row.id));
+    expect(enriched.hasMore).toBe(plain.hasMore);
+    expect(urls.some(url => url.searchParams.get('limit') === '1')).toBe(true);
+    expect(urls.every(url => url.searchParams.get('include') === 'reactions')).toBe(true);
+  });
   it('rejects a provider capability downgrade during an ID continuation', async () => {
     const { rows } = receiptPager(60);
     let requests = 0;

@@ -8,7 +8,18 @@ const interactive = z.object({
   get cards() { return z.array(interactive).optional(); },
 });
 const eventResponse = z.object({ eventMessageId: z.string().min(1), response: z.enum(['GOING', 'NOT_GOING', 'MAYBE']), timestampMS: integer, extraGuestCount: integer.optional() });
+const reactionFields = {
+  target: z.object({ id: z.string().min(1), fromMe: z.boolean().optional(), participant: z.string().optional(), remoteJid: z.string().optional() }),
+  senderTimestampMs: integer.optional(),
+};
+const reactionEvent = z.discriminatedUnion('action', [
+  z.object({ ...reactionFields, action: z.literal('set'), emoji: z.string().min(1) }),
+  z.object({ ...reactionFields, action: z.literal('remove') }),
+]);
+export const activeReactionsSchema = z.array(z.object({ reactor: z.string().min(1), emoji: z.string().min(1) }));
+export type ActiveReactions = z.infer<typeof activeReactionsSchema>;
 export const nativeMessageSchema = z.object({
+  reaction: reactionEvent.optional(),
   interactive: interactive.optional(),
   interactiveResponse: z.object({ kind: z.string().min(1), id: z.string().optional(), text: z.string().optional(), originMessageId: z.string().optional() }).optional(),
   poll: z.object({ question: z.string(), options: z.array(z.object({ id: z.string(), name: z.string() })), selectableOptionsCount: integer.nonnegative().optional(), ambiguous: z.boolean().optional() }).optional(),
@@ -17,7 +28,7 @@ export const nativeMessageSchema = z.object({
 });
 export type NativeMessage = z.infer<typeof nativeMessageSchema>;
 export function hasNativeContent(message: NativeMessage): boolean {
-  return Boolean(message.interactive || message.interactiveResponse || message.poll || message.event || message.eventResponse);
+  return Boolean(message.interactive || message.interactiveResponse || message.poll || message.event || message.eventResponse || message.reaction);
 }
 export const responseKindSchema = z.enum(['votes', 'eventResponses']);
 export type ResponseKind = z.infer<typeof responseKindSchema>;
@@ -31,7 +42,7 @@ export const responsePageSchema = z.object({
 
 export const contentDiagnosticSchema = z.object({
   version: z.literal(1), state: z.enum(['partial', 'invalid', 'unsupported', 'unavailable']),
-  reason: z.enum(['content_limit', 'unsupported_action', 'invalid_action', 'template_variant', 'native_parameters', 'response_variant', 'duplicate_poll_options', 'event_coordinates', 'event_time', 'native_media_unavailable', 'missing_original_secret', 'decryption_failed', 'invalid_target', 'original_content_unavailable', 'content_not_retained', 'missing_original', 'missing_secret', 'identity_unavailable', 'invalid_response', 'unknown_response', 'invalid_protocol_time_or_guests', 'response_storage_unavailable']).optional().catch(undefined),
+  reason: z.enum(['content_limit', 'unsupported_action', 'invalid_action', 'template_variant', 'native_parameters', 'response_variant', 'duplicate_poll_options', 'event_coordinates', 'event_time', 'native_media_unavailable', 'missing_original_secret', 'decryption_failed', 'invalid_target', 'original_content_unavailable', 'content_not_retained', 'missing_original', 'missing_secret', 'identity_unavailable', 'invalid_response', 'unknown_response', 'invalid_protocol_time_or_guests', 'response_storage_unavailable', 'reaction_target', 'encrypted_reaction']).optional().catch(undefined),
   targetId: z.string().min(1).max(200).optional(),
 });
 export type ContentDiagnostic = z.infer<typeof contentDiagnosticSchema>;

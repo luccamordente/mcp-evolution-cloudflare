@@ -243,9 +243,11 @@ O catálogo HTTP acrescenta obtenção do original, inspeção paginada e leitur
 
 ## Conteúdo nativo e respostas retidas
 
-O adaptador valida as cinco famílias nativas de corpo e os diagnósticos de `meta.content`, separados de `meta.update`. Conteúdo estruturado não exige texto ou mídia. Votos e RSVP são consultados por páginas autenticadas em `get_message` com `options.include: ["poll-responses"]` ou `["event-responses"]` e `offset`/`limit`; relações e continuações são validadas contra o alvo, sem seguir links externos nem encaminhar credenciais. As coleções descrevem observações do estado atual, com consistência eventual, sem snapshot ou total completo. D1 não recebe histórico ou participantes.
+O adaptador valida as famílias nativas de corpo (incluindo ações de reação) e os diagnósticos de `meta.content`, separados de `meta.update`. Conteúdo estruturado não exige texto ou mídia. Votos e RSVP são consultados por páginas autenticadas em `get_message` com `options.include: ["poll-responses"]` ou `["event-responses"]` e `offset`/`limit`; relações e continuações são validadas contra o alvo, sem seguir links externos nem encaminhar credenciais. As coleções descrevem observações do estado atual, com consistência eventual, sem snapshot ou total completo. D1 não recebe histórico ou participantes.
 
 A variante `event` de `send_message` usa o controle de escrita e idempotência compartilhado. Instantes com fuso são normalizados antes do fingerprint. O provedor guarda o segredo antes do envio; o consumidor não armazena esse segredo nem repete POST em falha. VCards textuais são conteúdo público da mensagem solicitada, enquanto URLs e bytes privados de anexos continuam excluídos da leitura integral.
+
+Com `include: ["reactions"]`, o adaptador encaminha `include=reactions` à busca e à leitura por ID. Evolution Go aplica paginação às mensagens e devolve as reações ativas no atributo `reactions` de cada recurso. WaPilot valida os pares `{reactor, emoji}` e os entrega no mesmo objeto da mensagem. Uma lista ausente ou inválida em uma leitura solicitada produz erro parcial `reactions_unavailable`, preservando os campos disponíveis. O corpo singular `reaction` descreve um evento consultado pelo ID da própria reação.
 
 ## Downloads temporários de anexos
 

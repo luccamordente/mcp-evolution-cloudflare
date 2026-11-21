@@ -7,7 +7,7 @@ O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Títu
 | `search_connections` | `options?: {query, include: ('status' | 'profile')[], offset, limit}` | D1 do usuário; consulta ao vivo quando falta o número salvo ou quando o status é solicitado |
 | `search_contacts` | `query: string, options?: {connectionId, offset, limit}` | `/user/contacts`; busca por nome/telefone e deduplicação por ID/JID |
 | `search_groups` | `options?: {connectionId, query, include: ['participants'], offset, limit}` | `/group/list`; filtro por nome/JID antes da paginação local |
-| `search_messages` | `options?: {connectionId, conversationId, text, includeReceiptOnly, offset, limit}` | `/message/search`; filtros aplicados no provedor |
+| `search_messages` | `options?: {connectionId, conversationId, text, include, includeReceiptOnly, offset, limit}` | `/message/search`; filtros aplicados no provedor |
 | `get_message` | `messageId?: string, options?: GetMessageOptions` | `/message/status`, mídia e relações autorizadas |
 | `send_message` | `message, options` | Rotas de envio existentes; veja [SEND-MESSAGE.md](SEND-MESSAGE.md) |
 
@@ -99,6 +99,10 @@ Um formato de conteúdo explícito retorna `message_content_pending`, status de 
 
 Conteúdo original não retido mantém `message_content_unavailable`/404 e os diagnósticos existentes, com o texto "WaPilot found the message, but its content is not available in retained history. This does not establish deletion or permanent loss." ID ausente mantém `message_not_found`/404. Falhas de infraestrutura continuam erros de infraestrutura.
 
+### Reações nas mensagens
+
+Em `search_messages` e `get_message`, peça `options.include: ["reactions"]` para receber as reações ativas no campo `reactions` de cada mensagem. Você pode combinar `attachments` e `reactions` na mesma consulta. A inclusão preserva a ordem e a paginação das mensagens. A lista se refere apenas aos eventos retidos naquela conexão. Para consultar uma ação pelo seu ID, use `get_message`: o campo `reaction` identifica a ação, o alvo e, para uma adição ou substituição, o emoji.
+
 ### Anexos com links temporários
 
 `search_messages` também aceita `options.encodingFormat: "application/json"` e `options.include: ["attachments"]`, com a mesma representação de anexos de `get_message`. A busca não transcreve nem extrai PDFs em lote. Para processar conteúdo, selecione uma mensagem e use `get_message`.
@@ -127,7 +131,7 @@ Para renderizar PDF, use `page` (posição física a partir de 1, padrão 1) ou 
 - `poll-responses`: votos de enquete via relação autorizada `votes`.
 - `event-responses`: respostas do evento via relação autorizada `eventResponses`.
 - `quoted`: resolve `quotedId` na mesma conexão quando presente; uma citação indisponível retorna `null`.
-- `reactions`: retorna `unsupported_include` explicitamente; não há listagem comprovada no contrato atual.
+- `reactions`: inclui em `message.reactions` as reações ativas observadas no histórico, com um par `{reactor, emoji}` por participante. Uma remoção retira o participante da lista. O array vazio indica uma consulta bem-sucedida sem reações ativas retidas. Quando a consulta está indisponível, a resposta identifica a parte afetada em `errors`.
 
 Respostas de enquete/evento usam `offset` e `limit` (padrão 5, máximo 100). O cliente percorre cursores internos das relações existentes e retorna `items`, `meta` e `hasMore`. O estado observado é parcial, sem garantia de lista completa de participantes ou snapshot. Um include incompatível retorna `incompatible_include`; ausência de relação retida pode impedir a consulta. Não são inventadas rotas de resposta adicionais.
 

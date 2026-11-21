@@ -31,8 +31,8 @@ export function recoveryFor(error: Pick<McpToolError, 'code' | 'operation' | 'st
       return { action: 'correct_arguments', steps: ['Correct the fields identified in message and validationIssues; omit unsupported fields rather than guessing values.', operation === 'search_messages' ? 'Use offset >= 0, limit 1..50, and offset + limit <= 200. Narrow conversationId or text instead of increasing the window.' : 'Check this tool\'s input schema for allowed values and field combinations, then retry the corrected request.'] };
     case 'incompatible_include':
       return { action: 'correct_arguments', tool: 'get_message', steps: ['Remove the incompatible include. Read the same message as application/json to inspect its type.', 'Use transcript only for audio, document-text and metadata only for PDFs, poll-responses only for polls, and event-responses only for events.'] };
-    case 'unsupported_include':
-      return { action: 'correct_arguments', tool: 'get_message', steps: ['Remove the unsupported include and retrieve the remaining message data.', 'WaPilot cannot list reactions. Report that limitation rather than interpreting an unavailable list as empty.'] };
+    case 'reactions_unavailable':
+      return { action: 'contact_operator', steps: ['Use the returned message data and report the reaction list as unavailable. Ask the WaPilot operator to check reaction access if needed.'] };
     case 'incompatible_encoding_format':
       return { action: 'correct_arguments', tool: 'get_message', steps: ['Request application/json with include: ["attachments"] for the same message to inspect attachment indices and MIME types.', 'Use the original MIME or application/octet-stream for a file. Use image/* for supported images or PDF pages. Use include: ["transcript"] for audio or ["document-text"] for PDF text.'] };
     case 'connection_not_found': case 'no_default_connection': case 'multiple_default_connections':

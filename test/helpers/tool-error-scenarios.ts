@@ -72,7 +72,7 @@ export const toolErrorScenarios: Record<McpErrorCode, ErrorScenario> = {
   responses_unavailable: { kind: 'mcp', ...inspect, status: 404 },
   invalid_options: classified(() => new OptionsError('invalid_options', 'WaPilot requires offset >= 0.'), correct, 'search_messages'),
   incompatible_include: classified(() => new OptionsError('incompatible_include', 'WaPilot cannot transcribe a video.'), { ...correct, tool: 'get_message' }),
-  unsupported_include: classified(() => new OptionsError('unsupported_include', 'WaPilot cannot list reactions.'), { ...correct, tool: 'get_message' }),
+  reactions_unavailable: { kind: 'mcp', ...operator, status: 502 },
   incompatible_encoding_format: classified(() => new OptionsError('incompatible_encoding_format', 'WaPilot cannot return this video as a PDF.'), { ...correct, tool: 'get_message' }),
   unexpected_error: classified(() => new Error('private-response https://private.invalid/file Bearer secret-value'), operator),
 };

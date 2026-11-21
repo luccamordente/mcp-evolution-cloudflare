@@ -47,6 +47,7 @@ for (const [code, scenario] of Object.entries(toolErrorScenarios)) {
     if (code === 'message_not_found') fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: null }));
     else if (code === 'message_content_unavailable') resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'application/octet-stream', body: {} } };
     else if (code === 'message_content_pending') { resource = { type: 'message', id: 'm1', attributes: {}, meta: { observation: { version: 1, state: 'receipt_only', observedAt: 1794790925000, timestampSource: 'receipt' } } }; options = { encodingFormat: 'image/*' }; }
+    else if (code === 'reactions_unavailable') options = { include: ['reactions'] };
     else if (code === 'message_unavailable') fetcher.mockResolvedValue(new Response('private-response', { status: 503 }));
     else { resource = { type: 'message', id: 'm1', attributes: { body: { event: { name: 'Synthetic event' } } } }; options = { include: ['event-responses'] }; }
     const result = await call('get_message', { messageId: 'm1', options });
@@ -384,8 +385,8 @@ it.each([
 it.each(['application/pdf', 'image/*'])('rejects incompatible text encoding %s', async encodingFormat => {
   expect(await call('get_message', { messageId: 'm1', options: { encodingFormat } })).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'incompatible_encoding_format', recovery: { action: 'correct_arguments' } } } } });
 });
-it.each(['metadata', 'poll-responses', 'event-responses', 'reactions'])('rejects unavailable include %s explicitly', async include => {
-  expect(await call('get_message', { messageId: 'm1', options: { include: [include] } })).toMatchObject({ isError: true, structuredContent: { data: { error: { code: include === 'reactions' ? 'unsupported_include' : 'incompatible_include' } } } });
+it.each(['metadata', 'poll-responses', 'event-responses'])('rejects unavailable include %s explicitly', async include => {
+  expect(await call('get_message', { messageId: 'm1', options: { include: [include] } })).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'incompatible_include' } } } });
 });
 it('filters connections before slicing and uses a saved number without a live request', async () => {
   await env.DB.prepare('UPDATE whatsapp_connections SET phone_number = ? WHERE id = ?').bind('15555550100', connectionId).run();
@@ -630,4 +631,39 @@ it('returns a null profile for an unpaired connection without looking up its sav
     structuredContent: { data: { items: [{ profile: null, phoneNumber: '15555550100' }] } },
   });
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('returns active reactions inside the same message in search and get', async () => {
+  const reactions = [{ reactor: 'alice@lid', emoji: '❤️' }, { reactor: 'bob@lid', emoji: '😂' }];
+  const parent = { type: 'message', id: 'm1', attributes: { at: 1794790925000, body: { text: 'hello' }, reactions } };
+  fetcher.mockImplementation(async input => Response.json({
+    jsonapi: { version: '1.1' }, data: new URL(String(input)).pathname === '/message/search' ? [parent] : parent,
+  }));
+  const options = { include: ['attachments', 'reactions'] };
+  expect(await call('search_messages', { options })).toMatchObject({ structuredContent: { data: { items: [{ id: 'm1', text: 'hello', reactions, attachments: [] }], hasMore: false } } });
+  expect(await call('get_message', { messageId: 'm1', options })).toMatchObject({ structuredContent: { data: { message: { id: 'm1', reactions }, attachments: [] } } });
+  expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('include'))).toEqual(['reactions', 'reactions']);
+  expect((await call('get_message', { messageId: 'm1' })).structuredContent?.data).not.toHaveProperty('message.reactions');
+});
+
+it('distinguishes a successful empty reaction lookup from missing or malformed enrichment', async () => {
+  const parent = { type: 'message', id: 'm1', attributes: { body: { text: 'hello' } } };
+  resource = { ...parent, attributes: { ...parent.attributes, reactions: [] } };
+  const options = { include: ['reactions'] };
+  expect(await call('get_message', { messageId: 'm1', options })).toMatchObject({ structuredContent: { data: { message: { reactions: [] } } } });
+  resource = parent;
+  expect(await call('get_message', { messageId: 'm1', options })).toMatchObject({ isError: true, structuredContent: { data: { partial: true, errors: [{ part: 'reactions', error: { code: 'reactions_unavailable' } }] } } });
+  const second = { ...parent, id: 'm2', attributes: { body: { text: 'second' }, reactions: [{ emoji: '❤️' }] } };
+  fetcher.mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: [parent, second] }));
+  const result = await call('search_messages', { options });
+  expect(result).toMatchObject({ isError: true, structuredContent: { data: { items: [{ id: 'm1' }, { id: 'm2' }], partial: true, errors: [{ part: 'items.0.reactions' }, { part: 'items.1.reactions' }] } } });
+  expect(result.structuredContent?.data).not.toHaveProperty('items.1.reactions');
+});
+
+it.each([{action:'set', emoji:'❤️'}, {action:'remove'}])('reads a retained reaction event by ID ($action)', async action => {
+  const reaction = { ...action, target: { id: 'original', participant: 'alice@lid', fromMe: false, remoteJid: 'group@g.us' }, senderTimestampMs: 1794790925000 };
+  resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'application/vnd.whatsapp.reaction', body: { reaction } } };
+  const result = await call('get_message', { messageId: 'm1' });
+  expect(result.isError).not.toBe(true);
+  expect(result).toMatchObject({ structuredContent: { data: { message: { id: 'm1', reaction } } } });
 });

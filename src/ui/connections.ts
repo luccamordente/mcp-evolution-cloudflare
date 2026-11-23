@@ -1,10 +1,13 @@
 import type { AuthenticatedUser } from '../types';
 import { WAPILOT_LOGO_SVG } from './wapilot-logo';
-import { SESSION_CONTROL } from './auth';
+import { sessionSignOut, SESSION_STATUS } from './auth';
 
 /** The dashboard and its same-origin requests share the browser session. */
 export function connectionsPage(user: AuthenticatedUser, sessionScripts = ''): string {
-  return PAGE.replaceAll('__USER_EMAIL__', escapeHtml(user.email)).replace('</head>', sessionScripts + '</head>');
+  const [initial = '—'] = user.email;
+  return PAGE.replace('__USER_INITIAL__', () => escapeHtml(initial.toUpperCase()))
+    .replace('__USER_EMAIL__', () => escapeHtml(user.email))
+    .replace('</head>', sessionScripts + '</head>');
 }
 
 function escapeHtml(value: string): string {
@@ -69,11 +72,25 @@ const PAGE = String.raw`<!doctype html>
     .context-option.action { color:var(--green-deep); font-weight:800; }
     .context-option.action .plus { width:28px; height:28px; display:grid; place-items:center; color:#063c22; background:var(--green); border-radius:50%; font-size:18px; }
     .divider { height:1px; margin:5px 8px; background:var(--line); }
-    .top-actions { display:contents; }
-    .user { display:flex; justify-self:end; align-items:center; gap:9px; max-width:100%; min-width:0; color:var(--muted); font-size:13px; }
-    .user > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .user-avatar { display:grid; place-items:center; flex:0 0 34px; width:34px; height:34px; color:var(--green-deep); background:var(--mint-strong); border-radius:50%; font-size:11px; font-weight:800; }
+    .account { position:relative; grid-column:3; justify-self:end; }
+    .account-trigger { display:flex; align-items:center; gap:8px; min-height:44px; padding:5px 11px 5px 5px; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:999px; cursor:pointer; font-size:13px; font-weight:700; white-space:nowrap; list-style:none; }
+    .account-trigger::-webkit-details-marker { display:none; }
+    .account-trigger:hover, .account[open] .account-trigger { background:var(--mint); border-color:#b8d8c3; }
+    .account-trigger:focus-visible { outline:3px solid var(--green-deep); outline-offset:3px; }
+    .account-avatar { display:grid; place-items:center; width:32px; height:32px; color:var(--green-deep); background:var(--mint-strong); border-radius:50%; font-size:12px; font-weight:800; }
+    .account-trigger .ph { color:var(--muted); }
+    .account[open] .account-trigger .ph { transform:rotate(180deg); }
+    .account-panel { position:absolute; z-index:21; inset-block-start:calc(100% + 9px); inset-inline-end:0; width:min(280px, calc(100vw - 32px)); padding:6px; background:var(--surface); border:1px solid var(--line); border-radius:15px; box-shadow:0 20px 44px rgba(16,32,25,.16); }
+    .account-details { margin:0; padding:8px 12px 10px; color:var(--muted); font-size:12px; }
+    .account-email { display:block; margin-top:3px; color:var(--ink); font-size:14px; overflow-wrap:anywhere; }
+    .account-panel [data-wapilot-signout] { width:100%; min-height:44px; padding:9px 12px; color:var(--ink); background:transparent; border:0; border-radius:9px; text-align:left; font-size:14px; font-weight:700; }
+    .account-panel [data-wapilot-signout]:hover { background:var(--mint); }
+    .account-panel [data-wapilot-signout]:focus-visible { outline:2px solid var(--green-deep); outline-offset:-2px; }
+    .account-panel [data-wapilot-signout]:disabled { color:var(--muted); cursor:wait; }
+    #wapilot-signout-status:not(:empty) { padding:4px 12px 8px; color:var(--red); font-size:13px; }
     .page { width:min(1180px, calc(100% - 64px)); margin:0 auto; padding:56px 0 80px; }
+    #wapilot-session-status:not(:empty) { display:block; margin-bottom:20px; padding:12px 16px; color:var(--ink); background:var(--amber-soft); border-radius:12px; font-size:14px; }
+    #wapilot-session-status a { color:inherit; font-weight:700; }
     .view[hidden] { display:none; }
     .page-heading { display:flex; justify-content:space-between; align-items:flex-end; gap:28px; margin-bottom:32px; }
     .eyebrow { margin:0 0 11px; color:var(--green-deep); font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
@@ -172,8 +189,8 @@ const PAGE = String.raw`<!doctype html>
     .toast { position:fixed; z-index:50; left:50%; bottom:24px; max-width:min(92vw, 520px); padding:12px 16px; color:#fff; background:#0b3021; border-radius:999px; box-shadow:0 12px 28px rgba(9,44,32,.2); font-size:13px; opacity:0; pointer-events:none; transform:translate(-50%, 15px); transition:opacity .2s ease, transform .2s ease; }
     .toast.is-visible { opacity:1; transform:translate(-50%, 0); }
     .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-    @media (max-width:860px) { .topbar { grid-template-columns:auto minmax(0, 1fr); align-items:center; padding:20px 24px; } .brand { grid-column:1; grid-row:1; } .user { grid-column:2; grid-row:1; } .context-wrap { grid-column:1 / -1; grid-row:2; width:100%; } .context-trigger { width:100%; } .context-menu { width:100%; } .page { width:min(100% - 36px, 660px); padding-top:42px; } .page-heading { align-items:flex-start; flex-direction:column; } .connection-hero { padding:30px 26px; } .onboarding-grid { grid-template-columns:1fr; gap:34px; } .onboarding-panel { min-height:0; } .stats { grid-template-columns:1fr; } .stat, .stat + .stat { min-height:0; padding:19px 0; border-left:0; border-bottom:1px solid var(--line); } .stat:last-child { border-bottom:0; } }
-    @media (max-width:520px) { .topbar { padding-inline:16px; } .brand { width:126px; } .page { width:min(100% - 28px, 520px); } h1 { font-size:42px; } .hero-top { grid-template-columns:1fr; } .hero-actions { justify-items:stretch; } .hero-buttons { display:grid; grid-template-columns:1fr; } .hero-buttons button { width:100%; } .activity-item { grid-template-columns:34px 1fr; padding-inline:0; } .activity-time { grid-column:2; } .state-card, .qr-panel { padding:25px 18px; } }
+    @media (max-width:860px) { .topbar { grid-template-columns:auto minmax(0, 1fr); row-gap:14px; padding:16px 24px; } .brand { grid-column:1; grid-row:1; } .account { grid-column:2; grid-row:1; } .context-wrap { grid-column:1 / -1; grid-row:2; width:100%; } .context-trigger { width:100%; } .page { width:min(100% - 36px, 660px); padding-top:42px; } .page-heading { align-items:flex-start; flex-direction:column; } .connection-hero { padding:30px 26px; } .onboarding-grid { grid-template-columns:1fr; gap:34px; } .onboarding-panel { min-height:0; } .stats { grid-template-columns:1fr; } .stat, .stat + .stat { min-height:0; padding:19px 0; border-left:0; border-bottom:1px solid var(--line); } .stat:last-child { border-bottom:0; } }
+    @media (max-width:520px) { .topbar { padding-inline:16px; } .brand { width:126px; } .account-label { display:none; } .page { width:min(100% - 28px, 520px); } h1 { font-size:42px; } .hero-top { grid-template-columns:1fr; } .hero-actions { justify-items:stretch; } .hero-buttons { display:grid; grid-template-columns:1fr; } .hero-buttons button { width:100%; } .activity-item { grid-template-columns:34px 1fr; padding-inline:0; } .activity-time { grid-column:2; } .state-card, .qr-panel { padding:25px 18px; } }
     @media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
   </style>
 </head>
@@ -189,9 +206,17 @@ const PAGE = String.raw`<!doctype html>
           <button class="context-option action" id="context-add" type="button"><i class="ph ph-plus-circle" aria-hidden="true"></i><span>Adicionar novo número</span></button>
         </div>
       </div>
-      <div class="top-actions">${SESSION_CONTROL}<div class="user"><span class="user-avatar" id="user-avatar">LM</span><span>__USER_EMAIL__</span></div></div>
+      <details class="account" id="account">
+        <summary class="account-trigger" aria-label="Minha conta"><span class="account-avatar" aria-hidden="true">__USER_INITIAL__</span><span class="account-label">Minha conta</span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
+        <div class="account-panel">
+          <p class="account-details">Conectado como <strong class="account-email">__USER_EMAIL__</strong></p>
+          ${sessionSignOut('Sair')}
+          <div id="wapilot-signout-status" role="status"></div>
+        </div>
+      </details>
     </header>
     <main class="page">
+      ${SESSION_STATUS}
       <section class="view" id="dashboard-view" aria-labelledby="dashboard-title">
         <div class="page-heading"><div><p class="eyebrow">Dashboard da conexão</p><h1 id="dashboard-title">Suas conexões no WaPilot.</h1></div></div>
         <div id="dashboard-content"></div>
@@ -278,7 +303,18 @@ const PAGE = String.raw`<!doctype html>
       window.addEventListener('scroll', () => { if (contextTrigger.getAttribute('aria-expanded') === 'true') updateContextPosition(); }, { passive: true });
       contextTrigger.addEventListener('click', () => setContextOpen(contextTrigger.getAttribute('aria-expanded') !== 'true'));
       contextMenu.addEventListener('click', (event) => { const target = event.target.closest('button'); if (!target) return; if (target.dataset.select) selectConnection(target.dataset.select); if (target.dataset.default) setDefault(target.dataset.default); if (target.id === 'context-add') { setContextOpen(false); showOnboarding(null, 'confirm'); } });
-      document.addEventListener('click', (event) => { if (!document.querySelector('#context-wrap').contains(event.target)) setContextOpen(false); });
+      const account = document.querySelector('#account');
+      const closeAccountOnOutsideInteraction = (event) => { if (!account.contains(event.target)) account.open = false; };
+      document.addEventListener('focusin', closeAccountOnOutsideInteraction);
+      document.addEventListener('click', (event) => {
+        closeAccountOnOutsideInteraction(event);
+        if (!document.querySelector('#context-wrap').contains(event.target)) setContextOpen(false);
+      });
+      account.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !account.open) return;
+        account.open = false;
+        account.querySelector('summary').focus();
+      });
       document.querySelector('#confirm-provision').addEventListener('click', provision);
       document.querySelector('#renew-qr').addEventListener('click', renewQr);
       document.querySelector('#renew-expired').addEventListener('click', renewQr);

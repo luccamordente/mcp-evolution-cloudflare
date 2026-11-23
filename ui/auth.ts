@@ -19,12 +19,19 @@ async function start() {
     const clerk = window.Clerk;
     if (!clerk || !window.__internal_ClerkUICtor) throw new Error();
     await clerk.load({ localization: ptBR, ui: { ClerkUI: window.__internal_ClerkUICtor }, signInUrl: '/sign-in', signUpUrl: '/accept-invitation', signInForceRedirectUrl: config.returnTo, signUpForceRedirectUrl: '/connections', telemetry: { disabled: true } });
+    const signOutStatus = document.getElementById('wapilot-signout-status');
     for (const button of document.querySelectorAll<HTMLButtonElement>('[data-wapilot-signout]')) {
       button.hidden = !clerk.session;
       button.addEventListener('click', async () => {
+        if (signOutStatus) signOutStatus.textContent = '';
         button.disabled = true;
         try { await clerk.signOut({ redirectUrl: '/sign-in' }); }
-        catch { button.disabled = false; notify('Não foi possível sair. Tente novamente.'); }
+        catch {
+          button.disabled = false;
+          const message = 'Não foi possível sair. Tente novamente.';
+          if (signOutStatus) signOutStatus.textContent = message;
+          else notify(message);
+        }
       });
     }
     if (config.mode === 'session') {

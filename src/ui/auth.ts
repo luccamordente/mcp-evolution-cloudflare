@@ -8,7 +8,12 @@ export function authScripts(publishableKey: string, frontend: string, mode: stri
 <script defer src="/auth.js"></script>`;
 }
 
-export const SESSION_CONTROL = '<button type="button" data-wapilot-signout hidden>Sair do navegador</button><span id="wapilot-session-status" role="status"></span>';
+export function sessionSignOut(label = 'Sair do navegador'): string {
+  return `<button type="button" data-wapilot-signout hidden>${label}</button>`;
+}
+
+export const SESSION_STATUS = '<span id="wapilot-session-status" role="status"></span>';
+export const SESSION_CONTROL = sessionSignOut() + SESSION_STATUS;
 
 export function authPage(title: string, description: string, scripts: string, mount = false): string {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>WaPilot · Acesso</title>

@@ -16,6 +16,43 @@ function openWorkspace(fetcher: typeof fetch, hash = 'dashboard') {
   });
 }
 
+it('keeps browser sign-out inside the account disclosure and session messages outside the header', () => {
+  const dom = openWorkspace(async input => Response.json(String(input) === '/connections/data'
+    ? { connections: [connected] }
+    : { authorizations: [] }));
+  try {
+    const { document, KeyboardEvent } = dom.window;
+    const account = document.querySelector<HTMLDetailsElement>('.topbar .account')!;
+    const trigger = account.querySelector('summary')!;
+    const signOut = account.querySelector<HTMLButtonElement>('[data-wapilot-signout]')!;
+    const connectionTrigger = document.querySelector<HTMLButtonElement>('#context-trigger')!;
+
+    expect(account.open).toBe(false);
+    expect(trigger.textContent).toContain('Minha conta');
+    expect(account.querySelector('.account-email')?.textContent).toBe('user@example.test');
+    expect(signOut.textContent).toBe('Sair');
+    expect(signOut.hidden).toBe(true);
+    expect(account.querySelector('#wapilot-signout-status')?.getAttribute('role')).toBe('status');
+    expect(document.querySelector('main #wapilot-session-status')).not.toBeNull();
+
+    trigger.click();
+    signOut.hidden = false;
+    signOut.focus();
+    expect(account.open).toBe(true);
+    signOut.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(account.open).toBe(false);
+    expect(document.activeElement).toBe(trigger);
+
+    trigger.click();
+    connectionTrigger.click();
+    expect(account.open).toBe(false);
+    expect(connectionTrigger.getAttribute('aria-expanded')).toBe('true');
+    trigger.click();
+    expect(account.open).toBe(true);
+    expect(connectionTrigger.getAttribute('aria-expanded')).toBe('false');
+  } finally { dom.window.close(); }
+});
+
 describe('continuing an existing connection awaiting QR', () => {
   function workspace(connectionQr?: string, hash = 'dashboard') {
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

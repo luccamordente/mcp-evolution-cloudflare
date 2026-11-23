@@ -275,3 +275,49 @@ it('loads the next authorization page and confirms revocation against a fresh li
     expect(list.querySelector('button')?.textContent).toBe('Carregar mais');
   } finally { dom.window.close(); }
 });
+
+it('shows subscription details and delivery results for the selected connection', async () => {
+  const next = { ...connected, id: 'two', isDefault: false, friendlyName: 'Second fixture' };
+  const item = {
+    id: 'sub_' + 'a'.repeat(64),
+    appName: 'Fixture <app>',
+    callbackUrl: 'https://receiver.example.test/full/path?one=1&two=2',
+    eventName: 'message.received',
+    conversationId: null,
+    state: 'active',
+    authorization: 'valid',
+    authorizationId: 'grant-reference',
+    activatedAt: '2026-11-23T13:00:00Z',
+    expiresAt: '2026-11-24T13:00:00Z',
+  };
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    switch (String(input)) {
+      case '/connections/data': return Response.json({ connections: [connected, next] });
+      case '/connections/authorizations': return Response.json({ authorizations: [] });
+      case '/connections/api/connections/one/subscriptions': return Response.json({ subscriptions: [item] });
+      case '/connections/api/connections/two/subscriptions': return Response.json({ subscriptions: [] });
+      case '/connections/api/connections/one/subscriptions/' + item.id:
+        return Response.json({ subscription: item, deliveries: [{
+          state: 'failed', result: 'http_410', attempts: 1, messageId: 'message-fixture', receivedAt: item.activatedAt,
+        }] });
+      default: throw new Error('Unexpected request: ' + input);
+    }
+  });
+  const dom = openWorkspace(fetcher);
+  try {
+    const { document } = dom.window;
+    const section = document.querySelector('#subscriptions')!;
+    await vi.waitFor(() => expect(section.querySelector('h4')?.textContent).toBe(item.appName));
+    expect(section.querySelector('.subscription-url')?.textContent).toBe(item.callbackUrl);
+    expect(section.querySelector('.subscription-url a')).toBeNull();
+    expect(dom.window.getComputedStyle(section.querySelector('[data-load-subscriptions]')!).display).toBe('none');
+    section.querySelector<HTMLElement>('.subscription-details summary')!.click();
+    await vi.waitFor(() => expect(section.querySelector('.subscription-deliveries')?.textContent).toContain('Resposta HTTP 410'));
+    expect(section.querySelector('.subscription-deliveries')?.textContent).toContain('message-fixture');
+    expect(section.querySelector('.subscription-reference')?.textContent).toContain(item.authorizationId);
+    expect(dom.window.getComputedStyle(section.querySelector('[data-load-deliveries]')!).display).toBe('none');
+    document.querySelector<HTMLButtonElement>('[data-select="two"]')!.click();
+    await vi.waitFor(() => expect(section.textContent).toContain('Nenhuma assinatura ativa nesta conexão.'));
+    expect(section.textContent).not.toContain(item.callbackUrl);
+  } finally { dom.window.close(); }
+});

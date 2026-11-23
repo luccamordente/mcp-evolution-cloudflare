@@ -26,6 +26,8 @@ it('removes legacy content on upgrade, preserves identity and operational state,
     return Response.json({ jsonapi: { version: '1.1' }, data });
   }, '0008_event_deliveries.sql');
   try {
+    // The running Worker needs its additive subscription migration even when the destructive legacy cleanup is pending.
+    await fixture.migrate('0013_connection_last_connected_at.sql', '0014_event_subscription_stops.sql');
     const account = await fixture.issue({ scope: 'mcp:read mcp:write' });
     const connectionId = account.connections[0];
     const hook = await fixture.webhook(connectionId);
@@ -60,7 +62,7 @@ it('removes legacy content on upgrade, preserves identity and operational state,
     const connection = await fixture.db.prepare('SELECT encrypted_token FROM whatsapp_connections WHERE id = ?').bind(connectionId).first<{ encrypted_token: string }>();
     expect(await decryptToken(connection!.encrypted_token, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')).toBe('synthetic-instance');
     expect(await (await fixture.fetch('/fixture/grants?'+new URLSearchParams({ user: encodeURIComponent('fixture-a@example.test') }))).json()).toEqual(grants);
-    await fixture.migrate('0009_drop_legacy_message_storage.sql');
+    await fixture.migrate('0009_drop_legacy_message_storage.sql', '0013_connection_last_connected_at.sql');
     const call = async (name: string, args: Record<string, unknown> = {}) => {
       const params = { name, arguments: args };
       return (await fixture.rpc(account.accessToken, 'tools/call', params, { 'Mcp-Name': String(params.name) })).body.result;

@@ -34,6 +34,10 @@ _Avoid_: prévia, arquivo de mídia como sinônimo de mensagem completa
 Monitoramento solicitado por um cliente em nome de um usuário para mensagens novas recebidas em uma conexão e, opcionalmente, em uma conversa.
 _Avoid_: conexão, autorização OAuth como sinônimo de assinatura
 
+**Encerramento de assinatura**:
+Término deliberado de uma assinatura de mensagens por ação do usuário ou do aplicativo responsável pelo acompanhamento.
+_Avoid_: expiração, revogação da autorização do aplicativo
+
 **Objetivo de acompanhamento**:
 Condição definida pelo usuário que determina o propósito e, quando aplicável, o término do monitoramento de mensagens.
 
@@ -47,6 +51,9 @@ _Avoid_: mensagem completa, resumo como sinônimo de prévia
 
 **Entrega de notificação**:
 Envio de uma notificação de mensagem a um cliente específico. Uma mesma mensagem pode originar entregas para diferentes assinaturas.
+
+**Registro de entrega**:
+Resumo operacional de uma entrega de notificação, com o horário de recebimento no WaPilot, o estado e as tentativas de processamento.
 
 ## Conexões
 

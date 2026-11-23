@@ -11,6 +11,7 @@ import { connectionsPage } from './ui/connections';
 import { adminPage } from './ui/admin';
 import { buildAdminSnapshot, isAdminOperator, type AdminOAuthReader } from './lib/admin';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
+import { describeEventSubscriptions, eventPageCursor, getEventSubscription, isEventSubscriptionId, listEventSubscriptionDeliveries, listEventSubscriptions, stopEventSubscription } from './lib/event-subscriptions';
 import { activateInvitedUser, inviteUser, InvitationError } from './lib/invitations';
 import { z } from 'zod';
 import { serveAttachment } from './lib/attachments';
@@ -141,17 +142,21 @@ app.get('/api/connections', async (c) => {
   return c.json({ connections: await connectionViews(c.env, user.id, true) });
 });
 
-async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
-  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
-  const user = await ensureUser(c.env.DB, auth);
-  const base = (c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin).replace(/\/$/, '');
+async function browserOAuthApi(env: Env, url: string) {
+  const base = (env.MCP_PUBLIC_URL ?? new URL(url).origin).replace(/\/$/, '');
   // Keep the Node-compatible Hono test surface free of the provider's
   // cloudflare: ESM imports; production Worker routes load it on demand.
   const [{ getOAuthApi }, { oauthOptions }] = await Promise.all([
     import('@cloudflare/workers-oauth-provider'),
     import('./lib/oauth'),
   ]);
-  const oauth = getOAuthApi(oauthOptions(base), c.env);
+  return getOAuthApi(oauthOptions(base), env);
+}
+
+async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  const oauth = await browserOAuthApi(c.env, c.req.url);
   const userId = encodeURIComponent(user.email);
   if (!revokeId) {
     try {
@@ -178,6 +183,49 @@ async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
 app.get('/api/authorizations', (c) => authorizationApi(c));
 app.delete('/api/authorizations/:id', (c) => authorizationApi(c, c.req.param('id')));
 app.post('/api/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.param('id')));
+
+const subscriptionsPath = '/api/connections/:id/subscriptions';
+app.get(subscriptionsPath, async (c) => {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  const connectionId = c.req.param('id');
+  if (!await getConnection(c.env.DB, user.id, connectionId)) return c.json({ error: 'Conexão não encontrada.' }, 404);
+  const cursor = eventPageCursor(c.req.query('cursor'));
+  if (cursor === null) return c.json({ error: 'Página de assinaturas inválida.' }, 400);
+  const now = Date.now();
+  const page = await listEventSubscriptions(c.env.DB, { userId: user.id, connectionId }, c.req.query('recent') === '1', cursor, now);
+  const oauth = page.subscriptions.length ? await browserOAuthApi(c.env, c.req.url).catch(() => undefined) : undefined;
+  return c.json({ subscriptions: await describeEventSubscriptions(page.subscriptions, oauth, encodeURIComponent(user.email), now), nextCursor: page.nextCursor });
+});
+
+app.get(`${subscriptionsPath}/:subscriptionId`, async (c) => {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  const scope = { userId: user.id, connectionId: c.req.param('id') };
+  const subscriptionId = c.req.param('subscriptionId');
+  const cursor = eventPageCursor(c.req.query('cursor'));
+  if (cursor === null) return c.json({ error: 'Página de entregas inválida.' }, 400);
+  const now = Date.now();
+  const record = isEventSubscriptionId(subscriptionId) && await getEventSubscription(c.env.DB, scope, subscriptionId, now);
+  if (!record) return c.json({ error: 'Assinatura não encontrada.' }, 404);
+  const [oauth, page] = await Promise.all([
+    browserOAuthApi(c.env, c.req.url).catch(() => undefined),
+    listEventSubscriptionDeliveries(c.env.DB, scope, subscriptionId, cursor, now),
+  ]);
+  const [subscription] = await describeEventSubscriptions([record], oauth, encodeURIComponent(user.email), now);
+  return c.json({ subscription, ...page });
+});
+
+app.delete(`${subscriptionsPath}/:subscriptionId`, async (c) => {
+  const auth = await requireUiAuth(c); if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  const scope = { userId: user.id, connectionId: c.req.param('id') };
+  const id = c.req.param('subscriptionId');
+  const result = isEventSubscriptionId(id) && await stopEventSubscription(c.env.DB, scope, id);
+  if (!result || !result.stopped) return c.json({ error: 'Assinatura disponível para encerramento não encontrada.' }, 404);
+  if (result.changed) await audit(c.env.DB, { ...scope, operation: 'subscription_stop', outcome: 'success' });
+  return c.json({ ok: true });
+});
 
 // Preserve the dashboard aliases while all paths use the same browser session.
 
@@ -466,7 +514,7 @@ async function activityFor(db: D1Database, userId: string, connectionId: string,
 }
 
 function auditTitle(operation: string): string {
-  return ({ connection_create: 'Conexão cadastrada', connection_provision: 'Instância criada', connection_qr_refresh: 'QR Code renovado', connection_status: 'Conexão verificada', connection_default: 'Conexão padrão atualizada', connection_update: 'Conexão atualizada', connection_repoint: 'Instância trocada' } as Record<string, string>)[operation] ?? 'Atividade da conexão';
+  return ({ connection_create: 'Conexão cadastrada', connection_provision: 'Instância criada', connection_qr_refresh: 'QR Code renovado', connection_status: 'Conexão verificada', connection_default: 'Conexão padrão atualizada', connection_update: 'Conexão atualizada', connection_repoint: 'Instância trocada', subscription_stop: 'Assinatura encerrada' } as Record<string, string>)[operation] ?? 'Atividade da conexão';
 }
 
 function formatRelativeTime(value: string): string {

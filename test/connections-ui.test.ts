@@ -275,3 +275,97 @@ it('loads the next authorization page and confirms revocation against a fresh li
     expect(list.querySelector('button')?.textContent).toBe('Carregar mais');
   } finally { dom.window.close(); }
 });
+
+it('shows subscription details and delivery results for the selected connection', async () => {
+  const next = { ...connected, id: 'two', isDefault: false, friendlyName: 'Second fixture' };
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 1);
+  const item = {
+    id: 'sub_' + 'a'.repeat(64),
+    appName: 'Fixture <app>',
+    callbackUrl: 'https://receiver.example.test/full/path?one=1&two=2',
+    eventName: 'message.received',
+    conversationId: null,
+    state: 'active',
+    authorization: 'valid',
+    authorizationId: 'grant-reference',
+    activatedAt: '2026-11-23T13:00:00Z',
+    expiresAt: expiresAt.toISOString(),
+  };
+  const filtered = {
+    ...item,
+    id: 'sub_' + 'b'.repeat(64),
+    appName: 'Fixture alerts',
+    conversationId: '120000000000000001@g.us',
+    authorization: 'unavailable',
+  };
+  const subscriptionPath = '/connections/api/connections/one/subscriptions';
+  let stopped = false;
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    switch (String(input)) {
+      case '/connections/data': return Response.json({ connections: [connected, next] });
+      case '/connections/authorizations': return Response.json({ authorizations: [] });
+      case subscriptionPath: return Response.json({ subscriptions: stopped ? [filtered] : [item, filtered] });
+      case subscriptionPath + '?recent=1':
+        return Response.json({ subscriptions: [{ ...item, state: 'cancelled', endedAt: new Date().toISOString() }] });
+      case '/connections/api/connections/two/subscriptions': return Response.json({ subscriptions: [] });
+      case subscriptionPath + '/' + item.id:
+        if (init?.method === 'DELETE') {
+          stopped = true;
+          return Response.json({ ok: true });
+        }
+        return Response.json({ subscription: item, deliveries: [{
+          state: 'failed', result: 'http_410', attempts: 1, messageId: 'message-fixture', receivedAt: item.activatedAt,
+        }] });
+      case subscriptionPath + '/' + filtered.id:
+        return Response.json({ subscription: filtered, deliveries: [] });
+      default: throw new Error('Unexpected request: ' + input);
+    }
+  });
+  const dom = openWorkspace(fetcher);
+  try {
+    const { document } = dom.window;
+    const section = document.querySelector('#subscriptions')!;
+    await vi.waitFor(() => expect(section.querySelector('.subscription-name')?.textContent).toBe(item.appName));
+    const [row, filteredRow] = section.querySelectorAll<HTMLDetailsElement>('#subscription-current details');
+    const summary = row.querySelector('summary')!;
+    expect(row.open).toBe(false);
+    expect(summary.querySelector('.subscription-meta')?.textContent).toBe('Todas as conversas');
+    expect(summary.querySelector('.subscription-status')?.textContent).toBe('Ativa');
+    expect(summary.querySelector('.subscription-timing strong')?.textContent).toBe('Expira amanhã');
+    expect(summary.querySelector('time')?.dateTime).toBe(item.expiresAt);
+    expect(summary.textContent).not.toContain(item.callbackUrl);
+    expect(filteredRow.querySelector('summary')?.textContent).toContain('Uma conversa específica');
+    expect(filteredRow.querySelector('.subscription-status.is-warning')?.textContent).toBe('Autorização não verificada');
+    expect(fetcher.mock.calls.some(([path]) => path === subscriptionPath + '/' + item.id)).toBe(false);
+    expect(dom.window.getComputedStyle(section.querySelector('[data-load-subscriptions]')!).display).toBe('none');
+    summary.click();
+    filteredRow.querySelector('summary')!.click();
+    await vi.waitFor(() => expect(row.querySelector('.subscription-deliveries')?.textContent).toContain('Resposta HTTP 410'));
+    await vi.waitFor(() => expect(filteredRow.textContent).toContain('Nenhuma entrega registrada nas últimas 24 horas.'));
+    expect(row.open).toBe(true);
+    expect(row.querySelector('.subscription-body h4')?.textContent).toBe('Entregas nas últimas 24 horas');
+    expect(row.querySelector('.subscription-deliveries')?.textContent).toContain('message-fixture');
+    expect(row.querySelector('.subscription-facts')?.textContent).toContain(item.authorizationId);
+    expect(row.querySelector('.subscription-url')?.textContent).toBe(item.callbackUrl);
+    expect(row.querySelector('.subscription-url a')).toBeNull();
+    expect(filteredRow.querySelector('.subscription-facts')?.textContent).toContain(filtered.conversationId);
+    expect(dom.window.getComputedStyle(row.querySelector('[data-load-deliveries]')!).display).toBe('none');
+
+    const dialog = section.querySelector('dialog')!;
+    dialog.showModal = vi.fn();
+    row.querySelector<HTMLButtonElement>('[data-stop-subscription]')!.click();
+    expect(dialog.showModal).toHaveBeenCalledOnce();
+    expect(dialog.querySelector('p')?.textContent).toContain(item.appName);
+    dialog.returnValue = 'stop';
+    dialog.dispatchEvent(new dom.window.Event('close'));
+    const recent = section.querySelector<HTMLDetailsElement>('#subscription-recent')!;
+    await vi.waitFor(() => expect(recent.querySelector('.subscription-status')?.textContent).toBe('Encerrada'));
+    expect(recent.open).toBe(true);
+    expect(recent.querySelector('[data-stop-subscription]')).toBeNull();
+
+    document.querySelector<HTMLButtonElement>('[data-select="two"]')!.click();
+    await vi.waitFor(() => expect(section.textContent).toContain('Nenhuma assinatura vigente nesta conexão.'));
+    expect(section.textContent).not.toContain(item.callbackUrl);
+  } finally { dom.window.close(); }
+});

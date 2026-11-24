@@ -6,6 +6,7 @@ import { ensureUser, resolveConnection, sha256 } from './db';
 import { encryptToken } from './crypto';
 import { sendCallback, CallbackSenderError } from './callback-sender';
 import { z } from 'zod';
+import { cancelEventSubscriptionStatements, eventSubscriptionStopped, findEventGrants, matchesEventGrant } from './event-subscriptions';
 
 const eventDefinition = {
   name: 'message.received',
@@ -58,21 +59,9 @@ export class EventAuthorizationUnavailable extends Error {
 
 /** Public Provider API only; a provider outage is distinct from known revocation. */
 export async function eventGrantValid(oauth: EventGrantReader, principal: EventPrincipal, now = Date.now()): Promise<boolean> {
-  let cursor: string | undefined;
-  const seen = new Set<string>();
   try {
-    do {
-      const page = await oauth.listUserGrants(principal.providerUserId, {limit:100, ...(cursor ? {cursor} : {})});
-      const grant = page.items.find(grant => grant.id === principal.grantId);
-      if (grant) return grant.userId === principal.providerUserId && grant.clientId === principal.clientId
-        && grant.scope.includes('mcp:read')
-        && (typeof grant.resource === 'string' ? grant.resource === principal.resource : Array.isArray(grant.resource) && grant.resource.includes(principal.resource))
-        && (grant.expiresAt === undefined || (Number.isFinite(grant.expiresAt) && grant.expiresAt * 1000 > now));
-      cursor = page.cursor;
-      if (cursor && seen.has(cursor)) throw new EventAuthorizationUnavailable();
-      if (cursor) seen.add(cursor);
-    } while (cursor);
-    return false;
+    const grant = (await findEventGrants(oauth, principal.providerUserId, [principal.grantId])).get(principal.grantId);
+    return !!grant && matchesEventGrant(grant, principal, now);
   } catch { throw new EventAuthorizationUnavailable(); }
 }
 
@@ -173,6 +162,8 @@ export function registerMcpEvents(server: McpServer, env: Env, user: Authenticat
   server.server.setRequestHandler('events/subscribe', {params:subscribeSchema}, async input => guarded(async () => {
     const owner = await principal();
     const {id,principalKey,argumentsJson} = await identity(input,owner);
+    const stopped = () => new ProtocolError(-32003, 'The WaPilot account owner ended this subscription.');
+    if (await eventSubscriptionStopped(env.DB, owner.userId, id)) throw stopped();
     let row = await env.DB.prepare('SELECT * FROM event_subscriptions WHERE id = ?').bind(id).first<SubscriptionRow>();
     let connectionId = row?.connection_id;
     if (!connectionId) {
@@ -182,8 +173,11 @@ export function registerMcpEvents(server: McpServer, env: Env, user: Authenticat
     if (!await eventAuthorizationValid(env.DB,oauth,owner,connectionId)) throw new ProtocolError(-32003,'WaPilot access is no longer available.');
     const now = Date.now(), expires = now+Math.min(input.ttlMs ?? lifetime,lifetime);
     await env.DB.prepare(`INSERT OR IGNORE INTO event_subscriptions (id,user_id,provider_user_id,grant_id,client_id,resource,principal_key,connection_id,event_name,arguments_json,conversation_id,callback_url,state,expires_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'pending',?)`).bind(id,owner.userId,owner.providerUserId,owner.grantId,owner.clientId,owner.resource,principalKey,connectionId,input.name,argumentsJson,input.arguments.conversationId ?? null,input.delivery.url,expires).run();
-    row = (await env.DB.prepare('SELECT * FROM event_subscriptions WHERE id = ?').bind(id).first<SubscriptionRow>())!;
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?, 'pending',? WHERE NOT EXISTS (SELECT 1 FROM event_subscription_stops WHERE subscription_id = ?)`)
+      .bind(id,owner.userId,owner.providerUserId,owner.grantId,owner.clientId,owner.resource,principalKey,connectionId,input.name,argumentsJson,input.arguments.conversationId ?? null,input.delivery.url,expires,id).run();
+    row = await env.DB.prepare('SELECT * FROM event_subscriptions WHERE id = ?').bind(id).first<SubscriptionRow>();
+    if (await eventSubscriptionStopped(env.DB, owner.userId, id)) throw stopped();
+    if (!row) throw callbackError('superseded');
     connectionId = row.connection_id;
     if (row.state === 'revoked') throw new ProtocolError(-32003,'WaPilot access is no longer available.');
     const cached = await env.DB.prepare("SELECT verified_until FROM event_subscriptions WHERE principal_key = ? AND callback_url = ? AND state = 'active' AND verified_until > ? AND expires_at > ? LIMIT 1").bind(principalKey,input.delivery.url,now,now).first<{verified_until:number}>();
@@ -213,17 +207,18 @@ export function registerMcpEvents(server: McpServer, env: Env, user: Authenticat
       activated_at = CASE WHEN state = 'active' AND expires_at > ? THEN activated_at ELSE ? END, version = version+1
       WHERE id = ? AND state != 'revoked' AND (version = ? OR (state = 'active' AND secret_hash = ?))
       AND EXISTS (SELECT 1 FROM users u JOIN whatsapp_connections c ON c.user_id = u.id WHERE u.id = event_subscriptions.user_id AND u.status = 'active' AND c.id = event_subscriptions.connection_id)
-      AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = event_subscriptions.user_id AND r.grant_id = event_subscriptions.grant_id AND r.expires_at > ?)`)
+      AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = event_subscriptions.user_id AND r.grant_id = event_subscriptions.grant_id AND r.expires_at > ?)
+      AND NOT EXISTS (SELECT 1 FROM event_subscription_stops s WHERE s.subscription_id = event_subscriptions.id)`)
       .bind(activatedAt,hash,activatedAt,activatedAt,hash,activatedAt+EVENT_SECRET_ROTATION_MS,activatedAt,encrypted,hash,cached?.verified_until ?? activatedAt+verificationLifetime,expires,activatedAt,activatedAt,id,row.version,hash,activatedAt).run();
-    if (!result.meta.changes) throw callbackError('superseded');
+    if (!result.meta.changes) {
+      if (await eventSubscriptionStopped(env.DB, owner.userId, id)) throw stopped();
+      throw callbackError('superseded');
+    }
     return {id,refreshBefore:new Date(expires).toISOString(),cursor:null,truncated:false};
   }));
   server.server.setRequestHandler('events/unsubscribe', {params:unsubscribeSchema}, async input => guarded(async () => {
     const owner = await principal(), {id} = await identity(input,owner);
-    await env.DB.batch([
-      env.DB.prepare("UPDATE event_deliveries SET state = 'cancelled', body = NULL, lease_token = NULL, lease_until = NULL, result_code = 'cancelled' WHERE subscription_id = ? AND state IN ('pending','delivering')").bind(id),
-      env.DB.prepare("UPDATE event_subscriptions SET state = 'cancelled', encrypted_secret = NULL, secret_hash = NULL, encrypted_previous_secret = NULL, previous_secret_until = NULL, verified_until = 0, expires_at = MIN(expires_at,?), version = version+1 WHERE id = ?").bind(Date.now(),id),
-    ]);
+    await env.DB.batch(cancelEventSubscriptionStatements(env.DB, owner.userId, id, Date.now()));
     return {};
   }));
 }

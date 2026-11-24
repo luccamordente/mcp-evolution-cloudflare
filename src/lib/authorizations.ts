@@ -24,12 +24,17 @@ export function isValidAuthorizationId(value: string): boolean {
 
 const FALLBACK_CLIENT_NAME = 'Cliente OAuth';
 
+export async function authorizationClientName(oauth: Pick<OAuthHelpers, 'lookupClient'>, clientId: string): Promise<string | undefined> {
+  let client: ClientInfo | null = null;
+  try { client = await oauth.lookupClient(clientId); } catch { /* CIMD metadata may be unavailable. */ }
+  if (typeof client?.clientName === 'string') return client.clientName.trim().slice(0, 160) || undefined;
+}
+
 /** Convert the provider's public grant summary into the deliberately small
  * contract exposed to the browser. Provider metadata and credentials never
  * cross this boundary. */
 export async function summarizeGrant(oauth: Pick<OAuthHelpers, 'lookupClient'>, grant: GrantSummary): Promise<AuthorizationSummary> {
-  let client: ClientInfo | null = null;
-  try { client = await oauth.lookupClient(grant.clientId); } catch { /* CIMD metadata may be unavailable. */ }
+  const clientName = await authorizationClientName(oauth, grant.clientId) ?? FALLBACK_CLIENT_NAME;
   const redirectUri = typeof grant.redirectUri === 'string' ? grant.redirectUri : undefined;
   let redirectHost: string | undefined;
   try {
@@ -38,7 +43,6 @@ export async function summarizeGrant(oauth: Pick<OAuthHelpers, 'lookupClient'>, 
   } catch { /* Keep the grant visible with no installation hint. */ }
   const rawResource = grant.resource;
   const resource = typeof rawResource === 'string' ? rawResource.slice(0, 512) : Array.isArray(rawResource) && typeof rawResource[0] === 'string' ? rawResource[0].slice(0, 512) : undefined;
-  const clientName = typeof client?.clientName === 'string' && client.clientName.trim() ? client.clientName.trim().slice(0, 160) : FALLBACK_CLIENT_NAME;
   return {
     id: grant.id,
     clientId: grant.clientId,

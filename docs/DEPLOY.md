@@ -377,3 +377,9 @@ This release adds observation and delivery fields inside existing message metada
 6. Retain compatible rollback artifacts. Keep metadata intact and check receipt filtering and pending reads after rollback. Old consumers or writers that ignore markers can expose receipts as messages or regress stored state. Use a verified compatible version or pause affected ingestion and reads until compatibility is restored. Data rollback requires separate approval and the repair tool's conditional checks.
 
 No deployment, production repair, real WhatsApp send, or key negotiation is performed by these checks. The historical loss cause and Cloud Logging delivery after deployment remain operational verification items.
+
+## Migration de encerramento de assinaturas pelo painel
+
+Aplique `0014_event_subscription_stops.sql` antes de publicar a revisão que inclui o painel de assinaturas. A migration cria o marcador de encerramento e os índices usados pelas listas. Ela é aditiva e usa o D1 existente.
+
+Depois de usar o encerramento pelo painel, faça rollback somente para uma versão que consulte o marcador no cadastro e na renovação. Uma versão anterior pode reativar uma assinatura encerrada pelo titular.

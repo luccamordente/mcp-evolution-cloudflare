@@ -79,6 +79,13 @@ it('requires the dashboard CSRF token and trusted origin for mutations and alias
     expect(accepted.status).toBe(404);
     expect(await accepted.json()).toEqual({ error: 'Connection not found' });
   }
+  const subscription = '/connections/api/connections/missing/subscriptions/sub_' + 'a'.repeat(64);
+  const anonymous = await fixture.fetch(subscription, { headers: { accept: 'text/html' } });
+  expect(anonymous.status).toBe(401);
+  expect(anonymous.headers.get('content-type')).toContain('application/json');
+  expect((await fixture.fetch(subscription, { method: 'DELETE', headers: { cookie, origin: 'https://mcp.invalid' } })).status).toBe(403);
+  expect((await fixture.fetch(subscription, { method: 'DELETE', headers: { ...headers, origin: 'https://attacker.invalid' } })).status).toBe(403);
+  expect((await fixture.fetch(subscription, { method: 'DELETE', headers })).status).toBe(404);
 });
 
 it('preserves native form origin while requiring explicit Clerk consent and its browser binding', async () => {

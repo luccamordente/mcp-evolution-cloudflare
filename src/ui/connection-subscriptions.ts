@@ -161,12 +161,19 @@ export const subscriptionScript = `
     return '<span class="subscription-timing"><strong>' + action + ' ' + relative + '</strong>' + timeTag(date) + '</span>';
   }
 
+  function webhookDestinationLabel(destination) {
+    if (!destination) return 'Destino indisponível';
+    if (destination.label === 'Webhook') return destination.hostname;
+    return destination.label + ' · ' + destination.hostname;
+  }
+
   function subscriptionRow(item, today) {
     const label = statusLabel(item);
     const tone = item.state === 'active' ? (item.authorization === 'valid' ? ' is-active' : ' is-warning') : '';
     const trigger = item.eventName === 'message.received' ? 'Nova mensagem recebida' : item.eventName;
     const scope = item.conversationId ? 'Uma conversa específica' : 'Todas as conversas';
-    const destination = item.destination ? item.destination.label + ' · ' + item.destination.hostname : item.callbackUrl;
+    const webhook = item.deliveryKind === 'webhook';
+    const destination = webhook ? webhookDestinationLabel(item.destination) : item.callbackUrl;
     return '<details class="subscription-details" data-subscription="' + escapeHtml(item.id) + '">'
       + '<summary><span class="subscription-identity"><span><span class="subscription-name">' + escapeHtml(item.appName)
       + '</span><span class="subscription-meta">' + scope + '</span></span></span>'
@@ -175,7 +182,8 @@ export const subscriptionScript = `
       + '<p class="subscription-progress" role="status"></p><ul class="subscription-deliveries"></ul>'
       + '<button class="secondary" type="button" data-load-deliveries hidden>Carregar mais entregas</button></div>'
       + '<div class="subscription-facts"><h4>Dados da assinatura</h4><dl>'
-      + '<dt>Destino da entrega</dt><dd class="subscription-url">' + escapeHtml(destination) + '</dd>'
+      + '<dt>' + (webhook ? 'Webhook' : 'Destino da entrega') + '</dt><dd class="subscription-url">' + escapeHtml(destination) + '</dd>'
+      + (webhook ? '<dt>Última entrega</dt><dd data-latest-webhook-delivery>Carregando entregas…</dd>' : '')
       + '<dt>Gatilho</dt><dd>' + escapeHtml(trigger) + '</dd>'
       + (item.conversationId ? '<dt>Conversa</dt><dd><code>' + escapeHtml(item.conversationId) + '</code></dd>' : '')
       + '<dt>Ativada em</dt><dd>' + timeTag(item.activatedAt) + '</dd>'
@@ -248,12 +256,15 @@ export const subscriptionScript = `
     if (recentSubscriptions.open) loadSubscriptionList(recentSubscriptions);
   }
 
+  function deliveryLabel(item) {
+    return item.result === 'delivery_unknown' ? 'Resultado desconhecido' : deliveryStatusLabels[item.state] || item.state;
+  }
+
   function deliveryItem(item) {
     const result = item.result || '';
     const reason = deliveryReasons[result] || (/^http_[1-5][0-9]{2}$/.test(result) ? 'Resposta HTTP ' + result.slice(5) : '');
     const tone = item.state === 'accepted' ? ' class="is-accepted"' : item.state === 'failed' || item.state === 'expired' ? ' class="is-failed"' : '';
-    const label = result === 'delivery_unknown' ? 'Resultado desconhecido' : deliveryStatusLabels[item.state] || item.state;
-    return '<li' + tone + '><strong>' + escapeHtml(label) + '</strong><span class="subscription-received">Recebida '
+    return '<li' + tone + '><strong>' + escapeHtml(deliveryLabel(item)) + '</strong><span class="subscription-received">Recebida '
       + timeTag(item.receivedAt) + '</span><small>' + escapeHtml(item.attempts) + (item.attempts === 1 ? ' tentativa' : ' tentativas')
       + (reason ? ' · ' + escapeHtml(reason) : '') + '</small>'
       + (item.messageId ? '<small>Mensagem <code>' + escapeHtml(item.messageId) + '</code></small>' : '') + '</li>';
@@ -264,13 +275,21 @@ export const subscriptionScript = `
     const items = details.querySelector('.subscription-deliveries');
     const progress = details.querySelector('[role=status]');
     const button = details.querySelector('[data-load-deliveries]');
+    const latest = cursor ? null : details.querySelector('[data-latest-webhook-delivery]');
     details.dataset.loading = '1';
     button.disabled = true;
     progress.textContent = 'Carregando entregas…';
+    if (latest) latest.textContent = progress.textContent;
     if (!cursor) items.replaceChildren();
     try {
       const page = await api(subscriptionPath(connectionId, details.dataset.subscription) + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''));
       if (!details.isConnected || connectionId !== subscriptionConnection) return;
+      if (latest) {
+        const [delivery] = page.deliveries;
+        latest.innerHTML = delivery
+          ? escapeHtml(deliveryLabel(delivery)) + ' · Recebida ' + timeTag(delivery.receivedAt)
+          : 'Nenhuma entrega recente';
+      }
       items.insertAdjacentHTML('beforeend', page.deliveries.map(deliveryItem).join(''));
       progress.textContent = items.childElementCount ? '' : 'Nenhuma entrega registrada nas últimas 24 horas.';
       details.dataset.loaded = '1';
@@ -278,6 +297,7 @@ export const subscriptionScript = `
     } catch (error) {
       if (!details.isConnected || connectionId !== subscriptionConnection) return;
       progress.textContent = error.sessionExpired ? error.message : 'Não foi possível carregar as entregas.';
+      if (latest) latest.textContent = 'Última entrega indisponível';
       updatePageButton(button, cursor, true);
     } finally {
       delete details.dataset.loading;

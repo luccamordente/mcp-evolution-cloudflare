@@ -6,12 +6,16 @@ const retention = 86_400_000;
 const pageSize = 20;
 type Cursor = { time: number; id: string };
 type Scope = { userId: string; connectionId: string };
+type SubscriptionDelivery =
+  | { deliveryKind: 'signed'; callbackUrl: string }
+  | { deliveryKind: 'webhook'; destination: { label: string; hostname: string } | null };
 type SubscriptionRecord = EventPrincipal & {
   id: string;
   connectionId: string;
   eventName: 'message.received';
   conversationId: string | null;
   callbackUrl: string;
+  deliveryKind: SubscriptionDelivery['deliveryKind'];
   destinationLabel: string | null;
   destinationHostname: string | null;
   activatedAt: number;
@@ -91,6 +95,7 @@ export async function stopEventSubscription(db: D1Database, scope: Scope, id: st
 }
 
 const subscriptionProjection = `s.id, s.user_id AS userId, s.connection_id AS connectionId, s.callback_url AS callbackUrl,
+  CASE WHEN s.destination_id IS NULL THEN 'signed' ELSE 'webhook' END AS deliveryKind,
   d.label AS destinationLabel, d.hostname AS destinationHostname,
   s.provider_user_id AS providerUserId, s.grant_id AS grantId, s.client_id AS clientId, s.resource, s.event_name AS eventName,
   s.conversation_id AS conversationId, s.activated_at AS activatedAt, s.expires_at AS expiresAt, s.state`;
@@ -132,11 +137,13 @@ export async function describeEventSubscriptions(rows: SubscriptionRecord[], oau
     const state = row.state !== 'active' ? row.state : row.expiresAt <= now ? 'expired' : 'active';
     const authorization = state !== 'active' ? undefined : grants === undefined ? 'unavailable'
       : grant && matchesEventGrant(grant, row, now) ? 'valid' : 'inactive';
+    const delivery: SubscriptionDelivery = row.deliveryKind === 'webhook'
+      ? { deliveryKind: 'webhook', destination: row.destinationLabel && row.destinationHostname
+        ? { label: row.destinationLabel, hostname: row.destinationHostname } : null }
+      : { deliveryKind: 'signed', callbackUrl: row.callbackUrl };
     return {
       id: row.id, appName: clients.get(row.clientId) ?? 'Aplicativo não identificado', authorizationId: row.grantId,
-      ...(row.destinationLabel && row.destinationHostname
-        ? { destination: { label: row.destinationLabel, hostname: row.destinationHostname } }
-        : { callbackUrl: row.callbackUrl }),
+      ...delivery,
       eventName: row.eventName, conversationId: row.conversationId,
       activatedAt: new Date(row.activatedAt).toISOString(),
       ...(state === 'active' ? { expiresAt: new Date(row.expiresAt).toISOString() } : { endedAt: new Date(row.expiresAt).toISOString() }),
@@ -168,7 +175,7 @@ export async function listEventSubscriptionDeliveries(db: D1Database, scope: Sco
     deliveries: deliveries.map(({ id: _, ...row }) => ({
       ...row,
       receivedAt: new Date(row.receivedAt).toISOString(),
-      result: row.result && /^(http_[1-5]\d{2}|http_2xx|deadline|attempt_limit|authorization|cancelled|unavailable|lease_expired|expired_or_invalid|sender_destination_blocked|sender_invalid_request)$/.test(row.result) ? row.result : null,
+      result: row.result && /^(http_[1-5]\d{2}|http_2xx|deadline|attempt_limit|authorization|cancelled|unavailable|lease_expired|expired_or_invalid|sender_destination_blocked|sender_invalid_request|delivery_unknown)$/.test(row.result) ? row.result : null,
     })),
     nextCursor: last && results.length > pageSize ? last.receivedAt + ':' + last.id : undefined,
   };

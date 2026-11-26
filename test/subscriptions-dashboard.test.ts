@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { clerkRuntime } from './helpers/clerk-session';
 import { eventRuntime } from './helpers/mcp-events-runtime';
 
 it('shows only the selected owner’s subscriptions and delivery metadata, and keeps a dashboard stop across cleanup and renewals', async () => {
@@ -46,7 +47,7 @@ it('shows only the selected owner’s subscriptions and delivery metadata, and k
     const { subscriptions } = await list.json() as { subscriptions: Array<{ id: string; [key: string]: unknown }> };
     expect(subscriptions).toHaveLength(2);
     expect(subscriptions.find(item => item.id === id)).toMatchObject({
-      id, appName: 'Fixture', authorizationId: owner.grantId, authorization: 'valid', state: 'active', callbackUrl: url,
+      id, appName: 'Fixture', authorizationId: owner.grantId, authorization: 'valid', state: 'active', deliveryKind: 'signed', callbackUrl: url,
       conversationId: 'conversation-a', eventName: input.name, activatedAt: expect.any(String), expiresAt: expect.any(String),
     });
     expect(JSON.stringify(subscriptions)).not.toMatch(/encrypted_secret|providerUserId|whsec_/);
@@ -91,6 +92,74 @@ it('shows only the selected owner’s subscriptions and delivery metadata, and k
     expect(newSubscription.body.result.id).not.toBe(id);
   } finally {
     releaseVerification?.();
+    await fixture.runtime.dispose();
+  }
+}, 20_000);
+
+it('shows redacted webhook details and the latest retained outcome through the authenticated API', async () => {
+  const host = 'routine.example.test';
+  const routineUrl = `https://${host}/automations/webhook/private-routine`;
+  const senderKey = 'synthetic-routine-key';
+  const fixture = await clerkRuntime(undefined, { WEBHOOK_ROUTINE_HOST: host });
+  try {
+    const owner = await fixture.issue({ email: 'luccamordente@gmail.com' });
+    const other = await fixture.issue({ email: 'other@example.test' });
+    await fixture.db.batch([
+      fixture.db.prepare("UPDATE users SET clerk_user_id = 'user_lucca' WHERE id = ?").bind(owner.userId),
+      fixture.db.prepare("UPDATE users SET clerk_user_id = 'user_other' WHERE id = ?").bind(other.userId),
+    ]);
+    const { cookie } = await fixture.session();
+    const otherSession = await fixture.session('user_other');
+    const headers = { cookie };
+    const connectionId = owner.connections[0];
+    const conversationId = '5511999999999';
+    const name = 'manage_webhook_subscription';
+    const registered = await fixture.rpc(owner.accessToken, 'tools/call', {
+      name, arguments: { operation: 'subscribe', url: routineUrl, senderKey, filter: { connectionId, conversationId } },
+    }, { 'Mcp-Name': name });
+    expect(registered.body.result).toMatchObject({
+      structuredContent: { data: { subscriptionId: expect.stringMatching(/^sub_/) } },
+    });
+    const id: string = registered.body.result.structuredContent.data.subscriptionId;
+    const path = (connection: string) => '/connections/api/connections/' + connection + '/subscriptions';
+    const detailPath = path(connectionId) + '/' + id;
+    const now = Date.now();
+    for (const [index, state, result] of [[0, 'failed', 'delivery_unknown'], [1, 'accepted', 'http_2xx']] as const) {
+      const sourceId = crypto.randomUUID();
+      const receivedAt = now - index * 1000;
+      await fixture.db.batch([
+        fixture.db.prepare('INSERT INTO event_sources (id, connection_id, message_id, received_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+          .bind(sourceId, connectionId, 'message-' + index, receivedAt, receivedAt + 86_400_000),
+        fixture.db.prepare('INSERT INTO event_deliveries (id, source_id, subscription_id, event_id, state, received_at, deadline_at, expires_at, attempts, next_attempt_at, result_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)')
+          .bind(crypto.randomUUID(), sourceId, id, 'event-' + index, state, receivedAt, receivedAt + 3_600_000, receivedAt + 86_400_000, receivedAt, result),
+      ]);
+    }
+
+    const subscription = { id, deliveryKind: 'webhook', destination: { label: 'Webhook', hostname: host }, conversationId, expiresAt: expect.any(String) };
+    const listResponse = await fixture.fetch(path(connectionId), { headers });
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toMatchObject({ subscriptions: [subscription] });
+    const response = await fixture.fetch(detailPath, { headers });
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(JSON.parse(body)).toMatchObject({
+      subscription,
+      deliveries: [
+        { messageId: 'message-0', receivedAt: new Date(now).toISOString(), state: 'failed', result: 'delivery_unknown' },
+        { messageId: 'message-1', state: 'accepted', result: 'http_2xx' },
+      ],
+    });
+    expect(body).not.toContain(routineUrl);
+    expect(body).not.toContain(senderKey);
+    expect(body).not.toContain('callbackUrl');
+    expect((await fixture.fetch(detailPath, { headers: { cookie: otherSession.cookie } })).status).toBe(404);
+    expect((await fixture.fetch(path(owner.connections[1]) + '/' + id, { headers })).status).toBe(404);
+
+    await fixture.db.prepare("UPDATE webhook_destinations SET grant_id = 'unmatched-grant' WHERE user_id = ?").bind(owner.userId).run();
+    const missing = await (await fixture.fetch(detailPath, { headers })).json();
+    expect(missing).toMatchObject({ subscription: { id, deliveryKind: 'webhook', destination: null } });
+    expect(JSON.stringify(missing)).not.toContain('callbackUrl');
+  } finally {
     await fixture.runtime.dispose();
   }
 }, 20_000);

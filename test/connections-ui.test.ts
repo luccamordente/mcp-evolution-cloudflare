@@ -303,6 +303,8 @@ it('shows subscription details and delivery results for the selected connection'
     ...item,
     id: 'sub_' + 'b'.repeat(64),
     appName: 'Fixture alerts',
+    deliveryKind: 'webhook',
+    destination: null,
     conversationId: '120000000000000001@g.us',
     authorization: 'unavailable',
   };
@@ -350,6 +352,9 @@ it('shows subscription details and delivery results for the selected connection'
     filteredRow.querySelector('summary')!.click();
     await vi.waitFor(() => expect(row.querySelector('.subscription-deliveries')?.textContent).toContain('Resposta HTTP 410'));
     await vi.waitFor(() => expect(filteredRow.textContent).toContain('Nenhuma entrega registrada nas últimas 24 horas.'));
+    expect(filteredRow.querySelector('.subscription-facts')?.textContent).toContain('Webhook');
+    expect(filteredRow.querySelector('.subscription-url')?.textContent).toBe('Destino indisponível');
+    expect(filteredRow.querySelector('[data-latest-webhook-delivery]')?.textContent).toBe('Nenhuma entrega recente');
     expect(row.open).toBe(true);
     expect(row.querySelector('.subscription-body h4')?.textContent).toBe('Entregas nas últimas 24 horas');
     expect(row.querySelector('.subscription-deliveries')?.textContent).toContain('message-fixture');
@@ -374,5 +379,46 @@ it('shows subscription details and delivery results for the selected connection'
     document.querySelector<HTMLButtonElement>('[data-select="two"]')!.click();
     await vi.waitFor(() => expect(section.textContent).toContain('Nenhuma assinatura vigente nesta conexão.'));
     expect(section.textContent).not.toContain(item.callbackUrl);
+  } finally { dom.window.close(); }
+});
+
+it('uses the expanded webhook subscription activity for the latest delivery and keeps it when loading older results', async () => {
+  const item = {
+    id: 'sub_' + 'c'.repeat(64), appName: 'Fixture webhook', deliveryKind: 'webhook',
+    destination: { label: 'Webhook', hostname: 'routine.example.test' },
+    eventName: 'message.received', conversationId: '120000000000000001@g.us', state: 'active',
+    authorization: 'valid', authorizationId: 'grant-reference',
+    activatedAt: '2026-11-23T13:00:00Z', expiresAt: '2026-11-30T13:00:00Z',
+  };
+  const path = '/connections/api/connections/one/subscriptions';
+  const detailPath = path + '/' + item.id;
+  const latest = { state: 'failed', result: 'delivery_unknown', attempts: 1, receivedAt: '2026-11-25T13:00:00Z' };
+  const older = { state: 'accepted', result: 'http_2xx', attempts: 1, receivedAt: item.activatedAt };
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    switch (String(input)) {
+      case '/connections/data': return Response.json({ connections: [connected] });
+      case '/connections/authorizations': return Response.json({ authorizations: [] });
+      case path: return Response.json({ subscriptions: [item] });
+      case detailPath: return Response.json({ subscription: item, deliveries: [latest], nextCursor: 'older' });
+      case detailPath + '?cursor=older': return Response.json({ subscription: item, deliveries: [older] });
+      default: throw new Error('Unexpected request: ' + input);
+    }
+  });
+  const dom = openWorkspace(fetcher);
+  try {
+    const { document } = dom.window;
+    await vi.waitFor(() => expect(document.querySelector('[data-subscription]')).not.toBeNull());
+    const row = document.querySelector<HTMLDetailsElement>('[data-subscription]')!;
+    expect(fetcher.mock.calls.filter(([url]) => url === detailPath)).toHaveLength(0);
+    row.querySelector('summary')!.click();
+    const outcome = row.querySelector('[data-latest-webhook-delivery]');
+    await vi.waitFor(() => expect(outcome?.textContent).toContain('Resultado desconhecido'));
+    expect(row.querySelector('.subscription-url')?.textContent).toBe(item.destination.hostname);
+    expect(outcome?.querySelector('time')?.dateTime).toBe(latest.receivedAt);
+    expect(outcome?.textContent).not.toContain('Aceita');
+    row.querySelector<HTMLButtonElement>('[data-load-deliveries]')!.click();
+    await vi.waitFor(() => expect(row.querySelectorAll('.subscription-deliveries li')).toHaveLength(2));
+    expect(outcome?.textContent).toContain('Resultado desconhecido');
+    expect(fetcher.mock.calls.filter(([url]) => url === detailPath)).toHaveLength(1);
   } finally { dom.window.close(); }
 });

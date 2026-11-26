@@ -86,6 +86,11 @@ export async function cleanupEventSubscriptions(db: D1Database, now = Date.now()
     db.prepare("UPDATE event_subscriptions SET encrypted_secret = NULL, secret_hash = NULL, encrypted_previous_secret = NULL, previous_secret_until = NULL, verified_until = 0 WHERE expires_at <= ? OR state IN ('cancelled','revoked')").bind(now),
     db.prepare('DELETE FROM event_subscriptions WHERE expires_at <= ?').bind(now-86400000),
     db.prepare('UPDATE webhook_destinations SET encrypted_key = NULL, version = version + 1 WHERE encrypted_key IS NOT NULL AND grant_expires_at <= ?').bind(now),
+    db.prepare(`UPDATE webhook_destinations SET encrypted_key = NULL, version = version + 1
+      WHERE id GLOB 'mcp_*' AND encrypted_key IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM event_subscriptions s WHERE s.destination_id = webhook_destinations.id AND s.state = 'active' AND s.expires_at > ?)`).bind(now),
+    db.prepare(`DELETE FROM webhook_destinations WHERE id GLOB 'mcp_*' AND NOT EXISTS (
+      SELECT 1 FROM event_subscriptions s WHERE s.destination_id = webhook_destinations.id)`),
     db.prepare('DELETE FROM event_grant_revocations WHERE expires_at <= ?').bind(now),
   ]);
 }

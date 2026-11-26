@@ -1,10 +1,8 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { encryptToken } from '../src/lib/crypto';
 import { eventRuntime } from './helpers/mcp-events-runtime';
 
 const host = 'routine.example.test';
 const key = 'synthetic-routine-key';
-const encryptionKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const tool = 'manage_webhook_subscription';
 const conversationId = '5511999999999';
 const otherConversation = '5511888888888';
@@ -27,16 +25,11 @@ async function watch() {
   const owner = await fixture.issue({ email });
   const connectionId = owner.connections[0];
   const hook = await fixture.webhook(connectionId);
-  const destinationId = crypto.randomUUID();
-  const url = `https://${host}/automations/webhook/${destinationId}`;
-  await fixture.db.prepare(`INSERT INTO webhook_destinations
-    (id,user_id,connection_id,grant_id,label,url,hostname,conversation_ids,encrypted_key)
-    VALUES (?,?,?,?,'Routine',?,?,?,?)`).bind(destinationId, owner.userId, connectionId, owner.grantId,
-    url, host, JSON.stringify([conversationId, otherConversation]), await encryptToken(key, encryptionKey)).run();
+  const url = `https://${host}/automations/webhook/${crypto.randomUUID()}`;
   const call = async (args: Record<string, unknown>) => (await fixture.rpc(owner.accessToken, 'tools/call',
     { name: tool, arguments: args }, { 'Mcp-Name': tool })).body;
   const filter = { connectionId, conversationId };
-  const subscription = await call({ operation: 'subscribe', destinationId, filter });
+  const subscription = await call({ operation: 'subscribe', url, senderKey: key, filter });
   expect(subscription).toMatchObject({ result: { structuredContent: { data: { subscriptionId: expect.stringMatching(/^sub_/) } } } });
   const subscriptionId: string = subscription.result.structuredContent.data.subscriptionId;
   async function emit(id: string, chat: string, senderAlt?: string) {
@@ -48,7 +41,7 @@ async function watch() {
     expect(response.status).toBe(202);
     return fixture.published.splice(0);
   }
-  return { owner, url, filter, destinationId, subscriptionId, call, emit };
+  return { owner, url, filter, subscriptionId, call, emit };
 }
 
 function delivery(id: unknown) {
@@ -103,13 +96,13 @@ it('retries a receiver rate limit with the same event and ends an ambiguous subs
 });
 
 it('uses the current destination key for queued work and drops pending content after grant revocation', async () => {
-  const { owner, destinationId, emit } = await watch();
+  const { owner, url, filter, call, emit } = await watch();
   const jobs = await emit('before-rotation', conversationId);
   expect(jobs).toHaveLength(1);
   const initialRequests = requests.length;
   const newKey = 'rotated-routine-key';
-  await fixture.db.prepare('UPDATE webhook_destinations SET encrypted_key = ?, version = version + 1 WHERE id = ?')
-    .bind(await encryptToken(newKey, encryptionKey), destinationId).run();
+  const renewal = await call({ operation: 'subscribe', url, senderKey: newKey, filter });
+  expect(renewal.result.isError).toBeFalsy();
   receiver = async () => Response.json({ status: 200, body: '' });
   await fixture.queue(jobs);
   expect(requests.slice(initialRequests)).toEqual([expect.objectContaining({ key: newKey })]);

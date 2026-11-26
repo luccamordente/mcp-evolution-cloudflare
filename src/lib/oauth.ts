@@ -52,7 +52,7 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
         if (auth) {
           const oauth = getOAuthApi(oauthOptions(resourceBaseUrl), env);
           registerMcpEvents(server, env, user, auth, oauth);
-          await registerWebhookSubscriptionTool(server, env, user, auth, oauth);
+          registerWebhookSubscriptionTool(server, env, user, auth, oauth);
         }
         return serveMcpHttp(request, server, mcpBodyLimit(env), auth ? {
           authInfo: {

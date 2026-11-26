@@ -279,7 +279,7 @@ A migration `0013_connection_last_connected_at.sql` acrescenta um horário UTC o
 
 ## Destinos de webhook para clientes sem MCP Events
 
-A migration `0015_webhook_destinations.sql` guarda destinos do titular com OAuth grant, conexão, conversas autorizadas, URL, credencial cifrada e versão. A sessão Clerk e as verificações de origem e CSRF protegem as mutações do painel. O cadastro do primeiro destino habilita a ferramenta para aquela autorização quando o cliente não está identificado como compatível com MCP Events. O painel exibe o nome, o host e o ID opaco do destino.
+A ferramenta `manage_webhook_subscription` recebe a URL e a chave da rotina via MCP HTTP autenticado. O Worker valida a autorização OAuth e a posse da conexão. Cada assinatura criada pela ferramenta tem um destino interno na tabela da migration `0015_webhook_destinations.sql`. O destino guarda a credencial cifrada e a versão. Renovar com o mesmo filtro e URL atualiza a mesma assinatura e pode substituir a chave.
 
 A assinatura guarda o destino e uma única conversa. O ingresso reutiliza o filtro de conversa antes de persistir conteúdo ou publicar na fila. O consumidor confere a versão do destino e a autorização antes da entrega. A desativação do destino, do titular ou da autorização elimina a chave e cancela entregas pendentes. As assinaturas MCP Events continuam usando verificação e assinatura Standard Webhooks.
 

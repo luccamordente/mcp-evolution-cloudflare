@@ -268,9 +268,9 @@ nova alteração é necessária.
 
 ## Assinaturas por webhook para clientes sem MCP Events
 
-O HTTP autenticado pode anunciar uma única ferramenta, `manage_webhook_subscription`. Ela é destinada a clientes sem suporte a MCP Events. A autorização OAuth precisa de `mcp:read` e de um destino configurado pelo titular em **Conexões**. Clientes identificados como compatíveis com MCP Events usam os métodos `events/*`.
+O HTTP autenticado anuncia `manage_webhook_subscription` quando o host de rotinas está configurado e a autorização OAuth inclui `mcp:read`. Clientes identificados como compatíveis com MCP Events usam os métodos `events/*`. Use a ferramenta quando o usuário pedir acompanhamento e o cliente não oferecer MCP Events.
 
-- `operation: "subscribe"` exige `destinationId` e `filter: { connectionId, conversationId }`. Use uma conversa aprovada no destino. O retorno inclui `subscriptionId`, o filtro efetivo e `refreshBefore`. Repita a chamada antes desse horário para renovar. A vigência padrão e máxima é de sete dias e `ttlMs` permite solicitar um prazo menor.
-- `operation: "unsubscribe"` exige `subscriptionId` e encerra a assinatura para a mesma autorização. O titular também pode encerrar a assinatura no painel.
+- `operation: "subscribe"` exige `url`, `senderKey` e `filter: { connectionId, conversationId }`. Use a URL HTTPS da rotina, a chave sem o prefixo `Bearer` e uma conversa exata de uma conexão própria. O resultado inclui `subscriptionId`, o filtro efetivo e `refreshBefore`. Repita a operação para renovar ou substituir a chave. A vigência padrão e máxima é de sete dias. Use `ttlMs` para solicitar um prazo menor.
+- `operation: "unsubscribe"` exige `subscriptionId` e encerra a assinatura para a mesma autorização.
 
-Cadastre a URL e a chave da rotina no painel. A ferramenta recebe apenas o ID do destino. O evento mantém o envelope `message.received` e entrega somente mensagens recebidas na conversa após a ativação. Use `get_message` se a prévia for insuficiente.
+A chave é cifrada e fica fora dos resultados da ferramenta. O evento `message.received` contém a prévia limitada e os IDs das novas mensagens recebidas. Use `get_message` se a prévia for insuficiente.

@@ -58,7 +58,7 @@ const receiver = createHttpsServer({
     localAddress: request.socket.localAddress, headers: request.headers,
     bodyBase64: Buffer.concat(body).toString('base64'),
   });
-  if (request.url === '/redirect') {
+  if (request.url === '/redirect' || request.url === '/automations/webhook/redirect') {
     response.writeHead(302, { location: 'https://127.0.0.1/redirect-target' }).end('redirect');
   } else if (request.url === '/large-response') {
     response.writeHead(200).end('x'.repeat(16 * 1024 + 1));

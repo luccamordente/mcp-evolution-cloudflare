@@ -7,6 +7,8 @@ export interface Env {
   DB: D1Database;
   EVENT_DELIVERIES?: Queue<string>;
   CALLBACK_SENDER?: DurableObjectNamespace<CallbackSender>;
+  WEBHOOK_ROUTINE_HOST?: string;
+  WEBHOOK_NATIVE_CLIENT_IDS?: string;
   OAUTH_KV?: KVNamespace;
   AI?: Pick<Ai, 'run' | 'toMarkdown'>;
   EVOLUTION_BASE_URL: string;

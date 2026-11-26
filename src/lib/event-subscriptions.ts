@@ -12,6 +12,8 @@ type SubscriptionRecord = EventPrincipal & {
   eventName: 'message.received';
   conversationId: string | null;
   callbackUrl: string;
+  destinationLabel: string | null;
+  destinationHostname: string | null;
   activatedAt: number;
   expiresAt: number;
   state: 'active' | 'cancelled' | 'revoked';
@@ -89,16 +91,18 @@ export async function stopEventSubscription(db: D1Database, scope: Scope, id: st
 }
 
 const subscriptionProjection = `s.id, s.user_id AS userId, s.connection_id AS connectionId, s.callback_url AS callbackUrl,
+  d.label AS destinationLabel, d.hostname AS destinationHostname,
   s.provider_user_id AS providerUserId, s.grant_id AS grantId, s.client_id AS clientId, s.resource, s.event_name AS eventName,
   s.conversation_id AS conversationId, s.activated_at AS activatedAt, s.expires_at AS expiresAt, s.state`;
 const ownerJoins = `JOIN whatsapp_connections c ON c.id = s.connection_id AND c.user_id = s.user_id
   JOIN users u ON u.id = s.user_id AND u.status = 'active'`;
+const subscriptionJoins = `${ownerJoins} LEFT JOIN webhook_destinations d ON d.id = s.destination_id AND d.user_id = s.user_id AND d.connection_id = s.connection_id AND d.grant_id = s.grant_id`;
 const visibleSubscriptions = `s.user_id = ?1 AND s.connection_id = ?2 AND s.expires_at > ?3
   AND s.activated_at IS NOT NULL AND s.state != 'pending'`;
 
 export async function listEventSubscriptions(db: D1Database, scope: Scope, recent: boolean, cursor?: Cursor, now = Date.now()) {
   const group = recent ? "(s.state != 'active' OR s.expires_at <= ?7)" : "s.state = 'active' AND s.expires_at > ?7";
-  const { results } = await db.prepare(`SELECT ${subscriptionProjection} FROM event_subscriptions s ${ownerJoins}
+  const { results } = await db.prepare(`SELECT ${subscriptionProjection} FROM event_subscriptions s ${subscriptionJoins}
     WHERE ${visibleSubscriptions} AND ${group} AND (?4 IS NULL OR (s.expires_at, s.id) < (?4, ?5))
     ORDER BY s.expires_at DESC, s.id DESC LIMIT ?6`)
     .bind(scope.userId, scope.connectionId, now - retention, cursor?.time ?? null, cursor?.id ?? null, pageSize + 1, now).all<SubscriptionRecord>();
@@ -108,7 +112,7 @@ export async function listEventSubscriptions(db: D1Database, scope: Scope, recen
 }
 
 export async function getEventSubscription(db: D1Database, scope: Scope, id: string, now = Date.now()) {
-  return db.prepare(`SELECT ${subscriptionProjection} FROM event_subscriptions s ${ownerJoins} WHERE ${visibleSubscriptions} AND s.id = ?4`)
+  return db.prepare(`SELECT ${subscriptionProjection} FROM event_subscriptions s ${subscriptionJoins} WHERE ${visibleSubscriptions} AND s.id = ?4`)
     .bind(scope.userId, scope.connectionId, now - retention, id).first<SubscriptionRecord>();
 }
 
@@ -130,7 +134,10 @@ export async function describeEventSubscriptions(rows: SubscriptionRecord[], oau
       : grant && matchesEventGrant(grant, row, now) ? 'valid' : 'inactive';
     return {
       id: row.id, appName: clients.get(row.clientId) ?? 'Aplicativo não identificado', authorizationId: row.grantId,
-      callbackUrl: row.callbackUrl, eventName: row.eventName, conversationId: row.conversationId,
+      ...(row.destinationLabel && row.destinationHostname
+        ? { destination: { label: row.destinationLabel, hostname: row.destinationHostname } }
+        : { callbackUrl: row.callbackUrl }),
+      eventName: row.eventName, conversationId: row.conversationId,
       activatedAt: new Date(row.activatedAt).toISOString(),
       ...(state === 'active' ? { expiresAt: new Date(row.expiresAt).toISOString() } : { endedAt: new Date(row.expiresAt).toISOString() }),
       state, authorization,
@@ -148,7 +155,8 @@ type DeliveryRecord = {
 };
 
 export async function listEventSubscriptionDeliveries(db: D1Database, scope: Scope, id: string, cursor?: Cursor, now = Date.now()) {
-  const { results } = await db.prepare(`SELECT d.id, m.message_id AS messageId, d.received_at AS receivedAt, d.state, d.attempts, d.result_code AS result
+  const { results } = await db.prepare(`SELECT d.id, m.message_id AS messageId, d.received_at AS receivedAt, d.state, d.attempts,
+    NULLIF(d.result_code, 'sending_bearer') AS result
     FROM event_subscriptions s ${ownerJoins} JOIN event_deliveries d ON d.subscription_id = s.id
     LEFT JOIN event_sources m ON m.id = d.source_id AND m.connection_id = s.connection_id AND m.expires_at > ?5
     WHERE ${visibleSubscriptions} AND s.id = ?4 AND d.expires_at > ?5 AND (?6 IS NULL OR (d.received_at, d.id) < (?6, ?7))

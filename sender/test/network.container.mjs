@@ -30,7 +30,7 @@ async function ready(url) {
 }
 function startSender(trustCertificate = true) {
   const id = docker('run', '--detach', '--rm', '--network', network, '--dns', '93.184.216.20',
-    '--publish', '127.0.0.1::8080', '--env', `CALLBACK_SENDER_TOKEN=${token}`,
+    '--publish', '127.0.0.1::8080', '--env', `CALLBACK_SENDER_TOKEN=${token}`, '--env', 'WEBHOOK_ROUTINE_HOST=callback.test',
     ...(trustCertificate ? ['--env', 'NODE_EXTRA_CA_CERTS=/fixtures/cert.pem'] : []),
     '--mount', `type=bind,source=${fixtures},target=/fixtures,readonly`, image);
   containers.push(id);
@@ -70,9 +70,12 @@ const headers = {
   'webhook-signature': 'v1,signature1 v1,signature2', 'X-MCP-Subscription-Id': 'sub_docker',
 };
 async function send(url, body = '{"text":"Olá 👩🏽‍💻\\n"}', senderOrigin = origin, deadline=Date.now()+45000) {
+  return sendRequest({ url, body, headers }, senderOrigin, deadline);
+}
+async function sendRequest(input, senderOrigin = origin, deadline = Date.now() + 45000) {
   const response = await fetch(`${senderOrigin}/send`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json','x-wapilot-deadline':String(deadline) },
-    body: JSON.stringify({ url, body, headers }),
+    body: JSON.stringify(input),
   });
   return { status: response.status, body: await response.json() };
 }
@@ -91,6 +94,36 @@ test('connects to the approved IP with original TLS identity, exact body and sig
   assert.equal(request.headers.authorization, undefined);
   assert.equal(request.headers.apikey, undefined);
   assert.equal(request.headers['x-wapilot-deadline'], undefined);
+});
+
+test('sends the receiver key and original JSON only to the configured routine endpoint', async () => {
+  const body = '{"eventId":"evt_docker"}';
+  const key = 'synthetic-receiver-key';
+  const path = '/automations/webhook/routine_1';
+  const base = { kind: 'bearer', body, key };
+  const before = (await observed()).callbacks.length;
+  assert.deepEqual(await sendRequest({ ...base, url: `https://wrong.test${path}` }), {
+    status: 400, body: { error: 'destination_blocked' },
+  });
+  assert.deepEqual(await sendRequest({ ...base, url: `https://callback.test${path}` }), {
+    status: 200, body: { status: 202, body: '' },
+  });
+  const callbacks = (await observed()).callbacks;
+  assert.equal(callbacks.length, before + 1);
+  const request = callbacks.at(-1);
+  assert.equal(request.path, path);
+  assert.equal(request.headers.authorization, `Bearer ${key}`);
+  assert.equal(request.headers['webhook-signature'], undefined);
+  assert.equal(request.headers['x-wapilot-deadline'], undefined);
+  assert.equal(request.bodyBase64, Buffer.from(body).toString('base64'));
+});
+
+test('returns the bearer receiver redirect without forwarding its key to the redirected URL', async () => {
+  const before = (await observed()).callbacks.length;
+  assert.deepEqual(await sendRequest({
+    kind: 'bearer', url: 'https://callback.test/automations/webhook/redirect', body: '{}', key: 'synthetic-receiver-key',
+  }), { status: 200, body: { status: 302, body: '' } });
+  assert.equal((await observed()).callbacks.length, before + 1);
 });
 
 test('rejects private and mixed DNS answers without accessing a receiver', async () => {

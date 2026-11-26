@@ -5,8 +5,8 @@ import { connectionsPage } from '../src/ui/connections';
 const connected = { id: 'one', friendlyName: 'Fixture', state: 'connected', isDefault: true };
 const qr = 'data:image/png;base64,c3ludGhldGljLXFy';
 
-function openWorkspace(fetcher: typeof fetch, hash = 'dashboard') {
-  return new JSDOM(connectionsPage({ id: 'user-1', email: 'user@example.test', claims: {} }), {
+function openWorkspace(fetcher: typeof fetch, hash = 'dashboard', webhookDestinations = false) {
+  return new JSDOM(connectionsPage({ id: 'user-1', email: 'user@example.test', claims: {} }, '', webhookDestinations), {
     url: 'https://example.test/connections#' + hash,
     runScripts: 'dangerously',
     beforeParse(window) {
@@ -15,6 +15,44 @@ function openWorkspace(fetcher: typeof fetch, hash = 'dashboard') {
     },
   });
 }
+
+it('configures a webhook destination for the selected connection and displays a redacted summary', async () => {
+  const url = 'https://api2.cursor.sh/automations/webhook/fixture';
+  const key = 'synthetic-sender-key';
+  const path = '/connections/api/connections/one/webhook-destinations';
+  const destination = { id: 'opaque-destination-id', label: 'Fixture webhook', hostname: 'api2.cursor.sh', grantId: 'grant', conversationIds: ['120363000000001@g.us'], state: 'active' };
+  let saved = false;
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === '/connections/data') return Response.json({ connections: [connected] });
+    if (String(input) === '/connections/authorizations') return Response.json({ authorizations: [{ id: 'grant', clientName: 'Fixture app', scopes: ['mcp:read'] }] });
+    if (String(input) === path && init?.method === 'POST') { saved = true; return Response.json({ destination }, { status: 201 }); }
+    if (String(input) === path) return Response.json({ destinations: saved ? [destination] : [] });
+    return Response.json({ subscriptions: [] });
+  });
+  const dom = openWorkspace(fetcher, 'dashboard', true);
+  try {
+    const { document, Event } = dom.window;
+    const section = document.querySelector<HTMLElement>('#webhook-destinations')!;
+    await vi.waitFor(() => expect(section.hidden).toBe(false));
+    const form = document.querySelector<HTMLFormElement>('#webhook-destination-form')!;
+    await vi.waitFor(() => expect(form.querySelector('option[value=grant]')).not.toBeNull());
+    form.querySelector<HTMLInputElement>('[name=label]')!.value = destination.label;
+    form.querySelector('select')!.value = destination.grantId;
+    form.querySelector<HTMLInputElement>('[name=url]')!.value = url;
+    const keyField = form.querySelector<HTMLInputElement>('[data-webhook-key]')!;
+    keyField.value = key;
+    form.querySelector<HTMLTextAreaElement>('[name=conversationIds]')!.value = destination.conversationIds.join('\n');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(keyField.value).toBe('');
+    await vi.waitFor(() => expect(section.textContent).toContain(destination.id));
+    expect(section.textContent).toContain(destination.hostname);
+    expect(section.innerHTML).not.toContain(url);
+    expect(section.innerHTML).not.toContain(key);
+    const request = fetcher.mock.calls.find(([input, init]) => input === path && init?.method === 'POST')?.[1];
+    expect(request?.headers).toMatchObject({ 'X-WaPilot-CSRF': 'fixture-csrf' });
+    expect(JSON.parse(String(request?.body))).toEqual({ url, key, label: destination.label, grantId: destination.grantId, conversationIds: destination.conversationIds });
+  } finally { dom.window.close(); }
+});
 
 it('keeps browser sign-out inside the account disclosure and session messages outside the header', () => {
   const dom = openWorkspace(async input => Response.json(String(input) === '/connections/data'

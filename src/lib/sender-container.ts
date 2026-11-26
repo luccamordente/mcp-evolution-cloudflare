@@ -30,8 +30,9 @@ export class CallbackSender extends DurableObject<Env> {
         const signal = deadline.signal;
         try {
           if (!container.running) {
+            const routineHost = this.env.WEBHOOK_ROUTINE_HOST;
             container.start({ image: container.images.sender, instance: 'lite', enableInternet: true,
-              env: { CALLBACK_SENDER_TOKEN: await this.#token() } });
+              env: { CALLBACK_SENDER_TOKEN: await this.#token(), ...(routineHost ? { WEBHOOK_ROUTINE_HOST: routineHost } : {}) } });
           }
           await container.setInactivityTimeout(IDLE_MS);
           while (!signal.aborted) {

@@ -1,6 +1,6 @@
 import { ingestEventDeliveries } from './lib/event-deliveries';
 import { invalidateEventGrant } from './lib/mcp-events';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { authenticateBrowserRequest, appendAuthHeaders, browserSessionScripts, safeReturnPath, authResponse, AuthError, browserCsrfCookie, assertBrowserMutation } from './lib/auth';
 import { authPage, SESSION_CONTROL } from './ui/auth';
 import { audit, createConnection, ensureUser, findConnectionByFriendlyName, findConnectionByInstanceId, getConnection, listConnections, listRecentAudit, removeConnection, repointConnection, revealConnectionToken, setDefaultConnection, updateConnection, validateWebhookEvent } from './lib/db';
@@ -11,7 +11,8 @@ import { connectionsPage } from './ui/connections';
 import { adminPage } from './ui/admin';
 import { buildAdminSnapshot, isAdminOperator, type AdminOAuthReader } from './lib/admin';
 import { authorizationListOptions, isValidAuthorizationId, listAuthorizations } from './lib/authorizations';
-import { describeEventSubscriptions, eventPageCursor, getEventSubscription, isEventSubscriptionId, listEventSubscriptionDeliveries, listEventSubscriptions, stopEventSubscription } from './lib/event-subscriptions';
+import { describeEventSubscriptions, eventPageCursor, findEventGrants, getEventSubscription, isEventSubscriptionId, listEventSubscriptionDeliveries, listEventSubscriptions, matchesEventGrant, stopEventSubscription } from './lib/event-subscriptions';
+import { changeWebhookDestination, isNativeWebhookClient, listWebhookDestinations, saveWebhookDestination, WebhookDestinationError } from './lib/webhook-destinations';
 import { activateInvitedUser, inviteUser, InvitationError } from './lib/invitations';
 import { z } from 'zod';
 import { serveAttachment } from './lib/attachments';
@@ -87,7 +88,7 @@ app.get('/connections', async (c) => {
     return c.html(adminProvisionPage(browserSessionScripts(c.env)));
   }
   c.header('Cache-Control', 'no-store');
-  return c.html(connectionsPage(auth, browserSessionScripts(c.env)));
+  return c.html(connectionsPage(auth, browserSessionScripts(c.env), Boolean(c.env.WEBHOOK_ROUTINE_HOST)));
 });
 
 /**
@@ -183,6 +184,79 @@ async function authorizationApi(c: any, revokeId?: string): Promise<Response> {
 app.get('/api/authorizations', (c) => authorizationApi(c));
 app.delete('/api/authorizations/:id', (c) => authorizationApi(c, c.req.param('id')));
 app.post('/api/authorizations/:id/revoke', (c) => authorizationApi(c, c.req.param('id')));
+
+const webhookDestinationsPath = '/api/connections/:id/webhook-destinations';
+const destinationKey = z.string().min(1).max(1026);
+const destinationInput = z.object({
+  label: z.string().trim().min(1).max(80),
+  grantId: z.string().refine(isValidAuthorizationId),
+  conversationIds: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
+  url: z.string().trim().min(1).max(2048),
+  key: destinationKey,
+}).strict();
+const destinationKeyInput = z.object({ key: destinationKey }).strict();
+
+async function webhookDestinationScope(c: Context<{ Bindings: Env }>, connectionId: string) {
+  const auth = await requireUiAuth(c);
+  if (auth instanceof Response) return auth;
+  const user = await ensureUser(c.env.DB, auth);
+  if (!c.env.WEBHOOK_ROUTINE_HOST || !await getConnection(c.env.DB, user.id, connectionId)) {
+    return c.json({ error: 'Configuração de destinos indisponível nesta conexão.' }, 404);
+  }
+  return { userId: user.id, connectionId, providerUserId: encodeURIComponent(user.email) };
+}
+
+app.get(webhookDestinationsPath, async (c) => {
+  const scope = await webhookDestinationScope(c, c.req.param('id'));
+  if (scope instanceof Response) return scope;
+  return c.json({ destinations: await listWebhookDestinations(c.env, scope) });
+});
+
+app.post(webhookDestinationsPath, async (c) => {
+  const scope = await webhookDestinationScope(c, c.req.param('id'));
+  if (scope instanceof Response) return scope;
+  const input = destinationInput.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: 'Confira os dados e as conversas do destino.' }, 400);
+  try {
+    const oauth = await browserOAuthApi(c.env, c.req.url);
+    const { grantId } = input.data;
+    const grant = (await findEventGrants(oauth, scope.providerUserId, [grantId])).get(grantId);
+    const resource = `${(c.env.MCP_PUBLIC_URL ?? new URL(c.req.url).origin).replace(/\/$/, '')}/mcp`;
+    if (!grant || !matchesEventGrant(grant, { ...scope, grantId, clientId: grant.clientId, resource }, Date.now())) {
+      return c.json({ error: 'Autorização do WaPilot não encontrada.' }, 404);
+    }
+    if (isNativeWebhookClient(c.env, grant.clientId)) {
+      return c.json({ error: 'Este aplicativo já pode assinar eventos diretamente.' }, 400);
+    }
+    const grantExpiresAt = grant.expiresAt === undefined ? undefined : grant.expiresAt * 1000;
+    const destination = await saveWebhookDestination(c.env, { ...scope, ...input.data, grantExpiresAt });
+    return c.json({ destination }, 201);
+  } catch (error) {
+    if (error instanceof WebhookDestinationError) return c.json({ error: error.message }, 400);
+    return c.json({ error: 'Não foi possível salvar o destino no WaPilot.' }, 503);
+  }
+});
+
+app.on(['PATCH', 'DELETE'], `${webhookDestinationsPath}/:destinationId`, async (c) => {
+  const scope = await webhookDestinationScope(c, c.req.param('id'));
+  if (scope instanceof Response) return scope;
+  const destinationId = c.req.param('destinationId');
+  let result: boolean;
+  try {
+    if (c.req.method === 'PATCH') {
+      const input = destinationKeyInput.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) return c.json({ error: 'Informe a nova chave do destino.' }, 400);
+      result = await changeWebhookDestination(c.env, { ...scope, destinationId }, { operation: 'rotate', key: input.data.key });
+    } else {
+      result = await changeWebhookDestination(c.env, { ...scope, destinationId }, { operation: 'disable' });
+    }
+  } catch (error) {
+    if (error instanceof WebhookDestinationError) return c.json({ error: error.message }, 400);
+    return c.json({ error: 'Não foi possível alterar o destino no WaPilot.' }, 503);
+  }
+  if (!result) return c.json({ error: 'Destino não encontrado nesta conexão.' }, 404);
+  return c.json({ ok: true });
+});
 
 const subscriptionsPath = '/api/connections/:id/subscriptions';
 app.get(subscriptionsPath, async (c) => {

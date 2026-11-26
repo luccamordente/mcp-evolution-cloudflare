@@ -1,6 +1,6 @@
 # Sender de callbacks do WaPilot
 
-Serviço interno Node 22+, sem dependências, banco, arquivos de negócio ou retries. Executa um único POST HTTPS com corpo e cabeçalhos já preparados pelo Worker. Assinaturas, autorização de usuário, retenção e novas tentativas pertencem ao Worker. Este pacote não deve receber uma rota pública de proxy.
+Serviço interno Node 22+, sem dependências, banco, arquivos de negócio ou retries. Executa um único POST HTTPS com o corpo preparado pelo Worker. Assinaturas, autorização de usuário, retenção e novas tentativas pertencem ao Worker. Este pacote não deve receber uma rota pública de proxy.
 
 ## Contrato HTTP
 
@@ -22,6 +22,8 @@ Serviço interno Node 22+, sem dependências, banco, arquivos de negócio ou ret
 
 Somente essas propriedades e cabeçalhos do envelope são aceitos. Os quatro cabeçalhos de identificação/assinatura são obrigatórios; `Content-Type` é opcional e assume `application/json`. Nomes de cabeçalho são comparados sem distinguir maiúsculas; valores são preservados. O corpo é a string UTF-8 exata que o Worker assinou: o sender não reserializa seu JSON. Headers de OAuth, conexão, prazo e autenticação interna não são encaminhados. A mesma interface atende desafios e notificações, conforme o [perfil OpenAI de MCP Events](https://developers.openai.com/plugins/build/mcp-events).
 
+Para rotinas que usam bearer, o Worker envia `{ "kind": "bearer", "url": "https://receiver.example.com/automations/webhook/example", "body": "{}", "key": "example" }`. O sender constrói `Authorization: Bearer <key>` com a chave do destino e exige correspondência exata com `WEBHOOK_ROUTINE_HOST`, HTTPS na porta padrão e um único identificador no caminho `/automations/webhook/`. A URL aceita somente o caminho da rotina, sem query ou fragmento. Quando `WEBHOOK_ROUTINE_HOST` está ausente, chamadas bearer são bloqueadas. O resultado bearer contém o status HTTP e `body: ""`.
+
 O prazo interno é obrigatório, inteiro positivo e seguro, validado somente após autenticação. Um prazo vencido retorna `504` sem acessar o callback; valor ausente ou inválido retorna `400`. O Node aplica o menor prazo entre esse valor absoluto e seus dez segundos locais, incluindo leitura do envelope, DNS e TLS. Respostas DNS tardias não iniciam conexão; a escrita HTTPS só começa após `secureConnect`, certificado verificado e nova conferência do prazo. Isso independe de cancelamento do chamador. O sender recebe apenas um limite de transporte, sem conhecer assinatura, lease ou eventos.
 
 Uma operação HTTP concluída retorna `200 {"status":202,"body":"..."}`. `status` é o status real do callback, inclusive `3xx`, `410` e `413`; `200` do sender não significa aceite do callback. Respostas acima do limite incluem `bodyTruncated:true`, mantendo somente o prefixo limitado. O verificador de desafios deve rejeitar respostas truncadas. Aceite do callback `2xx` comprova somente recebimento HTTP.
@@ -31,7 +33,7 @@ Erros retornam somente `{"error":"<código>"}`:
 | HTTP | Código | Significado |
 | --- | --- | --- |
 | 400 | `invalid_request` | Contrato, URL, tamanho do corpo ou cabeçalhos inválidos. |
-| 400 | `destination_blocked` | IP literal ou resultado DNS não público. |
+| 400 | `destination_blocked` | Destino bearer fora do escopo permitido ou endereço IP não público. |
 | 401 | `unauthorized` | Autenticação interna ausente ou inválida. |
 | 404 | `not_found` | Método ou caminho não suportado. |
 | 413 | `request_too_large` | Envelope interno acima de 2 MiB. |
@@ -44,7 +46,7 @@ Não registre envelope, corpo da resposta, URL completa, segredos ou assinaturas
 
 A resolução acontece no `lookup` da conexão Node, com todos os endereços validados. Uma resposta DNS mista, com qualquer endereço bloqueado, é recusada. O socket usa somente o endereço escolhido nessa resolução, com seleção automática de família e pooling desativados. O hostname original permanece no Host/SNI e na validação padrão do certificado; o IP conectado também é conferido. Não há redirects, proxy de ambiente nem segunda consulta DNS para conectar. A implementação usa as APIs documentadas de [HTTPS](https://nodejs.org/docs/latest-v22.x/api/https.html) e [conexão TCP](https://nodejs.org/docs/latest-v22.x/api/net.html#socketconnectoptions-connectlistener) do Node completo.
 
-O filtro recusa redes privadas, locais, multicast, documentação, benchmarks e blocos especiais. IPv6 aceita unicast global `2000::/3`, excluindo `2001::/23`, `2001:db8::/32`, `2002::/16` e `3fff::/20`. Isso também recusa endereços mapeados/traduzidos e protocolos especiais. A política é conservadora nos blocos reservados pelo IETF; não usa allowlist de hosts. A lista foi conferida nos registros [IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry) e [IPv6](https://www.iana.org/assignments/iana-ipv6-special-registry) da IANA em 2026-11-07 e precisa acompanhar mudanças de política de egress.
+O filtro recusa redes privadas, locais, multicast, documentação, benchmarks e blocos especiais. IPv6 aceita unicast global `2000::/3`, excluindo `2001::/23`, `2001:db8::/32`, `2002::/16` e `3fff::/20`. Isso também recusa endereços mapeados/traduzidos e protocolos especiais. A lista foi conferida nos registros [IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry) e [IPv6](https://www.iana.org/assignments/iana-ipv6-special-registry) da IANA em 2026-11-07 e precisa acompanhar mudanças de política de egress.
 
 | Item | Limite |
 | --- | --- |

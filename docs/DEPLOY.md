@@ -383,3 +383,9 @@ No deployment, production repair, real WhatsApp send, or key negotiation is perf
 Aplique `0014_event_subscription_stops.sql` antes de publicar a revisão que inclui o painel de assinaturas. A migration cria o marcador de encerramento e os índices usados pelas listas. Ela é aditiva e usa o D1 existente.
 
 Depois de usar o encerramento pelo painel, faça rollback somente para uma versão que consulte o marcador no cadastro e na renovação. Uma versão anterior pode reativar uma assinatura encerrada pelo titular.
+
+## Publicação de destinos de webhook
+
+Aplique somente a migration aditiva `0015_webhook_destinations.sql` antes de publicar o Worker que consulta o novo esquema. Publique a imagem atualizada do sender junto com essa revisão. A imagem aceita as chamadas assinadas existentes e a nova variante bearer.
+
+O fallback fica desativado enquanto `WEBHOOK_ROUTINE_HOST` estiver ausente. Confirme o host e a rota pela URL de uma rotina sintética autorizada. Configure `WEBHOOK_NATIVE_CLIENT_IDS` como array JSON de IDs OAuth verificados de clientes com MCP Events. Aplique os valores ao Worker e aguarde a reinicialização do Container para que o processo receba o host. Confira o caso A6 do [plano de implementação](plans/WEBHOOK-SUBSCRIPTIONS.md#acceptance-tests) antes de divulgar a disponibilidade. Para voltar ao sender anterior, desative o fallback e encerre as entregas bearer pendentes primeiro.

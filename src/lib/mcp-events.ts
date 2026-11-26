@@ -85,6 +85,7 @@ export async function cleanupEventSubscriptions(db: D1Database, now = Date.now()
     db.prepare('UPDATE event_subscriptions SET encrypted_previous_secret = NULL, previous_secret_until = NULL WHERE previous_secret_until <= ?').bind(now),
     db.prepare("UPDATE event_subscriptions SET encrypted_secret = NULL, secret_hash = NULL, encrypted_previous_secret = NULL, previous_secret_until = NULL, verified_until = 0 WHERE expires_at <= ? OR state IN ('cancelled','revoked')").bind(now),
     db.prepare('DELETE FROM event_subscriptions WHERE expires_at <= ?').bind(now-86400000),
+    db.prepare('UPDATE webhook_destinations SET encrypted_key = NULL, version = version + 1 WHERE encrypted_key IS NOT NULL AND grant_expires_at <= ?').bind(now),
     db.prepare('DELETE FROM event_grant_revocations WHERE expires_at <= ?').bind(now),
   ]);
 }
@@ -123,6 +124,21 @@ export async function eventWebhookHeaders(secrets: readonly string[], body: stri
 }
 function callbackError(reason: string): ProtocolError { return new ProtocolError(-32015, 'WaPilot could not verify the callback.', {reason}); }
 
+export async function resolveEventPrincipal(env: Env, user: AuthenticatedUser, auth: OAuthResourceAuth, oauth: Pick<OAuthHelpers, 'unwrapToken'>): Promise<EventPrincipal> {
+  if (!auth.scope.includes('mcp:read')) throw new ProtocolError(-32003, 'WaPilot requires mcp:read to monitor messages.');
+  const summary = await oauth.unwrapToken<{user?:AuthenticatedUser}>(auth.token);
+  if (!summary || !auth.userId || !auth.clientId || summary.userId !== auth.userId || summary.userId !== encodeURIComponent(user.email)
+    || summary.grant.clientId !== auth.clientId || summary.grant.props.user?.email !== user.email
+    || !summary.scope.includes('mcp:read') || summary.scope.slice().sort().join(' ') !== auth.scope.slice().sort().join(' ')
+    || (typeof summary.audience === 'string' ? summary.audience !== auth.audience : !summary.audience?.includes(auth.audience))) {
+    throw new ProtocolError(-32003, 'WaPilot could not verify the authorization.');
+  }
+  const owner = await ensureUser(env.DB, user);
+  const active = await env.DB.prepare("SELECT 1 AS present FROM users u WHERE id = ? AND status = 'active' AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = u.id AND r.grant_id = ? AND r.expires_at > ?)").bind(owner.id, summary.grantId, Date.now()).first();
+  if (!active) throw new ProtocolError(-32003, 'WaPilot access is no longer available.');
+  return {userId:owner.id,providerUserId:summary.userId,grantId:summary.grantId,clientId:auth.clientId,resource:auth.audience};
+}
+
 /** Only the authenticated HTTP handler registers events; stdio uses the shared factory. */
 export function registerMcpEvents(server: McpServer, env: Env, user: AuthenticatedUser, auth: OAuthResourceAuth, oauth: Pick<OAuthHelpers, 'unwrapToken'|'listUserGrants'>): void {
   async function guarded<T>(operation:()=>Promise<T>): Promise<T> {
@@ -131,20 +147,7 @@ export function registerMcpEvents(server: McpServer, env: Env, user: Authenticat
       throw new ProtocolError(-32603,'WaPilot could not complete the event request.');
     }
   }
-  async function principal(): Promise<EventPrincipal> {
-    if (!auth.scope.includes('mcp:read')) throw new ProtocolError(-32003, 'WaPilot requires mcp:read to monitor messages.');
-    const summary = await oauth.unwrapToken<{user?:AuthenticatedUser}>(auth.token);
-    if (!summary || !auth.userId || !auth.clientId || summary.userId !== auth.userId || summary.userId !== encodeURIComponent(user.email)
-      || summary.grant.clientId !== auth.clientId || summary.grant.props.user?.email !== user.email
-      || !summary.scope.includes('mcp:read') || summary.scope.slice().sort().join(' ') !== auth.scope.slice().sort().join(' ')
-      || (typeof summary.audience === 'string' ? summary.audience !== auth.audience : !summary.audience?.includes(auth.audience))) {
-      throw new ProtocolError(-32003, 'WaPilot could not verify the authorization.');
-    }
-    const owner = await ensureUser(env.DB, user);
-    const active = await env.DB.prepare("SELECT 1 AS present FROM users u WHERE id = ? AND status = 'active' AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = u.id AND r.grant_id = ? AND r.expires_at > ?)").bind(owner.id, summary.grantId, Date.now()).first();
-    if (!active) throw new ProtocolError(-32003, 'WaPilot access is no longer available.');
-    return {userId:owner.id,providerUserId:summary.userId,grantId:summary.grantId,clientId:auth.clientId,resource:auth.audience};
-  }
+  const principal = () => resolveEventPrincipal(env, user, auth, oauth);
   async function identity(input: z.infer<typeof unsubscribeSchema>, owner: EventPrincipal) {
     const principalKey = await sha256(JSON.stringify(owner));
     // Preserve omitted connectionId: later default changes cannot repoint this subscription.

@@ -8,6 +8,7 @@ const MAX_BODY_BYTES = 256 * 1024;
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 16 * 1024;
 const TIMEOUT_MS = 10_000;
+const routineHost = process.env.WEBHOOK_ROUTINE_HOST;
 // shortcut: special ranges follow the IANA registry reviewed on 2026-11-07; revisit when egress policy changes.
 const blocked = new BlockList();
 for (const [address, prefix] of [
@@ -34,15 +35,28 @@ function isPublicAddress(address) {
 
 function validateInput(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)
-    || Object.keys(input).some((key) => !['url', 'body', 'headers'].includes(key))
     || typeof input.url !== 'string' || Buffer.byteLength(input.url) > 2048
-    || typeof input.body !== 'string' || Buffer.byteLength(input.body) > MAX_BODY_BYTES
-    || !input.headers || typeof input.headers !== 'object' || Array.isArray(input.headers)) {
+    || typeof input.body !== 'string' || Buffer.byteLength(input.body) > MAX_BODY_BYTES) {
     throw new SenderError(400, 'invalid_request');
   }
   let url;
   try { url = new URL(input.url); } catch { throw new SenderError(400, 'invalid_request'); }
   if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new SenderError(400, 'invalid_request');
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const body = Buffer.from(input.body);
+  if (input.kind === 'bearer') {
+    if (Object.keys(input).some((key) => !['kind', 'url', 'body', 'key'].includes(key))
+      || typeof input.key !== 'string' || !/^[A-Za-z0-9._~+/-]{1,1024}={0,2}$/.test(input.key)) throw new SenderError(400, 'invalid_request');
+    if (hostname !== routineHost || url.port || /[?#]/.test(input.url) || isIP(hostname)
+      || !/^\/automations\/webhook\/[A-Za-z0-9_-]{1,200}$/.test(url.pathname)) {
+      throw new SenderError(400, 'destination_blocked');
+    }
+    return { url, hostname, body, headers: { authorization: `Bearer ${input.key}` }, statusOnly: true };
+  }
+  if (Object.keys(input).some((key) => !['url', 'body', 'headers'].includes(key))
+    || !input.headers || typeof input.headers !== 'object' || Array.isArray(input.headers)) {
+    throw new SenderError(400, 'invalid_request');
+  }
   const requiredHeaders = ['webhook-id', 'webhook-timestamp', 'webhook-signature', 'x-mcp-subscription-id'];
   const allowedHeaders = [...requiredHeaders, 'content-type'];
   const headers = {};
@@ -57,9 +71,8 @@ function validateInput(input) {
       try { validateHeaderValue(name, value); } catch { return true; }
       return name === 'content-type' && value !== 'application/json';
     })) throw new SenderError(400, 'invalid_request');
-  const hostname = url.hostname.replace(/^\[|\]$/g, '');
   if (isIP(hostname) && !isPublicAddress(hostname)) throw new SenderError(400, 'destination_blocked');
-  return { url, hostname, body: Buffer.from(input.body), headers };
+  return { url, hostname, body, headers, statusOnly: false };
 }
 
 function readInput(request, signal) {
@@ -97,7 +110,7 @@ function readInput(request, signal) {
   });
 }
 
-function postCallback({ url, hostname, body, headers }, signal, deadline) {
+function postCallback({ url, hostname, body, headers, statusOnly }, signal, deadline) {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
     let approvedAddress = isIP(hostname) ? hostname : undefined;
@@ -118,6 +131,12 @@ function postCallback({ url, hostname, body, headers }, signal, deadline) {
         });
       },
     }, (incoming) => {
+      incoming.on('error', reject);
+      if (statusOnly) {
+        resolve({ status: incoming.statusCode, body: '' });
+        incoming.destroy();
+        return;
+      }
       const chunks = [];
       let size = 0;
       incoming.on('data', (chunk) => {
@@ -129,7 +148,6 @@ function postCallback({ url, hostname, body, headers }, signal, deadline) {
           incoming.destroy();
         }
       });
-      incoming.on('error', reject);
       incoming.on('end', () => resolve({ status: incoming.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
     });
     outgoing.on('socket', (socket) => {

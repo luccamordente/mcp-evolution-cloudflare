@@ -1,12 +1,20 @@
 import type { Env } from '../types';
 import { decryptToken } from './crypto';
 import { eventAuthorizationValid, eventWebhookHeaders, type EventGrantReader, type EventPrincipal } from './mcp-events';
-import { CallbackSenderError, sendCallback } from './callback-sender';
+import { CallbackSenderError, sendCallback, type CallbackRequest } from './callback-sender';
 import { messageObservationSchema } from './message-observation';
 
 const HOUR = 3600000, DAY = 86400000, LEASE = 60000, MAX_ATTEMPTS = 6;
-type Subscription = {id:string; user_id:string; provider_user_id:string; grant_id:string; client_id:string; resource:string; connection_id:string; activated_at:number; expires_at:number; state:string; encrypted_secret:string|null; encrypted_previous_secret:string|null; previous_secret_until:number|null; callback_url:string};
-type Delivery = {id:string; subscription_id:string; event_id:string; body:string|null; deadline_at:number; lease_until:number; attempts:number; next_attempt_at:number; state:string};
+type Subscription = {id:string; user_id:string; provider_user_id:string; grant_id:string; client_id:string; resource:string; connection_id:string; activated_at:number; expires_at:number; state:string; encrypted_secret:string|null; encrypted_previous_secret:string|null; previous_secret_until:number|null; callback_url:string; destination_id:string|null};
+type Delivery = {id:string; subscription_id:string; event_id:string; body:string; deadline_at:number; lease_until:number; attempts:number};
+type BearerDestination = {url:string; encrypted_key:string; version:number};
+const destinationJoin = `LEFT JOIN webhook_destinations d ON d.id = s.destination_id AND d.user_id = s.user_id
+  AND d.connection_id = s.connection_id AND d.grant_id = s.grant_id`;
+const readyCallback = `((s.destination_id IS NULL AND s.encrypted_secret IS NOT NULL)
+  OR (d.hostname = ? AND d.encrypted_key IS NOT NULL AND (d.grant_expires_at IS NULL OR d.grant_expires_at > ?)))`;
+const uncertainDelivery = `UPDATE event_deliveries SET state = 'failed', body = NULL, lease_token = NULL, lease_until = NULL,
+  result_code = 'delivery_unknown' WHERE state = 'delivering' AND result_code = 'sending_bearer'
+  AND min(lease_until, deadline_at, expires_at) <= ?`;
 function principal(row: Subscription): EventPrincipal { return {userId:row.user_id,providerUserId:row.provider_user_id,grantId:row.grant_id,clientId:row.client_id,resource:row.resource}; }
 function record(value:unknown): Record<string,unknown> {return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string,unknown> : {};}
 function text(value:unknown,limit:number): value is string {return typeof value === 'string' && value.length<=limit && value.trim().length > 0;}
@@ -70,6 +78,7 @@ export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, con
     return;
   }
   const drops={invalid:0,unsupported:0,oversized:0};
+  const callbackHost = env.WEBHOOK_ROUTINE_HOST ?? null;
   if (eventName !== 'Message') {console.log(JSON.stringify({event:'mcp_events_ingress',connectionId:connection.id,...drops,unsupported:resources.length}));return;}
   for (const item of resources) {
     const data=notification(connection.id,item);
@@ -77,8 +86,10 @@ export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, con
     const now=Date.now(), occurred=Date.parse(data.timestamp);
     if (await env.DB.prepare('SELECT id FROM event_sources WHERE connection_id = ? AND message_id = ? AND expires_at > ?').bind(connection.id,data.messageId,now).first()) continue;
     const conversations=conversationIds(item,data.conversationId);
-    const candidates=await env.DB.prepare(`SELECT * FROM event_subscriptions WHERE user_id = ? AND connection_id = ? AND state = 'active' AND expires_at > ? AND activated_at <= ? AND encrypted_secret IS NOT NULL AND (conversation_id IS NULL OR conversation_id IN (${conversations.map(()=>'?').join(',')}))`)
-      .bind(connection.userId,connection.id,now,occurred,...conversations).all<Subscription>();
+    const candidates=await env.DB.prepare(`SELECT s.* FROM event_subscriptions s ${destinationJoin}
+      WHERE s.user_id = ? AND s.connection_id = ? AND s.state = 'active' AND s.expires_at > ? AND s.activated_at <= ?
+      AND ${readyCallback} AND (s.conversation_id IS NULL OR s.conversation_id IN (${conversations.map(()=>'?').join(',')}))`)
+      .bind(connection.userId,connection.id,now,occurred,callbackHost,now,...conversations).all<Subscription>();
     const selected:Subscription[]=[];
     // An unavailable Provider must fail ingress before reserving the source marker.
     for (const row of candidates.results) if (await eventAuthorizationValid(env.DB,oauth,principal(row),connection.id)) selected.push(row);
@@ -88,10 +99,11 @@ export async function ingestEventDeliveries(env:Env, oauth:EventGrantReader, con
     const statements=[env.DB.prepare('INSERT OR IGNORE INTO event_sources (id,connection_id,message_id,received_at,expires_at) VALUES (?,?,?,?,?)').bind(source,connection.id,data.messageId,now,now+DAY)];
     for (const sub of selected) statements.push(env.DB.prepare(`INSERT OR IGNORE INTO event_deliveries (id,source_id,subscription_id,event_id,body,state,received_at,deadline_at,expires_at,next_attempt_at)
       SELECT ?,?,?,?,?, 'pending',?,?,?,? FROM event_sources source JOIN event_subscriptions s ON s.id = ?
-      JOIN users u ON u.id = s.user_id JOIN whatsapp_connections c ON c.id = s.connection_id AND c.user_id = u.id
+      JOIN users u ON u.id = s.user_id JOIN whatsapp_connections c ON c.id = s.connection_id AND c.user_id = u.id ${destinationJoin}
       WHERE source.id = ? AND s.state = 'active' AND s.expires_at > ? AND s.activated_at <= ? AND u.status = 'active'
+      AND ${readyCallback}
       AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = s.user_id AND r.grant_id = s.grant_id AND r.expires_at > ?)`)
-      .bind(crypto.randomUUID(),source,sub.id,eventId,body,now,now+HOUR,now+DAY,now,sub.id,source,now,occurred,now));
+      .bind(crypto.randomUUID(),source,sub.id,eventId,body,now,now+HOUR,now+DAY,now,sub.id,source,now,occurred,callbackHost,now,now));
     await env.DB.batch(statements);
     console.info(JSON.stringify({event:'mcp_events_selection',connectionId:connection.id,selectedSubscriptions:selected.length,outcome:selected.length?'selected':'no_subscriber'}));
     const deliveries=await env.DB.prepare("SELECT id FROM event_deliveries WHERE source_id = ? AND state = 'pending'").bind(source).all<{id:string}>();
@@ -112,18 +124,20 @@ async function publishDelivery(env:Env,id:string,now:number): Promise<boolean> {
 
 async function finish(db:D1Database,id:string,lease:string,state:string,result:string): Promise<void> {
   const now=Date.now();
-  const finished=await db.prepare(`UPDATE event_deliveries SET state = CASE WHEN deadline_at <= ? OR NOT EXISTS (SELECT 1 FROM event_subscriptions s WHERE s.id = event_deliveries.subscription_id AND s.expires_at > ?) THEN 'expired' ELSE ? END,
+  const finished=await db.prepare(`UPDATE event_deliveries SET state = CASE WHEN ? = 'delivery_unknown' THEN 'failed'
+    WHEN deadline_at <= ? OR NOT EXISTS (SELECT 1 FROM event_subscriptions s WHERE s.id = event_deliveries.subscription_id AND s.expires_at > ?) THEN 'expired' ELSE ? END,
     result_code = ?, body = NULL, lease_token = NULL, lease_until = NULL WHERE id = ? AND state = 'delivering' AND lease_token = ? AND lease_until > ? RETURNING state`)
-    .bind(now,now,state,result,id,lease,now).first<{state:string}>();
+    .bind(result,now,now,state,result,id,lease,now).first<{state:string}>();
   if (finished) console.log(JSON.stringify({event:'mcp_events_delivery',state:finished.state,count:1}));
 }
 
 async function enforceDeliveryLimits(db:D1Database,id:string,now:number): Promise<void> {
   const results=await db.batch([
+    db.prepare(`${uncertainDelivery} AND id = ?`).bind(now,id),
     db.prepare("UPDATE event_deliveries SET state = 'expired', body = NULL, result_code = 'deadline', lease_token = NULL, lease_until = NULL WHERE id = ? AND (deadline_at <= ? OR expires_at <= ?) AND state IN ('pending','delivering')").bind(id,now,now),
-    db.prepare("UPDATE event_deliveries SET state = 'failed', body = NULL, result_code = 'attempt_limit', lease_token = NULL, lease_until = NULL WHERE id = ? AND attempts >= ? AND (state = 'pending' OR (state = 'delivering' AND lease_until <= ?))").bind(id,MAX_ATTEMPTS,now),
+    db.prepare("UPDATE event_deliveries SET state = 'failed', body = NULL, result_code = 'attempt_limit', lease_token = NULL, lease_until = NULL WHERE id = ? AND attempts >= ? AND (state = 'pending' OR (state = 'delivering' AND lease_until <= ? AND result_code IS NOT 'sending_bearer'))").bind(id,MAX_ATTEMPTS,now),
   ]);
-  if (results[0].meta.changes || results[1].meta.changes) console.log(JSON.stringify({event:'mcp_events_limits',expired:results[0].meta.changes,failed:results[1].meta.changes}));
+  if (results.some(result => result.meta.changes)) console.log(JSON.stringify({event:'mcp_events_limits',expired:results[1].meta.changes,failed:results[0].meta.changes+results[2].meta.changes}));
 }
 
 /** Queue bodies contain only IDs; ownership of a bounded attempt is conditional in D1. */
@@ -149,12 +163,14 @@ export async function consumeEventDeliveries(batch:MessageBatch<unknown>,env:Env
     await enforceDeliveryLimits(env.DB,id,now);
     const delivery=await env.DB.prepare(`UPDATE event_deliveries SET state = 'delivering', lease_token = ?, lease_until = ?, attempts = attempts+1, published_at = NULL,
       next_attempt_at = MIN(deadline_at, ? + MIN(60000 * (1 << attempts), 900000))
-      WHERE id = ? AND body IS NOT NULL AND deadline_at > ? AND expires_at > ? AND attempts < ? AND next_attempt_at <= ? AND (state = 'pending' OR (state = 'delivering' AND lease_until <= ?)) RETURNING *`)
+      WHERE id = ? AND body IS NOT NULL AND deadline_at > ? AND expires_at > ? AND attempts < ? AND next_attempt_at <= ?
+      AND (state = 'pending' OR (state = 'delivering' AND lease_until <= ? AND result_code IS NOT 'sending_bearer')) RETURNING *`)
       .bind(lease,now+LEASE,now,id,now,now,MAX_ATTEMPTS,now,now).first<Delivery>();
     if (!delivery) {message.ack(); continue;}
     const sub=await env.DB.prepare('SELECT * FROM event_subscriptions WHERE id = ?').bind(delivery.subscription_id).first<Subscription>();
+    let mayHaveStarted = false;
     try {
-      if (!sub || sub.state !== 'active' || sub.expires_at <= Date.now() || !sub.encrypted_secret) {
+      if (!sub || sub.state !== 'active' || sub.expires_at <= Date.now()) {
         await finish(env.DB,id,lease,'cancelled','authorization'); message.ack(); continue;
       }
       const authorizationRemaining=Math.min(sub.expires_at,delivery.deadline_at,delivery.lease_until)-Date.now();
@@ -167,20 +183,58 @@ export async function consumeEventDeliveries(batch:MessageBatch<unknown>,env:Env
       if (!authorized) {
         await finish(env.DB,id,lease,'cancelled','authorization'); message.ack(); continue;
       }
-      const secrets=[await decryptToken(sub.encrypted_secret,env.TOKEN_ENCRYPTION_KEY)];
-      if (sub.encrypted_previous_secret && (sub.previous_secret_until ?? 0)>Date.now()) secrets.push(await decryptToken(sub.encrypted_previous_secret,env.TOKEN_ENCRYPTION_KEY));
-      const headers=await eventWebhookHeaders(secrets,delivery.body!,delivery.event_id,sub.id);
-      const until=Math.min(sub.expires_at,delivery.deadline_at,delivery.lease_until,secrets.length>1 ? sub.previous_secret_until! : Infinity), remaining=until-Date.now();
-      if (remaining<=0) throw new CallbackSenderError('timeout');
-      const current=await env.DB.prepare(`UPDATE event_deliveries SET lease_until = lease_until WHERE id = ? AND state = 'delivering' AND lease_token = ? AND lease_until > ? AND deadline_at > ? AND body IS NOT NULL
-        AND EXISTS (SELECT 1 FROM event_subscriptions s JOIN users u ON u.id = s.user_id JOIN whatsapp_connections c ON c.id = s.connection_id AND c.user_id = u.id
+      const callbackHost = env.WEBHOOK_ROUTINE_HOST ?? null;
+      let request: CallbackRequest;
+      let destinationVersion: number | null = null;
+      let signatureDeadline = Infinity;
+      if (sub.destination_id) {
+        const destination = await env.DB.prepare(`SELECT d.url, d.encrypted_key, d.version FROM event_subscriptions s ${destinationJoin}
+          WHERE s.id = ? AND s.destination_id = ? AND ${readyCallback}`)
+          .bind(sub.id, sub.destination_id, callbackHost, Date.now()).first<BearerDestination>();
+        if (!destination) {
+          await finish(env.DB,id,lease,'cancelled','authorization'); message.ack(); continue;
+        }
+        destinationVersion = destination.version;
+        const key = await decryptToken(destination.encrypted_key, env.TOKEN_ENCRYPTION_KEY);
+        request = {kind:'bearer',url:destination.url,body:delivery.body,key};
+      } else {
+        if (!sub.encrypted_secret) {
+          await finish(env.DB,id,lease,'cancelled','authorization'); message.ack(); continue;
+        }
+        const secrets = [await decryptToken(sub.encrypted_secret, env.TOKEN_ENCRYPTION_KEY)];
+        if (sub.encrypted_previous_secret && sub.previous_secret_until && sub.previous_secret_until > Date.now()) {
+          secrets.push(await decryptToken(sub.encrypted_previous_secret, env.TOKEN_ENCRYPTION_KEY));
+          signatureDeadline = sub.previous_secret_until;
+        }
+        const headers = await eventWebhookHeaders(secrets, delivery.body, delivery.event_id, sub.id);
+        request = {url:sub.callback_url,body:delivery.body,headers};
+      }
+      const until=Math.min(sub.expires_at,delivery.deadline_at,delivery.lease_until,signatureDeadline);
+      const checkedAt = Date.now();
+      if (checkedAt >= until) throw new CallbackSenderError('timeout');
+      const current=await env.DB.prepare(`UPDATE event_deliveries SET result_code = COALESCE(?, result_code)
+        WHERE id = ? AND state = 'delivering' AND lease_token = ? AND lease_until > ? AND deadline_at > ? AND body IS NOT NULL
+        AND EXISTS (SELECT 1 FROM event_subscriptions s JOIN users u ON u.id = s.user_id JOIN whatsapp_connections c ON c.id = s.connection_id AND c.user_id = u.id ${destinationJoin}
         WHERE s.id = event_deliveries.subscription_id AND s.state = 'active' AND s.expires_at > ? AND u.status = 'active'
+        AND ${readyCallback} AND s.destination_id IS ? AND d.version IS ?
         AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = s.user_id AND r.grant_id = s.grant_id AND r.expires_at > ?)) RETURNING id`)
-        .bind(id,lease,Date.now(),Date.now(),Date.now(),Date.now()).first();
-      if (!current) {await finish(env.DB,id,lease,'cancelled','authorization');message.ack();continue;}
-      const sendRemaining=until-Date.now();
-      if (sendRemaining<=0) throw new CallbackSenderError('timeout');
-      const response=await sendCallback(env,{url:sub.callback_url,body:delivery.body!,headers},until);
+        .bind(sub.destination_id ? 'sending_bearer' : null,id,lease,checkedAt,checkedAt,checkedAt,callbackHost,checkedAt,sub.destination_id,destinationVersion,checkedAt).first();
+      if (!current) {
+        if (sub.destination_id) throw new Error('Callback authorization or destination version changed');
+        await finish(env.DB,id,lease,'cancelled','authorization'); message.ack(); continue;
+      }
+      if (Date.now()>=until) throw new CallbackSenderError('timeout');
+      mayHaveStarted = !!sub.destination_id;
+      const response=await sendCallback(env,request,until);
+      if (sub.destination_id) {
+        if (response.status === 200) { await finish(env.DB,id,lease,'accepted','http_2xx'); message.ack(); continue; }
+        if (response.status === 429) {
+          mayHaveStarted = false;
+          throw new Error('Callback rate limited');
+        }
+        if (response.status === 408 || response.status >= 500 || response.status < 300) throw new Error('Callback outcome unknown');
+        await finish(env.DB,id,lease,'failed','http_'+response.status); message.ack(); continue;
+      }
       if (response.status>=200 && response.status<300) {await finish(env.DB,id,lease,'accepted','http_2xx');message.ack();continue;}
       if (response.status!==408 && response.status!==429 && response.status<500) {await finish(env.DB,id,lease,'failed','http_'+response.status);message.ack();continue;}
       throw new Error('Callback unavailable');
@@ -188,6 +242,7 @@ export async function consumeEventDeliveries(batch:MessageBatch<unknown>,env:Env
       if (error instanceof CallbackSenderError && (error.reason==='invalid_request' || error.reason==='destination_blocked')) {
         await finish(env.DB,id,lease,'failed',error.code);message.ack();continue;
       }
+      if (mayHaveStarted) {await finish(env.DB,id,lease,'failed','delivery_unknown');message.ack();continue;}
       if (Date.now()>=delivery.deadline_at || (sub && Date.now()>=sub.expires_at)) {await finish(env.DB,id,lease,'expired','deadline');message.ack();continue;}
       if (delivery.attempts>=MAX_ATTEMPTS) {await finish(env.DB,id,lease,'failed','attempt_limit');message.ack();continue;}
       const next=Math.min(delivery.deadline_at,Date.now()+Math.min(60000*2**(delivery.attempts-1),900000));
@@ -201,6 +256,7 @@ export async function consumeEventDeliveries(batch:MessageBatch<unknown>,env:Env
 
 export async function cleanupEventDeliveries(db:D1Database,now=Date.now()): Promise<void> {
   await db.batch([
+    db.prepare(uncertainDelivery).bind(now),
     db.prepare("UPDATE event_deliveries SET state = CASE WHEN deadline_at <= ? THEN 'expired' ELSE 'cancelled' END, body = NULL, lease_token = NULL, lease_until = NULL, result_code = 'expired_or_invalid' WHERE state IN ('pending','delivering') AND (deadline_at <= ? OR NOT EXISTS (SELECT 1 FROM event_subscriptions s JOIN users u ON u.id = s.user_id JOIN whatsapp_connections c ON c.id = s.connection_id AND c.user_id = u.id WHERE s.id = event_deliveries.subscription_id AND s.state = 'active' AND s.expires_at > ? AND u.status = 'active' AND NOT EXISTS (SELECT 1 FROM event_grant_revocations r WHERE r.user_id = s.user_id AND r.grant_id = s.grant_id AND r.expires_at > ?)))").bind(now,now,now,now),
     db.prepare('DELETE FROM event_deliveries WHERE expires_at <= ?').bind(now),
     db.prepare('DELETE FROM event_sources WHERE expires_at <= ?').bind(now),
@@ -209,9 +265,9 @@ export async function cleanupEventDeliveries(db:D1Database,now=Date.now()): Prom
 
 /** D1, rather than broker attempts or publication count, owns the delivery budget. */
 export async function recoverEventDeliveries(env:Env,now=Date.now()) {
-  const exhausted=await env.DB.prepare("UPDATE event_deliveries SET state = 'failed', body = NULL, lease_token = NULL, lease_until = NULL, result_code = 'attempt_limit' WHERE attempts >= ? AND (state = 'pending' OR (state = 'delivering' AND lease_until <= ?))")
+  const exhausted=await env.DB.prepare("UPDATE event_deliveries SET state = 'failed', body = NULL, lease_token = NULL, lease_until = NULL, result_code = 'attempt_limit' WHERE attempts >= ? AND (state = 'pending' OR (state = 'delivering' AND lease_until <= ? AND result_code IS NOT 'sending_bearer'))")
     .bind(MAX_ATTEMPTS,now).run();
-  const recovered=await env.DB.prepare("UPDATE event_deliveries SET state = 'pending', lease_token = NULL, lease_until = NULL, published_at = NULL, result_code = 'lease_expired' WHERE state = 'delivering' AND lease_until <= ? AND deadline_at > ? AND expires_at > ? AND body IS NOT NULL")
+  const recovered=await env.DB.prepare("UPDATE event_deliveries SET state = 'pending', lease_token = NULL, lease_until = NULL, published_at = NULL, result_code = 'lease_expired' WHERE state = 'delivering' AND lease_until <= ? AND deadline_at > ? AND expires_at > ? AND body IS NOT NULL AND result_code IS NOT 'sending_bearer'")
     .bind(now,now,now).run();
   const due=await env.DB.prepare("SELECT id FROM event_deliveries WHERE state = 'pending' AND body IS NOT NULL AND deadline_at > ? AND expires_at > ? AND attempts < ? AND next_attempt_at <= ? AND (published_at IS NULL OR published_at <= ?) ORDER BY COALESCE(published_at,0),received_at LIMIT 100")
     .bind(now,now,MAX_ATTEMPTS,now,now-LEASE).all<{id:string}>();

@@ -141,7 +141,7 @@ export const subscriptionScript = `
     deadline:'Prazo da entrega esgotado', attempt_limit:'Limite de tentativas atingido', unavailable:'Destino indisponível',
     lease_expired:'Tentativa interrompida', authorization:'Sem autorização vigente', cancelled:'Assinatura encerrada',
     expired_or_invalid:'Prazo esgotado ou assinatura inativa', sender_invalid_request:'Entrega inválida',
-    sender_destination_blocked:'Destino bloqueado',
+    sender_destination_blocked:'Destino bloqueado', delivery_unknown:'O destino pode ter recebido o aviso.',
   };
   const subscriptionPath = (connectionId, id) => '/api/connections/' + encodeURIComponent(connectionId) + '/subscriptions' + (id ? '/' + encodeURIComponent(id) : '');
   const timeTag = (value) => '<time datetime="' + escapeHtml(value) + '">' + escapeHtml(formatDate(value)) + '</time>';
@@ -166,6 +166,7 @@ export const subscriptionScript = `
     const tone = item.state === 'active' ? (item.authorization === 'valid' ? ' is-active' : ' is-warning') : '';
     const trigger = item.eventName === 'message.received' ? 'Nova mensagem recebida' : item.eventName;
     const scope = item.conversationId ? 'Uma conversa específica' : 'Todas as conversas';
+    const destination = item.destination ? item.destination.label + ' · ' + item.destination.hostname : item.callbackUrl;
     return '<details class="subscription-details" data-subscription="' + escapeHtml(item.id) + '">'
       + '<summary><span class="subscription-identity"><span><span class="subscription-name">' + escapeHtml(item.appName)
       + '</span><span class="subscription-meta">' + scope + '</span></span></span>'
@@ -174,7 +175,7 @@ export const subscriptionScript = `
       + '<p class="subscription-progress" role="status"></p><ul class="subscription-deliveries"></ul>'
       + '<button class="secondary" type="button" data-load-deliveries hidden>Carregar mais entregas</button></div>'
       + '<div class="subscription-facts"><h4>Dados da assinatura</h4><dl>'
-      + '<dt>Endereço de entrega</dt><dd class="subscription-url">' + escapeHtml(item.callbackUrl) + '</dd>'
+      + '<dt>Destino da entrega</dt><dd class="subscription-url">' + escapeHtml(destination) + '</dd>'
       + '<dt>Gatilho</dt><dd>' + escapeHtml(trigger) + '</dd>'
       + (item.conversationId ? '<dt>Conversa</dt><dd><code>' + escapeHtml(item.conversationId) + '</code></dd>' : '')
       + '<dt>Ativada em</dt><dd>' + timeTag(item.activatedAt) + '</dd>'
@@ -251,7 +252,8 @@ export const subscriptionScript = `
     const result = item.result || '';
     const reason = deliveryReasons[result] || (/^http_[1-5][0-9]{2}$/.test(result) ? 'Resposta HTTP ' + result.slice(5) : '');
     const tone = item.state === 'accepted' ? ' class="is-accepted"' : item.state === 'failed' || item.state === 'expired' ? ' class="is-failed"' : '';
-    return '<li' + tone + '><strong>' + escapeHtml(deliveryStatusLabels[item.state] || item.state) + '</strong><span class="subscription-received">Recebida '
+    const label = result === 'delivery_unknown' ? 'Resultado desconhecido' : deliveryStatusLabels[item.state] || item.state;
+    return '<li' + tone + '><strong>' + escapeHtml(label) + '</strong><span class="subscription-received">Recebida '
       + timeTag(item.receivedAt) + '</span><small>' + escapeHtml(item.attempts) + (item.attempts === 1 ? ' tentativa' : ' tentativas')
       + (reason ? ' · ' + escapeHtml(reason) : '') + '</small>'
       + (item.messageId ? '<small>Mensagem <code>' + escapeHtml(item.messageId) + '</code></small>' : '') + '</li>';

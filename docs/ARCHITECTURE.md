@@ -276,3 +276,11 @@ O classificador MCP preserva os códigos públicos e acrescenta uma política de
 Leituras compostas mantêm as partes concluídas e registram as partes indisponíveis em `errors`, com `partial` e `isError`. Isso inclui inspeção, transcrição, relações, arquivos e renderização de páginas. A falha de um status live não elimina os registros de conexão. Cancelamento impede o início de novas etapas. Falhas de auditoria após uma leitura concluída preservam o resultado e produzem o evento de fallback `wapilot_audit_unavailable`, sem conteúdo. A auditoria de falhas registra somente código e status sanitizados, sem mensagens externas brutas.
 
 A migration `0013_connection_last_connected_at.sql` acrescenta um horário UTC opcional por conexão. Aplique-a antes de atualizar o Worker. Os webhooks autenticados `Connected` e `PairSuccess` trazem o horário de origem em `data.attributes.at` (milissegundos Unix). O WaPilot guarda somente o maior horário recebido para a instância e limpa esse valor ao trocar a instância. Eventos antigos sem horário e consultas de status preservam o valor atual.
+
+## Destinos de webhook para clientes sem MCP Events
+
+A migration `0015_webhook_destinations.sql` guarda destinos do titular com OAuth grant, conexão, conversas autorizadas, URL, credencial cifrada e versão. A sessão Clerk e as verificações de origem e CSRF protegem as mutações do painel. O cadastro do primeiro destino habilita a ferramenta para aquela autorização quando o cliente não está identificado como compatível com MCP Events. O painel exibe o nome, o host e o ID opaco do destino.
+
+A assinatura guarda o destino e uma única conversa. O ingresso reutiliza o filtro de conversa antes de persistir conteúdo ou publicar na fila. O consumidor confere a versão do destino e a autorização antes da entrega. A desativação do destino, do titular ou da autorização elimina a chave e cancela entregas pendentes. As assinaturas MCP Events continuam usando verificação e assinatura Standard Webhooks.
+
+No modo bearer, o sender limita o endereço ao host configurado e à rota de rotina. Ele monta a autorização HTTP a partir da chave cifrada no destino. O cancelamento interrompe tentativas futuras. Quando uma tentativa pode ter iniciado uma rotina, o resultado fica como desconhecido e a recuperação de posse não repete o POST.

@@ -10,7 +10,7 @@ let origin;
 before(async () => {
   child = spawn(process.execPath, ['src/server.mjs'], {
     cwd: new URL('..', import.meta.url),
-    env: { ...process.env, CALLBACK_SENDER_TOKEN: token, PORT: '0', HOST: '127.0.0.1' },
+    env: { ...process.env, CALLBACK_SENDER_TOKEN: token, WEBHOOK_ROUTINE_HOST: 'callback.test', PORT: '0', HOST: '127.0.0.1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   origin = await new Promise((resolve, reject) => {
@@ -80,6 +80,34 @@ test('blocks nonpublic IP destinations, including URL-normalized and mapped form
     const response = await send({ url: `https://${host}/events` });
     assert.equal(response.status, 400, host);
     assert.deepEqual(await response.json(), { error: 'destination_blocked' });
+  }
+});
+
+test('restricts bearer callbacks to the configured HTTPS origin and constructs its own headers', async () => {
+  const key = 'test-receiver-key';
+  for (const url of [
+    'https://other.test/automations/webhook/routine',
+    'https://callback.test.other.test/automations/webhook/routine',
+    'https://callback.test:8443/automations/webhook/routine',
+    'https://callback.test/elsewhere/routine',
+    'https://callback.test/automations/webhook/folder/routine',
+    'https://callback.test/automations/webhook/routine?query=1',
+    'https://callback.test/automations/webhook/routine?',
+    'https://callback.test/automations/webhook/routine#',
+  ]) {
+    const response = await send({ kind: 'bearer', url, key, headers: undefined });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: 'destination_blocked' });
+  }
+  for (const input of [
+    { kind: 'bearer', headers, key },
+    { kind: 'bearer', headers: undefined, key: 'key\r\nInjected: header' },
+    { kind: 'bearer', headers: undefined, key: 'a'.repeat(4097) },
+    { kind: 'bearer', headers: undefined, key: '' },
+  ]) {
+    const response = await send({ url: 'https://callback.test/automations/webhook/routine', ...input });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: 'invalid_request' });
   }
 });
 

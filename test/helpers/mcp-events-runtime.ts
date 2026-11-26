@@ -14,10 +14,11 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
     import { Buffer } from 'node:buffer';
     const base = 'https://mcp.invalid';
     let providerFailure = false, providerDelay = 0, queueFailure = false, fixtureNow, grantDeleteFailureAfter = -1, grantDeletes = 0, cursorCycle = false, cursorReads = 0;
+    let nativeClients;
     const realNow = Date.now;
     Date.now = () => fixtureNow ?? realNow();
     function fixtureEnv(env) {
-      env = {...env};
+      env = {...env, ...(nativeClients === undefined ? {} : {WEBHOOK_NATIVE_CLIENT_IDS:nativeClients})};
       env.CALLBACK_SENDER = { getByName() { return { fetch(url, init) { return fetch('https://sender.invalid/send', init); } }; } };
       env.EVENT_DELIVERIES = {async send(id) {if (queueFailure) throw new Error('Synthetic publication failure'); const response = await fetch('https://queue.invalid/',{method:'POST',body:JSON.stringify(id)}); if (!response.ok) throw new Error('Synthetic publication failure');}};
       if (providerFailure || providerDelay || grantDeleteFailureAfter >= 0 || cursorCycle) {
@@ -51,6 +52,7 @@ export async function eventRuntime(sender: (request: Request) => Promise<Respons
         const kv = env.OAUTH_KV;
         env.OAUTH_KV = {get:kv.get.bind(kv),put:kv.put.bind(kv),delete:kv.delete.bind(kv),list:async()=>{throw new Error('private fixture payload token=do-not-return');}};
       }
+      if (url.pathname === '/fixture/native-clients') { nativeClients = await request.text(); return new Response(null,{status:204}); }
       if (url.pathname === '/fixture/provider-failure') {providerFailure = url.searchParams.has('enabled'); return Response.json({ok:true});}
       if (url.pathname === '/fixture/provider-delay') {providerDelay = Number(url.searchParams.get('ms')); return Response.json({ok:true});}
       if (url.pathname === '/fixture/revoke-failure') {grantDeleteFailureAfter = url.searchParams.has('after') ? Number(url.searchParams.get('after')) : -1;grantDeletes=0;return Response.json({ok:true});}

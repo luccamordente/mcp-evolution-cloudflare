@@ -1,10 +1,8 @@
 import type { Env } from '../types';
 
-export interface CallbackRequest {
-  url: string;
-  body: string;
-  headers: Record<string, string>;
-}
+export type CallbackRequest =
+  | { url: string; body: string; headers: Record<string, string> }
+  | { kind: 'bearer'; url: string; body: string; key: string };
 
 export interface CallbackResponse {
   status: number;

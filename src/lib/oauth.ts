@@ -15,6 +15,7 @@ import { callsWriteTool, createMcpServer, mcpBodyLimit, WRITE_SCOPE } from './mc
 import { serveMcpHttp } from './mcp-http';
 import { logOAuthError } from './oauth-diagnostics';
 import { registerMcpEvents } from './mcp-events';
+import { registerWebhookSubscriptionTool } from './webhook-subscription-tool';
 import { WAPILOT_LOGO_SVG } from '../ui/wapilot-logo';
 import { ensureUser } from './db';
 
@@ -48,7 +49,11 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
         if (auth && !auth.scope.includes(WRITE_SCOPE) && request.method === 'POST' && await callsWriteTool(request)) {
           return insufficientScope(auth as unknown as OAuthResourceAuth, ['mcp:read', WRITE_SCOPE], 'Sending WhatsApp messages requires the mcp:write scope.');
         }
-        if (auth) registerMcpEvents(server, env, user, auth, getOAuthApi(oauthOptions(resourceBaseUrl), env));
+        if (auth) {
+          const oauth = getOAuthApi(oauthOptions(resourceBaseUrl), env);
+          registerMcpEvents(server, env, user, auth, oauth);
+          await registerWebhookSubscriptionTool(server, env, user, auth, oauth);
+        }
         return serveMcpHttp(request, server, mcpBodyLimit(env), auth ? {
           authInfo: {
             token: auth.token,

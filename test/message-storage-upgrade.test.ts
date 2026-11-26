@@ -27,7 +27,7 @@ it('removes legacy content on upgrade, preserves identity and operational state,
   }, '0008_event_deliveries.sql');
   try {
     // The running Worker needs its additive subscription migration even when the destructive legacy cleanup is pending.
-    await fixture.migrate('0013_connection_last_connected_at.sql', '0014_event_subscription_stops.sql');
+    await fixture.migrate('0013_connection_last_connected_at.sql', '0015_webhook_destinations.sql');
     const account = await fixture.issue({ scope: 'mcp:read mcp:write' });
     const connectionId = account.connections[0];
     const hook = await fixture.webhook(connectionId);

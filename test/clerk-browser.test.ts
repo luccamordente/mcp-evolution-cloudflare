@@ -1,3 +1,4 @@
+import { JSDOM } from 'jsdom';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { clerkRuntime } from './helpers/clerk-session';
 import { eventRuntime } from './helpers/mcp-events-runtime';
@@ -102,7 +103,29 @@ it('preserves native form origin while requiring explicit Clerk consent and its 
   const html = await consent.text();
   expect(html).toContain('/auth.js');
   expect(html).toContain('name="handle"');
-  expect(html).toContain('Sair do navegador');
+  const dom = new JSDOM(html, { runScripts: 'dangerously' });
+  try {
+    const { document, KeyboardEvent } = dom.window;
+    const account = document.querySelector<HTMLDetailsElement>('header .account');
+    expect(account).not.toBeNull();
+    const trigger = account!.querySelector('summary')!;
+    const signOut = account!.querySelector<HTMLButtonElement>('[data-wapilot-signout]')!;
+    expect(trigger.getAttribute('aria-label')).toBe('Minha conta');
+    expect(account!.querySelector('.account-email')?.textContent).toBe('luccamordente@gmail.com');
+    expect(signOut.textContent).toBe('Sair');
+    expect(signOut.getAttribute('type')).toBe('button');
+    expect(signOut.hidden).toBe(true);
+    expect(account!.querySelector('#wapilot-signout-status')?.getAttribute('role')).toBe('status');
+    expect(document.querySelector('main #wapilot-session-status')?.getAttribute('role')).toBe('status');
+
+    trigger.click();
+    expect(account!.open).toBe(true);
+    signOut.hidden = false;
+    signOut.focus();
+    signOut.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(account!.open).toBe(false);
+    expect(document.activeElement).toBe(trigger);
+  } finally { dom.window.close(); }
   expect(html).toContain('Permitir conexão');
   const handle = html.match(/name="handle" value="([^"]+)"/)![1];
   const binding = consent.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');

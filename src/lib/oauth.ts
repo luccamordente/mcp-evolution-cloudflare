@@ -10,7 +10,8 @@ import {
 } from '@cloudflare/workers-oauth-provider';
 import type { Env, AuthenticatedUser } from '../types';
 import { authenticateBrowserRequest, appendAuthHeaders, browserOrigin, browserSessionScripts, AuthError } from './auth';
-import { SESSION_CONTROL } from '../ui/auth';
+import { SESSION_STATUS } from '../ui/auth';
+import { accountMenu, accountMenuScript, accountMenuStyles } from '../ui/account-menu';
 import { callsWriteTool, createMcpServer, mcpBodyLimit, WRITE_SCOPE } from './mcp';
 import { serveMcpHttp } from './mcp-http';
 import { logOAuthError } from './oauth-diagnostics';
@@ -119,7 +120,7 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
       const authRequest = await oauth.parseAuthRequest(request);
       const transaction = await oauth.beginConsent(authRequest);
       const description = await oauth.describeConsent(authRequest);
-      const html = consentHtml(description.clientName, description.redirectHost, scopesSupported, transaction.handle, browserSessionScripts(env, 'session', url.pathname + url.search));
+      const html = consentHtml(description.clientName, description.redirectHost, scopesSupported, transaction.handle, user.email, browserSessionScripts(env, 'session', url.pathname + url.search));
       const response = new Response(html, { headers: transaction.headers });
       response.headers.set('Content-Type', 'text/html; charset=utf-8');
       // Native form POSTs under no-referrer send Origin: null.
@@ -160,7 +161,7 @@ async function authorizationUi(request: Request, env: Env, resource: string): Pr
   }
 }
 
-function consentHtml(clientName: string, redirectHost: string, scopes: string[], handle: string, sessionScripts = ''): string {
+function consentHtml(clientName: string, redirectHost: string, scopes: string[], handle: string, email: string, sessionScripts = ''): string {
   const esc = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
   const scopeLabels: Record<string, string> = {
     'mcp:read': 'Consultar seus dados do WhatsApp',
@@ -183,19 +184,22 @@ function consentHtml(clientName: string, redirectHost: string, scopes: string[],
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
   <style>
-    :root { color-scheme: light; --ink:#0f1b25; --muted:#667789; --line:#dfe9e6; --canvas:#f7faf9; --surface:#fff; --mint:#e9f8f0; --mint-strong:#d3f3e0; --green:#25d366; --green-deep:#108b45; --shadow:0 22px 60px rgba(20,61,39,.11); font-family:"DM Sans",system-ui,sans-serif; }
+    :root { color-scheme: light; --ink:#0f1b25; --muted:#667789; --line:#dfe9e6; --canvas:#f7faf9; --surface:#fff; --mint:#e9f8f0; --mint-strong:#d3f3e0; --green:#25d366; --green-deep:#108b45; --amber-soft:#fff5df; --red:#b53d42; --shadow:0 22px 60px rgba(20,61,39,.11); font-family:"DM Sans",system-ui,sans-serif; }
     * { box-sizing:border-box; }
     html { min-width:320px; background:var(--canvas); }
     body { min-height:100vh; margin:0; color:var(--ink); background:var(--canvas); }
     button { font:inherit; cursor:pointer; -webkit-tap-highlight-color:transparent; }
     button:focus-visible { outline:3px solid rgba(32,200,102,.4); outline-offset:3px; }
     .app { min-height:100vh; display:flex; flex-direction:column; }
-    .topbar { display:flex; align-items:center; justify-content:space-between; min-height:84px; padding:0 52px; background:var(--surface); border-bottom:1px solid var(--line); }
+    .topbar { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:16px; min-height:84px; padding:0 52px; background:var(--surface); border-bottom:1px solid var(--line); }
     .brand { display:inline-flex; align-items:center; width:142px; }
     .brand svg { display:block; width:100%; height:auto; }
     .secure-label { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; font-weight:700; }
     .secure-dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px rgba(37,211,102,.14); }
+    ${accountMenuStyles}
     main { width:min(1050px, calc(100% - 48px)); margin:0 auto; padding:72px 0 88px; }
+    #wapilot-session-status:not(:empty) { display:block; margin-bottom:20px; padding:12px 16px; color:var(--ink); background:var(--amber-soft); border-radius:12px; font-size:14px; }
+    #wapilot-session-status a { color:inherit; font-weight:700; }
     .intro { max-width:690px; margin:0 auto 30px; text-align:center; }
     .eyebrow { margin:0 0 12px; color:var(--green-deep); font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
     h1, h2 { margin:0; font-family:"Manrope","DM Sans",sans-serif; letter-spacing:-.04em; }
@@ -224,7 +228,7 @@ function consentHtml(clientName: string, redirectHost: string, scopes: string[],
     .deny:hover { background:rgba(255,255,255,.55); border-color:rgba(15,27,37,.3); }
     .privacy-note { display:flex; align-items:flex-start; gap:9px; max-width:710px; margin:24px auto 0; color:var(--muted); font-size:12px; line-height:1.5; text-align:center; }
     .privacy-note span:first-child { color:var(--green-deep); font-size:16px; line-height:1.1; }
-    @media (max-width:760px) { .topbar { min-height:72px; padding:0 24px; } main { width:min(100% - 32px, 580px); padding:48px 0 56px; } .consent-card { grid-template-columns:1fr; } .request-panel, .permissions-panel { padding:30px 26px; } .permissions-panel { border-top:1px solid rgba(16,139,69,.12); } }
+    @media (max-width:760px) { .topbar { grid-template-columns:auto 1fr auto; min-height:72px; padding:0 24px; } .secure-label { justify-self:center; } main { width:min(100% - 32px, 580px); padding:48px 0 56px; } .consent-card { grid-template-columns:1fr; } .request-panel, .permissions-panel { padding:30px 26px; } .permissions-panel { border-top:1px solid rgba(16,139,69,.12); } }
     @media (max-width:460px) { .topbar { padding:0 16px; } .brand { width:126px; } .secure-label { font-size:12px; } .secure-label span:last-child { display:none; } main { width:min(100% - 24px, 520px); padding-top:36px; } h1 { font-size:40px; } .request-panel, .permissions-panel { padding:25px 20px; } }
     @media (prefers-reduced-motion:reduce) { *, *::before, *::after { transition-duration:.01ms !important; } }
   </style>
@@ -233,9 +237,11 @@ ${sessionScripts}</head>
   <div class="app">
     <header class="topbar">
       <div class="brand" aria-label="WaPilot">${WAPILOT_LOGO_SVG}</div>
-      ${SESSION_CONTROL}<div class="secure-label"><span class="secure-dot" aria-hidden="true"></span><span>Conexão segura</span></div>
+      <div class="secure-label"><span class="secure-dot" aria-hidden="true"></span><span>Conexão segura</span></div>
+      ${accountMenu(email)}
     </header>
     <main>
+      ${SESSION_STATUS}
       <section class="intro" aria-labelledby="consent-title">
         <p class="eyebrow">Autorização de conexão</p>
         <h1 id="consent-title">Conecte seu WhatsApp ao WaPilot.</h1>
@@ -264,6 +270,7 @@ ${sessionScripts}</head>
       <p class="privacy-note"><span aria-hidden="true">●</span><span>O WaPilot usa esta autorização apenas para operar as permissões acima. Seus tokens não são exibidos nesta tela.</span></p>
     </main>
   </div>
+  ${accountMenuScript}
 </body>
 </html>`;
 }

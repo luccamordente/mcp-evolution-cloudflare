@@ -234,7 +234,7 @@ O lote é limitado a dez alvos. Um erro em um alvo pode coexistir com ações ac
 
 A chave opcional reserva `update_message` em `send_operations` por usuário, conexão e chave. O D1 guarda hash e o resultado operacional mínimo por 24 horas. Uma chamada simultânea ou interrompida com a mesma chave não reabre o despacho. A auditoria contém operação, contagens e códigos seguros. O texto de edição, emoji e conteúdo retido ficam fora dos registros de operação.
 
-O provedor projeta edições conforme a configuração de retenção e aplica revogações ao histórico já retido. A revogação projetada remove texto e metadados de mídia do original e impede que uma observação antiga restaure o corpo. O WaPilot consulta novamente a mensagem ao resgatar links de anexos. A aceitação do despacho é independente da projeção e da visibilidade em dispositivos vinculados.
+O provedor projeta edições conforme a configuração de retenção e aplica revogações ao histórico já retido. A edição projetada expõe `editedAt` na mensagem original. A revogação projetada expõe `revokedAt` e remove texto e metadados de mídia do original e impede que uma observação antiga restaure o corpo. O WaPilot consulta novamente a mensagem ao resgatar links de anexos. A aceitação do despacho é independente da projeção e da visibilidade em dispositivos vinculados.
 
 ## Resultado operacional de envios
 

@@ -163,7 +163,17 @@ Use `update_message` para aplicar uma operação a 1–10 mensagens da mesma con
 
 O retorno apresenta um item por alvo, na ordem da seleção. `accepted` indica que o despacho terminou. `rejected` indica uma recusa, `not_started` indica que o despacho daquele alvo não começou, e `unknown` indica que a ação pode ter sido aplicada. Resultados parciais preservam os itens aceitos. Alguns itens aceitos incluem `actionId` para identificar a ação. O `messageId` continua sendo o ID da mensagem original.
 
-Para consultar o estado observado, use `get_message` na mensagem original. Uma mensagem revogada pode permanecer como marcador com `revokedAt`, sem texto ou anexos. O efeito em outros dispositivos depende da sincronização e da privacidade do WhatsApp.
+Para consultar o estado observado, use `get_message` ou `search_messages` na mesma conexão. O aceite de despacho e a atualização de histórico são observações independentes. Os horários `editedAt` e `revokedAt` estão em ISO 8601 no resultado WaPilot.
+
+| Ação | Alteração no histórico armazenado | Leitura pelo WaPilot |
+| --- | --- | --- |
+| `edit_text` | Atualiza o texto da mensagem original elegível e registra `edited_at` e o ID da edição. Preserva o ID e horário original. A gravação do texto depende da retenção configurada. | Texto atualizado e `editedAt` quando a edição foi projetada. |
+| `delete_for_everyone` | Registra `revoked_at` e limpa texto, mídia e conteúdo das edições retidas da mesma mensagem. Replays preservam a revogação. | Registro com `revokedAt`, sem texto nem anexos. Links WaPilot antigos falham ao consultar o original. URLs diretas de armazenamento seguem a própria expiração. |
+| `set_reaction`, `remove_reaction` | Armazena uma ação separada, com alvo, autor e ordem temporal. A leitura calcula a reação ativa de cada autor. | `reactions` quando solicitado. A remoção retira a reação do autor da lista. |
+| `mark_read`, `mark_played` | O despacho envia um recibo. Um recibo observado depois pode atualizar a entrega na cópia de envio da mensagem. | Quando o recibo consta no histórico, `delivery` pode indicar `read` ou `played`. A privacidade de leitura afeta o que o remetente observa. |
+| `add_label`, `remove_label` | Envia uma alteração ao estado sincronizado da conta Business. O histórico de mensagens não mantém uma lista de etiquetas por mensagem. | Resultado por alvo. A leitura da mensagem não mostra a etiqueta. |
+
+Uma revogação recebida antes de o original ser retido ainda não se aplica a uma mensagem que chega depois.
 
 Use `options.connectionId` para selecionar uma conexão explicitamente. Com `options.idempotencyKey`, o mesmo pedido pode recuperar o resultado armazenado por 24 horas. Alterar os argumentos com a mesma chave gera conflito. Após um resultado desconhecido, consulte o estado da mensagem antes de decidir se precisa de uma nova ação.
 

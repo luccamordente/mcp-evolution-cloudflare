@@ -104,7 +104,7 @@ describe.runIf(Boolean(fixtureURL))('message actions through the WaPilot Worker 
       items: [{ actionId: expect.stringMatching(/^synthetic-action-/) }],
     });
     expect((await call('get_message', { messageId: 'edit-me' })).structuredContent.data).toMatchObject({
-      message: { id: 'edit-me', text: 'edited through WaPilot' },
+      message: { id: 'edit-me', text: 'edited through WaPilot', editedAt: expect.any(String) },
     });
     const original = await call('get_message', { messageId: 'revoke-me' }, { include: ['attachments'] });
     const [attachment] = z.tuple([z.object({ downloadUrl: z.url(), downloadAvailable: z.literal(true) })]).parse(original.structuredContent.data.attachments);
@@ -126,7 +126,7 @@ describe.runIf(Boolean(fixtureURL))('message actions through the WaPilot Worker 
     const search = await call('search_messages', {}, { conversationId: directChat, limit: 20, include: ['attachments'] });
     expect(search.isError).not.toBe(true);
     expect(search.structuredContent.data.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'edit-me', text: 'edited through WaPilot' }),
+      expect.objectContaining({ id: 'edit-me', text: 'edited through WaPilot', editedAt: expect.any(String) }),
       expect.objectContaining({ id: 'revoke-me', revokedAt: expect.any(String), attachments: [] }),
     ]));
     expect(JSON.stringify(search)).not.toContain('private original');

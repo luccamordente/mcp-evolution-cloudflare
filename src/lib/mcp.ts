@@ -136,6 +136,7 @@ export const TOOL_TITLES = {
 // keeps the payload intentionally free-form while declaring every JSON value.
 export const dataOutput = z.object({ data: z.json() });
 const retainedMessageOutput = z.object({
+  editedAt: z.iso.datetime().optional(),
   revokedAt: z.iso.datetime().optional(),
   observation: messageObservationSchema.optional(),
   delivery: messageDeliverySchema.optional(),

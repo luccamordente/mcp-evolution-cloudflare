@@ -316,6 +316,12 @@ function normalizeGroup(value: unknown): Group {
   };
 }
 
+function retainedMutationTime(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 253402300799999) {
+    return new Date(value).toISOString();
+  }
+}
+
 function normalizeMessage(value: unknown, includeReactions = false): Message {
   const item = resource(value);
   const attributes = resourceAttributes(value);
@@ -337,9 +343,10 @@ function normalizeMessage(value: unknown, includeReactions = false): Message {
     type: stringValue(attributes.encodingFormat),
     messageType: stringValue(attributes.encodingFormat) ?? 'unknown',
   };
-  if (typeof meta.revokedAt === 'number' && Number.isSafeInteger(meta.revokedAt) && meta.revokedAt > 0 && meta.revokedAt <= 253402300799999) {
-    return { ...message, type: undefined, messageType: 'unknown', revokedAt: new Date(meta.revokedAt).toISOString() };
-  }
+  const editedAt = retainedMutationTime(meta.editedAt);
+  if (editedAt) message.editedAt = editedAt;
+  const revokedAt = retainedMutationTime(meta.revokedAt);
+  if (revokedAt) return { ...message, type: undefined, messageType: 'unknown', revokedAt };
   if (includeReactions) {
     const reactions = activeReactionsSchema.safeParse(attributes.reactions);
     if (reactions.success) message.reactions = reactions.data;

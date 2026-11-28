@@ -8,6 +8,7 @@ import { OptionsError } from '../../src/lib/mcp-options';
 import { PdfProcessingError } from '../../src/lib/pdf-policy';
 import { SendOperationError } from '../../src/lib/send-idempotency';
 import { SendMessageInputError } from '../../src/lib/send-message';
+import { MessageUpdateError } from '../../src/lib/update-message';
 import type { ErrorRecovery } from '../../src/lib/tool-recovery';
 
 type Expectation = { status: number; retryable: boolean; action: ErrorRecovery['action']; tool?: ErrorRecovery['tool'] };
@@ -27,6 +28,8 @@ const classified = (error: () => Error, expectation: Expectation, operation = 'g
 export const toolErrorScenarios: Record<McpErrorCode, ErrorScenario> = {
   contact_result_unknown: classified(() => new ContactUpdateError("contact_result_unknown","Inspect the contact."), {status:409,retryable:false,action:"stop"}, "update_contact"),
   contact_update_pending: classified(() => new ContactUpdateError("contact_update_pending","Inspect the contact."), {status:409,retryable:false,action:"stop"}, "update_contact"),
+  message_update_pending: classified(() => new MessageUpdateError('message_update_pending', 'WaPilot is waiting for the earlier message update.'), { status: 409, retryable: false, action: 'stop' }, 'update_message'),
+  message_update_idempotency_unavailable: classified(() => new MessageUpdateError('message_update_idempotency_unavailable', 'WaPilot could not verify the key for this message update.'), { status: 503, retryable: false, action: 'stop' }, 'update_message'),
   idempotency_conflict: classified(() => new SendOperationError('idempotency_conflict', 'WaPilot received different arguments for the same action key.'), reconcile, 'send_message'),
   send_in_progress: classified(() => new SendOperationError('send_in_progress', 'WaPilot cannot confirm this send yet.'), reconcile, 'send_message'),
   send_result_unknown: classified(() => new SendOperationError('send_result_unknown', 'WaPilot could not confirm the earlier send.'), reconcile, 'send_message'),
@@ -41,6 +44,7 @@ export const toolErrorScenarios: Record<McpErrorCode, ErrorScenario> = {
   service_request_failed: classified(() => new EvolutionApiError(429, 'private-response https://private.invalid/file Bearer secret-value'), { ...readRetry, status: 429 }, 'search_groups'),
   media_too_large: classified(() => new SendMessageInputError('media_too_large', 413, 'WaPilot attachment exceeds its size limit.'), { ...correct, status: 413 }, 'send_message'),
   message_not_found: { kind: 'mcp', status: 404, retryable: false, action: 'inspect_message', tool: 'search_messages' },
+  message_revoked: { kind: 'mcp', status: 410, retryable: false, action: 'stop' },
   message_content_unavailable: { kind: 'mcp', status: 404, retryable: false, action: 'inspect_message', tool: 'search_messages' },
   message_content_pending: { kind: 'mcp', status: 409, retryable: false, action: 'inspect_message', tool: 'get_message' },
   message_unavailable: { kind: 'mcp', ...readRetry },

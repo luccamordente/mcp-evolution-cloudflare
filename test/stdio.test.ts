@@ -42,6 +42,14 @@ it('serves the shared tools and resources with a persistent default connection o
       response.end(JSON.stringify({ jsonapi: { version: '1.1' }, data: { type: 'message', id: 'local-sticker-1' } }));
       return;
     }
+    if (request.url === '/message/actions') {
+      response.end(JSON.stringify({ jsonapi: { version: '1.1' }, data: {
+        type: 'messageActionResult', id: 'local-result', attributes: {
+          version: 1, items: [{ conversationId: '5511999999999', messageId: 'fixture-message', outcome: 'accepted' }],
+        },
+      } }));
+      return;
+    }
     if (request.url === '/send/text' || request.url === '/send/media') {
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
@@ -59,10 +67,11 @@ it('serves the shared tools and resources with a persistent default connection o
   await new Promise<void>((done) => upstream.listen(0, '127.0.0.1', done));
   cleanup.push(() => new Promise<void>((done) => upstream.close(() => done())));
   const address = upstream.address() as { port: number };
-  async function open() {
+  async function open(readOnly = false) {
     const transport = new StdioClientTransport({ command: process.execPath, args: ['scripts/dev-stdio.mjs'], cwd: workspace, stderr: 'pipe', env: {
       PATH: process.env.PATH!, EVOLUTION_BASE_URL: `http://127.0.0.1:${address.port}`,
       LOCAL_INSTANCE_ID: 'local-instance', LOCAL_INSTANCE_TOKEN: 'fixture-instance-credential', SEND_MEDIA_ORIGINS: 'https://media.example.test',
+      WAPILOT_STDIO_READ_ONLY: readOnly ? '1' : '0',
     } });
     let stderr = '';
     transport.stderr!.on('data', (chunk) => { stderr += chunk.toString(); });
@@ -84,7 +93,7 @@ it('serves the shared tools and resources with a persistent default connection o
   }
   const first = await open();
   expect(first.client.getServerCapabilities()).not.toHaveProperty('events');
-  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toEqual(['search_connections', 'search_contacts', 'update_contact', 'search_groups', 'search_messages', 'get_message', 'send_message']);
+  expect((await first.client.listTools()).tools.map((tool) => tool.name)).toEqual(['search_connections', 'search_contacts', 'update_contact', 'update_message', 'search_groups', 'search_messages', 'get_message', 'send_message']);
   const resources = await first.client.listResources();
   expect(resources.resources.map(resource => resource.uri)).toEqual(['ui://wapilot/send-receipt-v3.html']);
   expect((await first.client.readResource({ uri: resources.resources[0].uri })).contents).toHaveLength(1);
@@ -93,6 +102,14 @@ it('serves the shared tools and resources with a persistent default connection o
   expect(connections).toHaveLength(1);
   expect(connections[0].isDefault).toBe(1);
   expect((await first.client.callTool({ name: "search_connections", arguments: { options: { include: ["status"] } } })).isError).not.toBe(true);
+  const messageUpdate = { name: 'update_message', arguments: {
+    targets: [{ conversationId: '5511999999999', messageId: 'fixture-message' }],
+    operation: { kind: 'mark_read' },
+  } };
+  const updated = await first.client.callTool(messageUpdate);
+  expect(updated.isError).not.toBe(true);
+  expect(updated.structuredContent).toMatchObject({ data: { items: [{ messageId: 'fixture-message', outcome: 'accepted' }] } });
+  expect(requests).toContain('POST /message/actions');
   for (const tool of [{ name: "search_contacts", arguments: { query: "Fixture" } }, { name: "search_groups", arguments: { options: {  } } }, { name: "search_messages", arguments: { options: {  } } }]) {
     const result = await first.client.callTool(tool);
     expect(result.isError).not.toBe(true);
@@ -125,6 +142,11 @@ it('serves the shared tools and resources with a persistent default connection o
     { name: 'send_message', arguments: sendArguments({ message: { kind: 'forward', to: '5511999999999', source: { conversationId: '5511999999999', messageId: 'fixture-message' } } }) },
   ]) expect((await second.client.callTool(tool)).isError).not.toBe(true);
   await second.close();
+  const readOnlySession = await open(true);
+  expect((await readOnlySession.client.listTools()).tools.map(tool => tool.name)).toContain('update_message');
+  const forbidden = await readOnlySession.client.callTool(messageUpdate);
+  expect(forbidden).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'insufficient_scope' } } } });
+  await readOnlySession.close();
   expect(await readFile(resolve(state, 'encryption.key'), 'utf8') === keyBefore).toBe(true);
   const { getPlatformProxy } = await import('wrangler');
   const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: resolve(workspace, 'wrangler.jsonc'), environment: 'stdio', remoteBindings: false, envFiles: [], persist: { path: resolve(state, 'bindings/v3') } });
@@ -155,7 +177,7 @@ it('serves the shared tools and resources with a persistent default connection o
   const changedInstance = await failedSetup({ ...restartEnv, LOCAL_INSTANCE_ID: 'another-instance' }, false, workspace);
   expect(changedInstance.code).toBe(1);
   expect(changedInstance.stderr).toContain('configuração diverge');
-  expect(requests.filter((request) => !request.startsWith('GET '))).toEqual(expectedSendPaths.map(path => `POST ${path}`));
+  expect(requests.filter((request) => !request.startsWith('GET '))).toEqual(['/message/actions', ...expectedSendPaths].map(path => `POST ${path}`));
 }, 60_000);
 
 async function failedSetup(env: Record<string, string>, endInput = false, workspace?: string) {

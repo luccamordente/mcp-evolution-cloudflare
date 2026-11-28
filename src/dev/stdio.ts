@@ -114,7 +114,8 @@ try {
     if (!closing) {
       const env: Env = { DB: db, TOKEN_ENCRYPTION_KEY: key, EVOLUTION_BASE_URL: baseUrl, MAX_MEDIA_BYTES: '8388608', IMAGE_STORAGE_ORIGINS: config.IMAGE_STORAGE_ORIGINS, SEND_MEDIA_ORIGINS: config.SEND_MEDIA_ORIGINS };
       const transport = new StdioServerTransport(input, process.stdout, { maxBufferSize: mcpBodyLimit(env) });
-      server = serveStdio(() => createMcpServer(env, identity, ['mcp:read', 'mcp:write']), { transport, onerror: () => console.error('WaPilot: erro no protocolo MCP local.') });
+      const scopes = config.WAPILOT_STDIO_READ_ONLY === '1' ? ['mcp:read'] : ['mcp:read', 'mcp:write'];
+      server = serveStdio(() => createMcpServer(env, identity, scopes), { transport, onerror: () => console.error('WaPilot: erro no protocolo MCP local.') });
       const transportClosed = transport.onclose;
       transport.onclose = () => { transportClosed?.(); stop(); };
     }

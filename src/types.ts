@@ -133,6 +133,7 @@ export interface Message extends NativeMessage {
   recipient?: string;
   direction?: 'inbound' | 'outbound' | 'unknown';
   timestamp?: string;
+  revokedAt?: string;
   status?: string;
   type?: string;
   text?: string;

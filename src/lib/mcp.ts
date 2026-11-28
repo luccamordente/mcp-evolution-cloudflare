@@ -1,4 +1,6 @@
 import { ContactUpdateError, reservedContactUpdate, updateContactInput } from './update-contact';
+import { MessageUpdateError, reservedMessageUpdate, updateMessageInput } from './update-message';
+import { isMetadataOnlyUpdate } from './message-update';
 import { pendingAvailability, messageObservationSchema, messageDeliverySchema, MESSAGE_CONTENT_NOT_RETAINED } from './message-observation';
 import { avatarLookupJidFromPhone, evolutionState, extractAvatarUrl, extractDisplayName, extractPhone } from './connection-status';
 import { Buffer } from 'node:buffer';
@@ -74,6 +76,12 @@ Add options.include: ["status"] to refresh the number and see live connection st
 Include "profile" for the current account’s WhatsApp display name, address (jid), and profile picture (avatarUrl).
 Use a returned connection ID to select a connection in other tools.`,
   update_contact: `Change one contact on the selected connection. Block, unblock, or add or remove one Business label by ID.`,
+  update_message: `Apply one action to one to ten existing messages on one WhatsApp connection.
+Use messageId and conversationId from search_messages or get_message. Choose edit_text,
+delete_for_everyone, mark_read, mark_played, set_reaction, remove_reaction, add_label,
+or remove_label. Read each ordered data.items outcome even when isError is true.
+Acceptance records dispatch. For an unknown outcome, inspect the message before another action.
+Use the same options.idempotencyKey and arguments to recover a keyed result within 24 hours.`,
   search_contacts: `Find contacts by name, display name, phone number, or WhatsApp address
 (JID). Requires query. Returns matching contacts and their identifiers
 in a paginated list. Use this tool to resolve a person before sending.`,
@@ -116,6 +124,7 @@ export const TOOL_TITLES = {
   search_connections: 'Search connections',
   search_contacts: 'Search contacts',
   update_contact: 'Update contact',
+  update_message: 'Update messages',
   search_groups: 'Search groups',
   search_messages: 'Search messages',
   get_message: 'Get message',
@@ -127,6 +136,7 @@ export const TOOL_TITLES = {
 // keeps the payload intentionally free-form while declaring every JSON value.
 export const dataOutput = z.object({ data: z.json() });
 const retainedMessageOutput = z.object({
+  revokedAt: z.iso.datetime().optional(),
   observation: messageObservationSchema.optional(),
   delivery: messageDeliverySchema.optional(),
   reactions: activeReactionsSchema.optional(),
@@ -151,7 +161,7 @@ const readOnlyAnnotations = TOOL_ANNOTATIONS.readOnly;
 const sendAnnotations = TOOL_ANNOTATIONS.send;
 
 /** Tools that create WhatsApp side effects and therefore need the mcp:write scope. */
-export const WRITE_TOOLS: ReadonlySet<string> = new Set(['send_message','update_contact']);
+export const WRITE_TOOLS: ReadonlySet<string> = new Set(['send_message', 'update_contact', 'update_message']);
 export const WRITE_SCOPE = 'mcp:write';
 
 /** True when the transport-validated token carries mcp:write. Missing auth info is denied. */
@@ -196,6 +206,7 @@ function ok(data: unknown) {
 
 export type McpErrorCode =
   | 'contact_result_unknown' | 'contact_update_pending'
+  | 'message_update_pending' | 'message_update_idempotency_unavailable'
   | 'idempotency_conflict'
   | 'send_in_progress'
   | 'send_result_unknown'
@@ -210,6 +221,7 @@ export type McpErrorCode =
   | 'service_request_failed'
   | 'media_too_large'
   | 'message_not_found'
+  | 'message_revoked'
   | 'message_content_unavailable'
   | 'message_content_pending'
   | 'message_unavailable'
@@ -248,7 +260,7 @@ export interface McpToolError {
 }
 
 class MessageReadError extends Error {
-  constructor(public readonly code: 'message_not_found' | 'message_content_unavailable' | 'message_unavailable' | 'message_content_pending', public readonly status: number, message: string, public readonly messageType?: string, public readonly contentUnavailableReason: Message['contentUnavailableReason'] = 'not_retained_or_unknown', public readonly contentDiagnostic?: Message['contentDiagnostic']) { super(message); }
+  constructor(public readonly code: 'message_not_found' | 'message_revoked' | 'message_content_unavailable' | 'message_unavailable' | 'message_content_pending', public readonly status: number, message: string, public readonly messageType?: string, public readonly contentUnavailableReason: Message['contentUnavailableReason'] = 'not_retained_or_unknown', public readonly contentDiagnostic?: Message['contentDiagnostic']) { super(message); }
 }
 class ReactionsUnavailableError extends Error {
   constructor() { super('WaPilot could not retrieve active reactions for this message.'); }
@@ -326,6 +338,10 @@ function classifyBaseError(error: unknown, operation: string): Omit<McpToolError
 
 export function classifyMcpError(error: unknown, operation: string): McpToolError {
   if(error instanceof ContactUpdateError) return {code:error.code,status:409,operation,message:error.message,retryable:false,hint:error.message,recovery:{action:'stop',steps:[error.message]}};
+  if (error instanceof MessageUpdateError) {
+    const status = error.code === 'message_update_idempotency_unavailable' ? 503 : 409;
+    return { code: error.code, status, operation, message: error.message, retryable: false, hint: error.message, recovery: { action: 'stop', steps: [error.message] } };
+  }
   const classified = classifyBaseError(error, operation);
   const recovery = recoveryFor(classified);
   return { ...classified, retryable: WRITE_TOOLS.has(operation) ? false : classified.retryable, hint: recovery.steps.join(' '), recovery };
@@ -464,6 +480,45 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       return {connectionId,...result};
     });
   });
+  server.registerTool('update_message', {
+    title: TOOL_TITLES.update_message,
+    description: TOOL_DESCRIPTIONS.update_message,
+    inputSchema: updateMessageInput,
+    outputSchema: dataOutput,
+    annotations: { ...sendAnnotations, destructiveHint: true },
+  }, async ({ targets, operation, options }, ctx) => {
+    const tool = 'update_message';
+    if (!canWrite(ctx)) return fail(tool, new InsufficientScopeError());
+    let connectionId: string | undefined;
+    const record = async (outcome: 'success' | 'failure', details: Record<string, unknown>) => {
+      try {
+        await audit(env.DB, {
+          userId: ensured.id, connectionId, operation: tool, outcome,
+          metadata: { kind: operation.kind, count: targets.length, ...details },
+        });
+      } catch { console.warn(JSON.stringify({ event: 'wapilot_audit_unavailable', operation: tool })); }
+    };
+    try {
+      const { client, connection } = await clientFor(options?.connectionId, id => { connectionId = id; });
+      const action = { targets, operation };
+      const dispatch = () => client.updateMessage(action, ctx.mcpReq.signal);
+      const items = options?.idempotencyKey
+        ? await reservedMessageUpdate(env.DB, { userId: ensured.id, connectionId: connection.id, key: options.idempotencyKey, action }, dispatch)
+        : await dispatch();
+      const counts = { accepted: 0, rejected: 0, unknown: 0, not_started: 0 };
+      const errorCodes = new Set<string>();
+      for (const item of items) {
+        counts[item.outcome]++;
+        if (item.outcome !== 'accepted') errorCodes.add(item.error.code);
+      }
+      const hasFailures = counts.accepted !== items.length;
+      await record(hasFailures ? 'failure' : 'success', { counts, errorCodes: [...errorCodes] });
+      return { ...ok({ connectionId: connection.id, operation: operation.kind, items }), ...(hasFailures ? { isError: true } : {}) };
+    } catch (error) {
+      await record('failure', auditFailure(error, tool));
+      return fail(tool, error, connectionId ? { connectionId } : undefined);
+    }
+  });
   server.registerTool('search_groups', { title: TOOL_TITLES.search_groups, description: TOOL_DESCRIPTIONS.search_groups, inputSchema: searchGroupsInput, annotations: readOnlyAnnotations, outputSchema: dataOutput }, async ({ options }) => {
     const parsed = groupOptions.safeParse(options ?? {});
     if (!parsed.success) return fail('search_groups', invalidOptions(parsed.error));
@@ -518,7 +573,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       const pdf = mime === 'application/pdf';
       const includes = o.include ?? [];
       const availability = pendingAvailability(message.observation);
-      if (!availability && (message.contentUnavailable || (message.text === undefined && !message.media && !message.medias?.length && !hasNativeContent(message) && message.update?.state !== 'unsupported'))) throw new MessageReadError('message_content_unavailable', 404, MESSAGE_CONTENT_NOT_RETAINED, message.messageType, message.contentUnavailableReason, message.contentDiagnostic);
+      if (!message.revokedAt && !availability && (message.contentUnavailable || (message.text === undefined && !message.media && !message.medias?.length && !hasNativeContent(message) && !isMetadataOnlyUpdate(message.update)))) throw new MessageReadError('message_content_unavailable', 404, MESSAGE_CONTENT_NOT_RETAINED, message.messageType, message.contentUnavailableReason, message.contentDiagnostic);
       const audioTranscription = mime.startsWith('audio/') && includes.includes('transcript');
       const expiresAt = startedAt + (audioTranscription ? AUDIO_TRANSCRIPTION_TIMEOUT_MS : PDF_TIMEOUT_MS);
       const deadline = new AbortController();
@@ -533,7 +588,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
       };
       try {
         const format = o.encodingFormat ?? 'application/json';
-        const data: Record<string, unknown> = { connectionId: id, messageId, message: messageForClient(message, own), ...(availability ? { availability } : {}), encodingFormat: format, ...(format === 'application/json' ? { mimeType: format } : !availability ? { mimeType: mime } : {}) };
+        const data: Record<string, unknown> = { connectionId: id, messageId, message: messageForClient(message, own), ...(availability ? { availability } : {}), encodingFormat: format, ...(format === 'application/json' ? { mimeType: format } : !availability && !message.revokedAt ? { mimeType: mime } : {}) };
         const binary: CallToolResult['content'] = [];
         const errors: { part: string; error: McpToolError }[] = [];
         const attempt = async (part: string, work: () => Promise<void>) => {
@@ -544,6 +599,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
           }
         };
         for (const include of new Set(includes)) await attempt(include, async () => {
+          if (message.revokedAt && include !== 'attachments') throw new MessageReadError('message_revoked', 410, 'WaPilot recorded that this message was deleted for everyone.');
           if (availability && include !== 'quoted' && include !== 'reactions') throw new MessageReadError('message_content_pending', 409, availability.message, message.messageType, message.contentUnavailableReason);
 
           if ((include === 'metadata' || include === 'document-text') && !pdf || include === 'transcript' && !mime.startsWith('audio/') || include === 'poll-responses' && !message.poll || include === 'event-responses' && !message.event) throw new OptionsError('incompatible_include', `WaPilot cannot include ${include} for this message.`);
@@ -571,6 +627,7 @@ export async function createMcpServer(env: Env, user: AuthenticatedUser, trusted
           }
         });
         if (format !== 'application/json') await attempt('encodingFormat', async () => {
+          if (message.revokedAt) throw new MessageReadError('message_revoked', 410, 'WaPilot recorded that this message was deleted for everyone.');
           if (availability) throw new MessageReadError('message_content_pending', 409, availability.message, message.messageType, message.contentUnavailableReason);
 
           const binaryFormat = format !== 'image/*' && (format !== 'application/pdf' || (o.attachmentIndex ?? 0) > 0);

@@ -1,6 +1,6 @@
 # Ferramentas WaPilot
 
-O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Títulos, descrições e campos de entrada orientam o agente sobre tipos de envio, limites, processamento e recuperação. As instruções do servidor explicam o envelope de erros e resultados parciais; os tipos de envio continuam derivados do schema, com descrição por variante. Argumentos comuns ficam em `options`; omitir `options.connectionId` usa a conexão padrão do usuário. Os UUIDs de conexão são internos e cada leitura resolve a propriedade da conexão. Não use IDs de instância como UUIDs de conexão.
+O catálogo compartilhado inclui as ferramentas abaixo. O HTTP também pode anunciar `manage_webhook_subscription`, conforme a autorização. Títulos, descrições e campos de entrada orientam o agente sobre tipos de envio, limites, processamento e recuperação. As instruções do servidor explicam o envelope de erros e resultados parciais; os tipos de envio continuam derivados do schema, com descrição por variante. Argumentos comuns ficam em `options`; omitir `options.connectionId` usa a conexão padrão do usuário. Os UUIDs de conexão são internos e cada leitura resolve a propriedade da conexão. Não use IDs de instância como UUIDs de conexão.
 
 | Ferramenta | Argumentos | Fonte interna |
 | --- | --- | --- |
@@ -9,6 +9,8 @@ O catálogo HTTP e o catálogo stdio anunciam exatamente seis ferramentas. Títu
 | `search_groups` | `options?: {connectionId, query, include: ['participants'], offset, limit}` | `/group/list`; filtro por nome/JID antes da paginação local |
 | `search_messages` | `options?: {connectionId, conversationId, text, include, includeReceiptOnly, offset, limit}` | `/message/search`; filtros aplicados no provedor |
 | `get_message` | `messageId?: string, options?: GetMessageOptions` | `/message/status`, mídia e relações autorizadas |
+| `update_contact` | `contactId, operation, options?` | Bloqueio e etiquetas do contato |
+| `update_message` | `targets, operation, options?` | Ações sobre mensagens retidas na conexão escolhida |
 | `send_message` | `message, options` | Rotas de envio existentes; veja [SEND-MESSAGE.md](SEND-MESSAGE.md) |
 
 Não há ferramentas separadas de status, galeria, respostas ou mídia. A UI de comprovante de envio permanece disponível; a galeria não é publicada.
@@ -136,6 +138,34 @@ Para renderizar PDF, use `page` (posição física a partir de 1, padrão 1) ou 
 Respostas de enquete/evento usam `offset` e `limit` (padrão 5, máximo 100). O cliente percorre cursores internos das relações existentes e retorna `items`, `meta` e `hasMore`. O estado observado é parcial, sem garantia de lista completa de participantes ou snapshot. Um include incompatível retorna `incompatible_include`; ausência de relação retida pode impedir a consulta. Não são inventadas rotas de resposta adicionais.
 
 Conflitos entre `page` e `pages`, recortes inválidos, paginação inválida e opções desconhecidas retornam `invalid_options` antes de acesso remoto. Identificadores e tipos de argumento inválidos também podem ser recusados pelo validador MCP.
+
+## Atualização de mensagens
+
+Use `update_message` para aplicar uma operação a 1–10 mensagens da mesma conexão. Copie `conversationId` e `messageId` de `search_messages` ou `get_message`. A ferramenta também usa o formato de lista para uma única mensagem. O escopo HTTP exigido é `mcp:write`.
+
+```json
+{
+  "targets": [{"conversationId": "120363000000001@g.us", "messageId": "message-a"}],
+  "operation": {"kind": "mark_read"},
+  "options": {"idempotencyKey": "read-a"}
+}
+```
+
+| Operação | Campos e efeito |
+| --- | --- |
+| `edit_text` | `text`. Substitui o texto de todas as mensagens próprias elegíveis pelo mesmo texto. A janela de edição é de 15 minutos. |
+| `delete_for_everyone` | Solicita a exclusão de mensagens próprias para todos dentro de 48 horas. |
+| `mark_read` | Envia recibos para mensagens recebidas, sujeito à privacidade de leitura. |
+| `mark_played` | Envia recibos de reprodução para mensagens de voz recebidas. |
+| `set_reaction` | `emoji`. Define ou substitui a reação da conta por um emoji. |
+| `remove_reaction` | Remove a reação da conta. |
+| `add_label`, `remove_label` | `labelId`. Aplica ou remove uma etiqueta Business existente na conexão. |
+
+O retorno apresenta um item por alvo, na ordem da seleção. `accepted` indica que o despacho terminou. `rejected` indica uma recusa, `not_started` indica que o despacho daquele alvo não começou, e `unknown` indica que a ação pode ter sido aplicada. Resultados parciais preservam os itens aceitos. Alguns itens aceitos incluem `actionId` para identificar a ação. O `messageId` continua sendo o ID da mensagem original.
+
+Para consultar o estado observado, use `get_message` na mensagem original. Uma mensagem revogada pode permanecer como marcador com `revokedAt`, sem texto ou anexos. O efeito em outros dispositivos depende da sincronização e da privacidade do WhatsApp.
+
+Use `options.connectionId` para selecionar uma conexão explicitamente. Com `options.idempotencyKey`, o mesmo pedido pode recuperar o resultado armazenado por 24 horas. Alterar os argumentos com a mesma chave gera conflito. Após um resultado desconhecido, consulte o estado da mensagem antes de decidir se precisa de uma nova ação.
 
 ## Envio e idempotência
 

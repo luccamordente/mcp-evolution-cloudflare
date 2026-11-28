@@ -2,7 +2,7 @@
 
 O [checkpoint Clerk de 16/11/2026](docs/qa/clerk-stabilization-2026-11-16.md) registra os dois usuários ativos vinculados em produção e os gates ainda pendentes. O vínculo administrativo não substitui a sessão real no dashboard/API, e o fim do prazo de 24 horas não encerra sozinho a estabilização.
 
-O catálogo MCP atual usa `search_connections`, `search_contacts`, `update_contact`, `search_groups`, `search_messages`, `get_message` e `send_message`. Para os argumentos e limites, consulte [o contrato atual](docs/TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. A consulta operacional por chave usa `get_message` com `options.idempotencyKey`.
+O catálogo MCP atual usa `search_connections`, `search_contacts`, `update_contact`, `search_groups`, `search_messages`, `get_message`, `update_message` e `send_message`. Para os argumentos e limites, consulte [o contrato atual](docs/TOOLS.md). Mídia e respostas são opções de `get_message`; os campos comuns de envio ficam em `options`, com `mediaSource` e `mimeType` compartilhados e Status via `to: "status"`. A consulta operacional por chave usa `get_message` com `options.idempotencyKey`.
 
 
 Instale Node 22+ e rode `npm install`, `npm run check` e `npx wrangler deploy --dry-run`. O entrypoint de produção é `src/worker.ts`; `src/index.ts` exporta o fallback Hono usado por testes e pelas rotas de UI/webhook.
@@ -352,3 +352,8 @@ Expect eight connected tests and one Go fixture test to pass without skips. The 
 The Go log records request paths and `schemaUnchanged=true`, then confirms removal of its synthetic schema. Private control files and local D1 are removed after the test. No provider fetch is mocked. Only the `_test.go` fixture exposes control endpoints. No production route, migration, WhatsApp message, personal credential, or remote binding is used. `npm run check` skips these eight tests when the launcher environment is absent; that skip does not prove connected acceptance.
 
 Run `npm run check` separately. Validate the Worker bundle with `npx wrangler deploy --dry-run --containers-rollout none` while preserving the sender Container configuration. This is a Worker-only build; a full Container image build still requires Docker. Follow [the observation release sequence](docs/DEPLOY.md#release-same-row-message-observations) before an authorized publication.
+
+
+### Aceitação de atualização de mensagens
+
+Execute `npx vitest run test/update-message.acceptance.test.ts` para validar a fronteira HTTP MCP, a autorização e a idempotência com o provedor simulado. Para atravessar o serviço Go e observar os despachos capturados, execute `WAPILOT_ACTIONS_GO_ROOT=/workspace/evolution-go npm run test:acceptance:update`. A fixture usa HTTP de loopback e dados sintéticos. Para restringir o processo stdio local a leituras, defina `WAPILOT_STDIO_READ_ONLY=1`. Consulte [o plano de aceitação](docs/plans/UPDATE-MESSAGE.md#acceptance-suites) para os casos de homologação em dispositivos.

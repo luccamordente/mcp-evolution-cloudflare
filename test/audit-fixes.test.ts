@@ -8,7 +8,7 @@ const msg = (id: string, at: number) => ({ type: 'message', id, attributes: { en
 describe('mcp:write scope', () => {
   it('detects write tool calls in single and batch JSON-RPC bodies', async () => {
     const req = (body: unknown) => new Request('https://x.invalid/mcp', { method: 'POST', body: JSON.stringify(body) });
-    for (const name of ['send_message', 'update_contact']) {
+    for (const name of ['send_message', 'update_contact', 'update_message']) {
       expect(await callsWriteTool(req({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name } }))).toBe(true);
     }
     expect(await callsWriteTool(req({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_messages' } }))).toBe(false);

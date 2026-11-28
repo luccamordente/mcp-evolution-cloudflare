@@ -389,3 +389,9 @@ Depois de usar o encerramento pelo painel, faça rollback somente para uma vers�
 Aplique somente a migration aditiva `0015_webhook_destinations.sql` antes de publicar o Worker que consulta o novo esquema. Publique a imagem atualizada do sender junto com essa revisão. A imagem aceita as chamadas assinadas existentes e a nova variante bearer.
 
 O fallback fica desativado enquanto `WEBHOOK_ROUTINE_HOST` estiver ausente. Confirme o host e a rota pela URL de uma rotina sintética autorizada. Configure `WEBHOOK_NATIVE_CLIENT_IDS` como array JSON de IDs OAuth verificados de clientes com MCP Events. A chave da rotina é um argumento da ferramenta MCP. Aplique os valores ao Worker e aguarde a reinicialização do Container para que o processo receba o host. Confira o caso A6 do [plano de implementação](plans/WEBHOOK-SUBSCRIPTIONS.md#acceptance-tests) antes de divulgar a disponibilidade. Para voltar ao sender anterior, desative o fallback e encerre as entregas bearer pendentes primeiro.
+
+## Publicação de atualização de mensagens
+
+Publique primeiro a revisão do provedor que registra `POST /message/actions`. Confirme a migration de histórico e a versão do contrato em um ambiente de teste. Execute a [aceitação conectada](../DEVELOPMENT.md#aceitação-de-atualização-de-mensagens) com as duas revisões da release.
+
+Em contas pareadas de teste, confira recibos em um grupo com dois autores, privacidade de leitura, mensagem de voz reproduzida e mudanças de etiqueta em um dispositivo vinculado. Compare os resultados com a [matriz de ações](plans/UPDATE-MESSAGE.md#action-inventory-acceptance-gate) antes de publicar o Worker. Depois de publicar, confirme a ferramenta no catálogo MCP e a exigência de `mcp:write`.

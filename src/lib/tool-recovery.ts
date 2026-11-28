@@ -11,6 +11,8 @@ export interface ErrorRecovery {
 export function recoveryFor(error: Pick<McpToolError, 'code' | 'operation' | 'status' | 'retryable'>): ErrorRecovery {
   const { code, operation, status } = error;
   switch (code) {
+    case 'message_revoked':
+      return { action: 'stop', steps: ['WaPilot retained a deletion marker for this message. The original message content is unavailable.'] };
     case 'message_content_pending': return observationRecovery();
     case 'responses_unavailable':
       return { action: 'inspect_message', tool: 'get_message', steps: ['Read the same message as application/json without the response include to retrieve the poll or event itself.', 'Report that responses are unavailable; this is not evidence of zero votes or RSVPs. Do not invent a response endpoint or infer participant choices.', 'If responses are essential, ask the user to check the conversation or ask the WaPilot operator to investigate retained response access.'] };
@@ -45,6 +47,7 @@ export function recoveryFor(error: Pick<McpToolError, 'code' | 'operation' | 'st
       return { action: operation === 'send_message' ? 'contact_operator' : 'reconcile_send', tool: 'get_message', steps: ['WaPilot cannot access the send safety record. Do not bypass deduplication by removing or changing the key.', 'Retry the status lookup later with the same connection and key. If it remains unavailable, ask the WaPilot operator to restore the service.', 'dispatchState: not_started confirms only that this attempt stopped before dispatch; it does not settle any earlier attempt.'] };
     case 'insufficient_scope':
       if (operation === 'update_contact') return {action:'reauthorize',steps:['Reconnect the MCP client with permission to change contacts (mcp:write).']};
+      if (operation === 'update_message') return { action: 'reauthorize', steps: ['Reconnect the MCP client with permission to update WhatsApp messages (mcp:write).'] };
       return { action: 'reauthorize', steps: ['Reconnect the MCP client and grant WaPilot permission to send messages (mcp:write).', 'After authorization, confirm the intended recipient and content before submitting the send.'] };
     case 'no_document_text': case 'document_text_too_large': case 'document_conversion_failed':
       return { action: 'inspect_message', tool: 'get_message', steps: ['Use include: ["metadata"] for bounded PDF text chunks and page information, or encodingFormat: "image/*" to inspect selected pages.', 'For scans or visual content, inspect the returned images or retrieve the original PDF for an available external reader. WaPilot text extraction does not perform OCR.', 'Avoid automatically repeating the failed whole-document extraction.'] };

@@ -16,8 +16,8 @@ let env: Env;
 let connectionId: string;
 let resource: Record<string, unknown>;
 let fetcher: MockInstance<typeof fetch>;
-async function rpc(method: string, params: Record<string, unknown> = {}, scopes = ['mcp:read', 'mcp:write']) {
-  const handler = createMcpHandler(() => createMcpServer(env, user), { legacy: 'reject', responseMode: 'json' });
+async function rpc(method: string, params: Record<string, unknown> = {}, scopes = ['mcp:read', 'mcp:write'], trustedLocalScopes?: readonly string[]) {
+  const handler = createMcpHandler(() => createMcpServer(env, user, trustedLocalScopes), { legacy: 'reject', responseMode: 'json' });
   const response = await handler.fetch(new Request('https://mcp.invalid/mcp', {
     method: 'POST', headers: { 'content-type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(method === 'tools/call' ? { 'Mcp-Name': String(params.name) } : {}) },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: { [PROTOCOL_VERSION_META_KEY]: '2026-07-28', [CLIENT_INFO_META_KEY]: { name: 'api-tests', version: '1' }, [CLIENT_CAPABILITIES_META_KEY]: {} } } }),
@@ -34,8 +34,8 @@ beforeEach(async () => {
   fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ jsonapi: { version: '1.1' }, data: resource }));
 });
 afterEach(async () => { vi.restoreAllMocks(); await local.dispose(); });
-it('publishes the seven MCP tools and the send receipt resource', async () => {
-  expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_contacts', 'update_contact', 'search_groups', 'search_messages', 'get_message', 'send_message']);
+it('publishes the eight shared MCP tools and the send receipt resource', async () => {
+  expect((await rpc('tools/list')).tools?.map(t => t.name)).toEqual(['search_connections', 'search_contacts', 'update_contact', 'update_message', 'search_groups', 'search_messages', 'get_message', 'send_message']);
   const resources = await rpc('resources/list');
   expect(resources.resources).toEqual([expect.objectContaining({ uri: 'ui://wapilot/send-receipt-v3.html' })]);
 });
@@ -45,6 +45,7 @@ for (const [code, scenario] of Object.entries(toolErrorScenarios)) {
   it(`returns ${code} through the MCP boundary with recovery and safe identity`, async () => {
     let options: Record<string, unknown> = {};
     if (code === 'message_not_found') fetcher.mockResolvedValue(Response.json({ jsonapi: { version: '1.1' }, data: null }));
+    else if (code === 'message_revoked') { resource = { ...resource, meta: { revokedAt: 1794790925000 } }; options = { encodingFormat: 'application/octet-stream' }; }
     else if (code === 'message_content_unavailable') resource = { type: 'message', id: 'm1', attributes: { encodingFormat: 'application/octet-stream', body: {} } };
     else if (code === 'message_content_pending') { resource = { type: 'message', id: 'm1', attributes: {}, meta: { observation: { version: 1, state: 'receipt_only', observedAt: 1794790925000, timestampSource: 'receipt' } } }; options = { encodingFormat: 'image/*' }; }
     else if (code === 'reactions_unavailable') options = { include: ['reactions'] };
@@ -173,6 +174,38 @@ it('rechecks connection ownership when a signed link is used', async () => {
   expect(response.status).toBe(404);
   expect(await response.json()).toMatchObject({ error: { code: 'attachment_not_found', retryable: false, recovery: { action: 'inspect_message', tool: 'get_message' } } });
   expect(fetcher.mock.calls).toHaveLength(1);
+});
+
+it('makes projected deletions visible and refuses a previously issued attachment link', async () => {
+  retainAttachments();
+  const get = { messageId: 'm1', options: { include: ['attachments'] } };
+  const original = await call('get_message', get);
+  const link = attachmentsResult.parse(original.structuredContent?.data).attachments[0].downloadUrl;
+  const revokedAt = 1794790925000;
+  resource = { ...resource, meta: { revokedAt } };
+  fetcher.mockClear();
+  const revoked = await call('get_message', get);
+  expect(revoked.isError).not.toBe(true);
+  expect(revoked.structuredContent?.data).toMatchObject({ message: { id: 'm1', revokedAt: new Date(revokedAt).toISOString() }, attachments: [] });
+  expect(JSON.stringify(revoked)).not.toMatch(/caption|clip.mp4|downloadUrl/);
+  const history = await call('search_messages', { options: { include: ['attachments'] } });
+  expect(history.structuredContent?.data).toMatchObject({ items: [{ id: 'm1', revokedAt: new Date(revokedAt).toISOString(), attachments: [] }] });
+  const response = await app.request(link, {}, env);
+  expect(response.status).toBe(404);
+  expect(await response.json()).toMatchObject({ error: { code: 'attachment_not_found', retryable: false } });
+  expect(fetcher.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual(['/message/status', '/message/search', '/message/status']);
+});
+
+it('honors read-only trusted local scopes before dispatching a message update', async () => {
+  const result = await rpc('tools/call', {
+    name: 'update_message',
+    arguments: {
+      targets: [{ conversationId: '5511999999999', messageId: 'm1' }],
+      operation: { kind: 'mark_read' },
+    },
+  }, ['mcp:read', 'mcp:write'], ['mcp:read']);
+  expect(result).toMatchObject({ isError: true, structuredContent: { data: { error: { code: 'insufficient_scope' } } } });
+  expect(fetcher).not.toHaveBeenCalled();
 });
 
 it.each([

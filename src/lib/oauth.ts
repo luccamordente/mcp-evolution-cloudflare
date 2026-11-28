@@ -44,10 +44,10 @@ export function oauthOptions(resourceBaseUrl: string, fallback?: ExportedHandler
           const status = error instanceof AuthError ? error.status : 503;
           return Response.json({ error: status === 403 ? 'Esta conta não tem acesso ao WaPilot.' : 'Não foi possível verificar o acesso ao WaPilot.' }, { status, headers: { 'Cache-Control': 'no-store' } });
         }
-        // Step-up: a send tool called with a read-only token gets a standard 403
+        // Step-up: a write tool called with a read-only token gets a standard 403
         // insufficient_scope challenge naming mcp:write, so clients can re-authorize.
         if (auth && !auth.scope.includes(WRITE_SCOPE) && request.method === 'POST' && await callsWriteTool(request)) {
-          return insufficientScope(auth as unknown as OAuthResourceAuth, ['mcp:read', WRITE_SCOPE], 'Sending WhatsApp messages requires the mcp:write scope.');
+          return insufficientScope(auth as unknown as OAuthResourceAuth, ['mcp:read', WRITE_SCOPE], 'Changing WhatsApp data requires the mcp:write scope.');
         }
         if (auth) {
           const oauth = getOAuthApi(oauthOptions(resourceBaseUrl), env);

@@ -226,6 +226,16 @@ Logs estruturados contêm somente contadores agregados: descartes `invalid`/`uns
 
 O adaptador usa a classificação do SDK; uma declaração moderna malformada continua no caminho moderno e não é rebaixada. Clientes 2025 enviam `Accept: application/json, text/event-stream`. OAuth, posse de conexão e escopos são iguais nos dois caminhos. `GET` e `DELETE` recebem 405; não é criado `Mcp-Session-Id`. Os logs guardam revisão allowlisted, transporte, nomes dos headers ausentes, status e duração, sem headers de autorização, corpo ou nome arbitrário fornecido pelo cliente.
 
+## Atualização de mensagens
+
+`update_message` compartilha o catálogo HTTP e stdio. O HTTP exige `mcp:write`. A resolução de usuário ativo, conexão e credencial mantém o isolamento existente. O adaptador envia um único `POST /message/actions` autenticado por token de instância. O provedor verifica cada alvo retido, resolve aliases de conversa e deriva a autoria do histórico. Para recibos de grupo, organiza o despacho por conversa e remetente original. O orçamento HTTP do adaptador é de 30 segundos e o serviço de ações tem prazo de 24 segundos.
+
+O lote é limitado a dez alvos. Um erro em um alvo pode coexistir com ações aceitas. Falha ambígua de despacho interrompe os envios pendentes no provedor. O adaptador valida identidade e ordem de todos os itens da resposta. Um erro de transporte ou uma resposta inválida após a submissão torna o lote desconhecido. Nenhum write é repetido automaticamente.
+
+A chave opcional reserva `update_message` em `send_operations` por usuário, conexão e chave. O D1 guarda hash e o resultado operacional mínimo por 24 horas. Uma chamada simultânea ou interrompida com a mesma chave não reabre o despacho. A auditoria contém operação, contagens e códigos seguros. O texto de edição, emoji e conteúdo retido ficam fora dos registros de operação.
+
+O provedor projeta edições conforme a configuração de retenção e aplica revogações ao histórico já retido. A revogação projetada remove texto e metadados de mídia do original e impede que uma observação antiga restaure o corpo. O WaPilot consulta novamente a mensagem ao resgatar links de anexos. A aceitação do despacho é independente da projeção e da visibilidade em dispositivos vinculados.
+
 ## Resultado operacional de envios
 
 Os registros `send_operations` sustentam a consulta sem `messageId` de `get_message`, via `options.idempotencyKey`, no escopo do usuário e conexão. A consulta retorna somente o estado operacional do envio unificado; não depende do token da instância nem reenvia mensagens. IDs conhecidos são consultados diretamente por `get_message`, que mapeia o `status` retido informado pelo provedor. O resultado operacional não comprova entrega ou leitura.

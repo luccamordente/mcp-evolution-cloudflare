@@ -6,7 +6,8 @@ import type { Contact, Group, Message, Page, SendMessageResult } from '../types'
 import { Buffer } from 'node:buffer';
 import { AudioTranscriptionError } from './audio-transcription';
 import { DocumentReadingError } from './document-reading';
-import { messageUpdateSchema } from './message-update';
+import { isMetadataOnlyUpdate, messageUpdateSchema } from './message-update';
+import { MESSAGE_ACTION_TIMEOUT_MS, messageActionFailure, messageActionResultSchema, type MessageAction, type MessageActionItem } from './update-message';
 import type { OutgoingMessage } from './send-message';
 
 const JSON_API_MEDIA_TYPE = 'application/vnd.api+json';
@@ -16,7 +17,7 @@ const GROUP_REQUEST_TIMEOUT_MS = 300_000;
 const MEDIA_REQUEST_TIMEOUT_MS = 60_000;
 const GIF_PLAYBACK_FLAG = 1 << 6;
 
-type EvolutionRequestInit = RequestInit & { timeoutMs?: number };
+type EvolutionRequestInit = RequestInit & { timeoutMs?: number; expectedStatus?: number };
 
 export interface EvolutionClientOptions {
   baseUrl: string;
@@ -130,7 +131,7 @@ function isJsonApiDocument(value: unknown): boolean {
 
 /** Shared HTTP boundary. GET reads retry transient 5xx/network failures; writes never retry. */
 async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: string, apiKey: string, init: EvolutionRequestInit = {}): Promise<T> {
-  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, signal: parentSignal, ...fetchInit } = init;
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, expectedStatus, signal: parentSignal, ...fetchInit } = init;
   const headers = new Headers(fetchInit.headers);
   headers.set('Accept', JSON_API_MEDIA_TYPE);
   if (fetchInit.body && !(fetchInit.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', JSON_API_MEDIA_TYPE);
@@ -167,6 +168,9 @@ async function requestJson<T>(fetcher: typeof fetch, baseUrl: string, path: stri
     }
     clearTimeout(timeout);
     if (response.ok) {
+      if (expectedStatus !== undefined && response.status !== expectedStatus) {
+        throw new EvolutionApiError(502, 'WaPilot received an unexpected service response.');
+      }
       if (payload !== undefined && !isJsonApiDocument(payload)) {
         throw new EvolutionApiError(502, 'Evolution Go returned an invalid JSON:API document', payload);
       }
@@ -333,6 +337,9 @@ function normalizeMessage(value: unknown, includeReactions = false): Message {
     type: stringValue(attributes.encodingFormat),
     messageType: stringValue(attributes.encodingFormat) ?? 'unknown',
   };
+  if (typeof meta.revokedAt === 'number' && Number.isSafeInteger(meta.revokedAt) && meta.revokedAt > 0 && meta.revokedAt <= 253402300799999) {
+    return { ...message, type: undefined, messageType: 'unknown', revokedAt: new Date(meta.revokedAt).toISOString() };
+  }
   if (includeReactions) {
     const reactions = activeReactionsSchema.safeParse(attributes.reactions);
     if (reactions.success) message.reactions = reactions.data;
@@ -432,10 +439,11 @@ function normalizeMessage(value: unknown, includeReactions = false): Message {
   // of passing a misleading file MIME type through.
   const isGenericFormat = !message.type || message.type === 'application/octet-stream';
   const missingContent = message.text === undefined && !message.media && !message.medias?.length && !hasNativeContent(message);
+  const metadataOnly = isMetadataOnlyUpdate(message.update);
   if (isGenericFormat && message.text !== undefined && !message.media) {
     message.type = 'text/plain';
   } else if (isGenericFormat && missingContent) {
-    message.type = message.update?.state === 'unsupported' ? 'application/vnd.whatsapp.update' : undefined;
+    message.type = metadataOnly ? 'application/vnd.whatsapp.update' : undefined;
   }
   if (message.contentDiagnostic && ['unavailable', 'invalid', 'unsupported'].includes(message.contentDiagnostic.state)) {
     message.contentUnavailable = true;
@@ -443,7 +451,7 @@ function normalizeMessage(value: unknown, includeReactions = false): Message {
   } else if (message.update?.state === 'unavailable') {
     message.contentUnavailable = true;
     message.contentUnavailableReason = message.update.reason;
-  } else if (missingContent && message.update?.state !== 'unsupported') {
+  } else if (missingContent && !metadataOnly) {
     message.contentUnavailable = true;
     message.contentUnavailableReason = 'not_retained_or_unknown';
   }
@@ -483,6 +491,22 @@ function normalizeSendResult(payload: unknown, recipientId?: string): SendMessag
 }
 
 const MESSAGE_SEARCH_MAX_LIMIT = 50;
+
+const actionResponse = z.object({
+  data: z.object({
+    type: z.literal('messageActionResult'),
+    id: z.string().trim().min(1),
+    attributes: z.object({
+      version: z.literal(1),
+      items: z.array(z.object({ conversationId: z.string(), messageId: z.string() }).and(messageActionResultSchema)).max(10),
+    }),
+  }),
+});
+
+const actionRequestFailure = z.object({
+  jsonapi: z.object({ version: z.literal('1.1') }),
+  errors: z.array(z.object({ code: z.string().optional(), detail: z.string().optional() })).min(1),
+});
 
 /** Narrow HTTP client for the Evolution Go JSON:API 1.1 contract. */
 export class EvolutionGoClient {
@@ -528,6 +552,41 @@ export class EvolutionGoClient {
       if(error instanceof EvolutionApiError && error.status < 500 && error.status !== 408) throw error;
       throw new ContactUpdateError('contact_result_unknown','The contact update may have applied. Inspect the contact before making another change.');
     }
+  }
+
+  async updateMessage(action: MessageAction, signal: AbortSignal): Promise<MessageActionItem[]> {
+    if (signal.aborted) return messageActionFailure(action, 'not_started', 'message_update_not_started');
+    try {
+      const payload = await this.request<unknown>('/message/actions', {
+        method: 'POST',
+        redirect: 'manual',
+        signal,
+        timeoutMs: MESSAGE_ACTION_TIMEOUT_MS,
+        expectedStatus: 200,
+        body: jsonApiBody({ type: 'messageAction', attributes: { version: 1, ...action } }),
+      });
+      const { items } = actionResponse.parse(payload).data.attributes;
+      if (items.length === action.targets.length && items.every((item, index) => {
+        const target = action.targets[index];
+        return item.conversationId === target.conversationId && item.messageId === target.messageId &&
+          (item.outcome !== 'accepted' || item.actionId !== target.messageId);
+      })) return items;
+    } catch (error) {
+      if (error instanceof EvolutionApiError) {
+        const failure = actionRequestFailure.safeParse(error.details);
+        if (failure.success) {
+          const [primary] = failure.data.errors;
+          if (error.status === 400 && primary.code === 'invalid_message_action') {
+            return messageActionFailure(action, 'not_started', 'invalid_message_action');
+          }
+          if ([401, 403, 415].includes(error.status) ||
+            (error.status === 404 && primary.detail === 'no route for POST /message/actions')) {
+            return messageActionFailure(action, 'not_started', 'message_update_unavailable');
+          }
+        }
+      }
+    }
+    return messageActionFailure(action, 'unknown', 'message_update_unknown');
   }
 
   async contactManagement(ids:string[]) {
